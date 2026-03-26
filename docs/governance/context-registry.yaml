@@ -5,6 +5,7 @@ owners:
   NORTHSTAR.md: founder
   CONSTITUTION.md: platform
   AGENTS.md: devex
+  openspec/AGENTS.md: platform
   PRD.md: product
   docs/governance/DOCS_SYSTEM.md: platform
   docs/governance/context-registry.yaml: platform
@@ -52,6 +53,16 @@ documents:
       - routing_change
       - approval_boundary_change
     consumers:
+      - coding_agents
+
+  - path: openspec/AGENTS.md
+    role: proposal_router
+    canonical: true
+    update_trigger:
+      - proposal_workflow_change
+      - promotion_rule_change
+    consumers:
+      - planning_agents
       - coding_agents
 
   - path: PRD.md

@@ -1,29 +1,29 @@
 
-# Stub targets; replace with real commands for your stack.
-# See AGENTS.md for expected commands.
+.PHONY: setup dev demo test lint typecheck verify
 
-.PHONY: setup dev test lint typecheck verify
+PYTHON ?= python3
+DEMO_WORKSPACE ?= .tmp/demo
+FIXED_NOW ?= 2026-03-26T12:00:00Z
 
 setup:
-	@echo "Run your install/setup command (e.g. npm install, uv sync)"
-	@exit 1
+	@mkdir -p .tmp
+	@$(PYTHON) --version
+	@echo "setup ok"
 
-dev:
-	@echo "Run your dev server command"
-	@exit 1
+dev: demo
+
+demo:
+	@rm -rf $(DEMO_WORKSPACE)
+	@$(PYTHON) -m opendream_memory.cli demo --workspace $(DEMO_WORKSPACE) --now $(FIXED_NOW)
 
 test:
-	@echo "Run your test command"
-	@exit 1
+	@$(PYTHON) -m unittest discover -s tests -v
 
 lint:
-	@echo "Run your linter"
-	@exit 1
+	@$(PYTHON) scripts/lint.py
 
 typecheck:
-	@echo "Run your type checker"
-	@exit 1
+	@$(PYTHON) scripts/typecheck.py
 
 verify: lint typecheck test
-	@echo "Full verify passed"
-
+	@echo "verify ok"

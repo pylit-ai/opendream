@@ -14,6 +14,8 @@ All other files may summarize or link to it, but may not become competing source
   - owns project-wide invariants, quality gates, safety rules, and engineering governance
 - `AGENTS.md`
   - owns the canonical agent entrypoint, read order, commands, approval boundaries, and routing
+- `openspec/AGENTS.md`
+  - owns OpenSpec proposal routing and promotion guidance
 - `PRD.md`
   - owns the current product / epic scope, user stories, and success metrics
 - `specs/<id>/spec.md`
@@ -28,6 +30,8 @@ All other files may summarize or link to it, but may not become competing source
   - own durable architectural decisions after they stabilize
 - `docs/mcp/servers.md`
   - owns MCP server inventory, tool contracts, and trust boundaries
+- `openspec/changes/<id>/...`
+  - own proposal-stage design bundles before approved behavior is promoted into `specs/`
 - `CURRENT_STATE.md` (brownfield only)
   - owns descriptive legacy reality
 - `MIGRATION_GUARDRAILS.md` (brownfield only)
@@ -51,6 +55,7 @@ All other files may summarize or link to it, but may not become competing source
 ## Canonical spec surface
 - Canonical implementation requirements live only in `specs/<id>/{spec.md,plan.md,tasks.md}`.
 - Spec lifecycle and dependency state live only in `specs/registry.yaml`.
+- `openspec/changes/<id>/...` may hold proposal bundles, but they are not canonical implementation requirements until promoted.
 - Framework adapters must not define requirements, acceptance criteria, or policy.
 - Preferred framework adapter path is `.meta/spec-adapters/<framework>/...`.
 
@@ -70,6 +75,11 @@ All other files may summarize or link to it, but may not become competing source
 2. `PRD.md`
 3. `CONSTITUTION.md`
 
+### If drafting or reviewing a proposal before implementation
+1. `openspec/AGENTS.md`
+2. `docs/governance/DOCS_SYSTEM.md`
+3. `CONSTITUTION.md`
+
 ### If implementing or changing a feature
 1. active `specs/<id>/spec.md`
 2. active `specs/<id>/plan.md`
@@ -87,6 +97,7 @@ All other files may summarize or link to it, but may not become competing source
 - Update `NORTHSTAR.md` when mission, target users, strategic pillars, or non-goals change.
 - Update `CONSTITUTION.md` when a project-wide invariant, safety rule, or quality gate changes.
 - Update `AGENTS.md` when repo layout, commands, routing, or approval boundaries change.
+- Update `openspec/AGENTS.md` when proposal workflow or promotion rules change.
 - Update `PRD.md` when current epic or product scope changes.
 - Update a spec bundle when behavior, rollout, rollback, or verification changes.
 

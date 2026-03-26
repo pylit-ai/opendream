@@ -7,6 +7,11 @@ Use it to find the correct source of truth.
 
 ## Read order
 
+### If drafting or reviewing an OpenSpec proposal
+1. `openspec/AGENTS.md`
+2. `docs/governance/DOCS_SYSTEM.md`
+3. `CONSTITUTION.md`
+
 ### If changing repository structure, docs, or agent configuration
 1. `docs/governance/DOCS_SYSTEM.md`
 2. `CONSTITUTION.md`
@@ -35,6 +40,7 @@ Use it to find the correct source of truth.
 - `CONSTITUTION.md` — project-wide invariants and safety rules
 - `PRD.md` — current product / epic scope
 - `docs/governance/DOCS_SYSTEM.md` — documentation taxonomy and precedence
+- `openspec/AGENTS.md` — OpenSpec proposal workflow and promotion rules
 - `docs/architecture/overview.md` — enduring technical structure
 - `docs/mcp/servers.md` — MCP servers, tool contracts, and trust boundaries
 - `specs/registry.yaml` — active / superseded / archived change registry

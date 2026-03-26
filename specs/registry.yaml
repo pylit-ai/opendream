@@ -35,3 +35,24 @@ specs:
       - canonical docs exist
       - adapters point to canonical docs
       - no duplicate policy in adapters
+  - id: 401-autodream-style-memory-subsystem
+    title: local-first agent memory subsystem
+    status: implemented
+    owner: platform
+    created: 2026-03-26
+    touched_surfaces:
+      - memory-runtime
+      - cli
+      - tests
+      - specs-lifecycle
+    depends_on:
+      - 001-bootstrap
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - docs/architecture/overview.md
+      - Makefile
+    verification:
+      - make verify passes
+      - demo command produces deterministic memory artifacts
+      - consolidation writes only within the memory store
