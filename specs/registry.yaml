@@ -1,0 +1,37 @@
+version: 1
+
+statuses:
+  - proposed
+  - active
+  - blocked
+  - implemented
+  - superseded
+  - archived
+
+rules:
+  - no two active specs may touch the same surface unless they declare a dependency or an explicit non-overlap
+  - a superseded spec must name its replacement
+  - an implemented spec must be archived after enduring decisions are promoted
+  - each spec must have one owner
+  - each spec must define verification
+
+specs:
+  - id: 001-bootstrap
+    title: bootstrap repository operating system
+    status: active
+    owner: platform
+    created: 2026-03-12
+    touched_surfaces:
+      - docs-governance
+      - repo-routing
+      - specs-lifecycle
+    depends_on: []
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - docs/governance/DOCS_SYSTEM.md
+      - AGENTS.md
+    verification:
+      - canonical docs exist
+      - adapters point to canonical docs
+      - no duplicate policy in adapters

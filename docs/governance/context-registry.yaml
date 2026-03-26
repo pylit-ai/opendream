@@ -1,0 +1,135 @@
+version: 1
+canonical_entrypoint: AGENTS.md
+
+owners:
+  NORTHSTAR.md: founder
+  CONSTITUTION.md: platform
+  AGENTS.md: devex
+  PRD.md: product
+  docs/governance/DOCS_SYSTEM.md: platform
+  docs/governance/context-registry.yaml: platform
+  docs/mcp/servers.md: platform
+  specs/registry.yaml: platform
+
+review_cadence_days:
+  adapters: 30
+  governance: 90
+  specs_registry: 30
+  archive: 90
+
+documents:
+  - path: NORTHSTAR.md
+    role: vision
+    canonical: true
+    update_trigger:
+      - mission_change
+      - target_user_change
+      - strategic_pillar_change
+      - non_goal_change
+    consumers:
+      - humans
+      - planning_agents
+
+  - path: CONSTITUTION.md
+    role: governance
+    canonical: true
+    update_trigger:
+      - invariant_change
+      - safety_policy_change
+      - quality_gate_change
+      - approval_boundary_change
+    consumers:
+      - planning_agents
+      - coding_agents
+      - reviewers
+
+  - path: AGENTS.md
+    role: router
+    canonical: true
+    update_trigger:
+      - repo_layout_change
+      - command_change
+      - routing_change
+      - approval_boundary_change
+    consumers:
+      - coding_agents
+
+  - path: PRD.md
+    role: product_scope
+    canonical: true
+    update_trigger:
+      - epic_change
+      - roadmap_change
+      - user_story_change
+    consumers:
+      - humans
+      - planning_agents
+
+  - path: docs/governance/DOCS_SYSTEM.md
+    role: docs_governance
+    canonical: true
+    update_trigger:
+      - taxonomy_change
+      - precedence_change
+      - lifecycle_change
+    consumers:
+      - humans
+      - coding_agents
+      - planning_agents
+
+  - path: docs/mcp/servers.md
+    role: tool_manifest
+    canonical: true
+    update_trigger:
+      - server_added
+      - server_removed
+      - auth_change
+      - capability_change
+    consumers:
+      - coding_agents
+      - operators
+
+adapters:
+  - path: CLAUDE.md
+    tool: claude_code
+    canonical: false
+    must_not_define_policy: true
+    points_to:
+      - AGENTS.md
+      - docs/governance/DOCS_SYSTEM.md
+
+  - path: .github/copilot-instructions.md
+    tool: github_copilot
+    canonical: false
+    must_not_define_policy: true
+    points_to:
+      - AGENTS.md
+      - docs/governance/DOCS_SYSTEM.md
+
+  - path: .cursor/rules/00-router.mdc
+    tool: cursor
+    canonical: false
+    must_not_define_policy: true
+    points_to:
+      - AGENTS.md
+      - docs/governance/DOCS_SYSTEM.md
+
+  - path: opencode.json
+    tool: opencode
+    canonical: false
+    must_not_define_policy: true
+    points_to:
+      - AGENTS.md
+      - docs/governance/DOCS_SYSTEM.md
+
+checks:
+  - id: no_duplicate_policy
+    description: Canonical policy text must not be duplicated in adapter files.
+  - id: no_active_spec_overlap
+    description: Active specs may not overlap touched surfaces without explicit dependency or conflict.
+  - id: no_stale_active_specs
+    description: Specs marked implemented must be archived within review cadence.
+  - id: thin_adapters
+    description: Adapter files should remain short and routing-focused.
+  - id: no_normative_in_adapters
+    description: BCP14 requirement keywords must not appear in adapter surfaces.
