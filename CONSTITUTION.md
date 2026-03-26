@@ -4,6 +4,11 @@
 This document defines non-negotiable engineering, safety, and delivery rules for this repository.
 If any spec, plan, or implementation conflicts with this constitution, the constitution wins.
 
+## Article 0 — Product trust
+1. OpenDream exists to improve long-horizon agent reliability without weakening operator control.
+2. If a design increases autonomy by reducing auditability or reversibility, the design is wrong unless explicitly approved.
+3. Local-first, inspectable behavior is the default; hidden remote state is not.
+
 ## Article I — Correctness
 1. No feature is complete without automated verification.
 2. Every externally visible behavior change MUST be covered by tests or an explicit verifier.
@@ -29,6 +34,13 @@ If any spec, plan, or implementation conflicts with this constitution, the const
 2. Secrets MUST NOT be committed, logged, or embedded in examples.
 3. Destructive actions require explicit approval paths in AGENTS.md and relevant specs.
 4. All external integrations MUST document authentication model, failure modes, and revocation path.
+5. Sensitive values MUST NOT be promoted into durable memory unless an explicit allowlist and review path exist.
+
+## Article IV.a — Memory integrity
+1. Durable memory mutations MUST preserve provenance.
+2. Contradictions MUST NOT be silently overwritten.
+3. Background memory maintenance MUST NOT modify repository product code unless a spec explicitly expands that boundary.
+4. Startup memory MUST remain compact enough to be reviewed and reasoned about by an operator.
 
 ## Article V — Observability
 1. All production-impacting flows MUST emit structured logs.

@@ -1,45 +1,45 @@
 # NORTHSTAR
 
 ## Mission
-Build <product-name> for <primary user> so they can <core outcome> with radically less <pain/cost/risk>.
+Build OpenDream for developers and platform teams building coding agents so they can give those agents durable, auditable project memory with radically less repetition, context loss, and silent drift.
 
 ## Why this should exist
 The status quo fails because:
-1. <failure mode 1>
-2. <failure mode 2>
-3. <failure mode 3>
+1. transcript-only agents forget important project constraints and force users to restate them every session.
+2. append-only notes and ad hoc scratchpads accumulate noise, contradictions, and stale instructions.
+3. current memory systems are often opaque, hard to audit, and too risky to trust in production coding workflows.
 
 ## Who it is for
-- Primary user: <persona>
-- Secondary user: <persona>
-- Explicitly not for: <persona/use-case>
+- Primary user: developers operating long-lived coding agents on real repositories
+- Secondary user: platform teams building or embedding agent runtimes and needing a clean-room memory layer
+- Explicitly not for: general-purpose consumer chat history, social memory products, or cloud-first knowledge-management suites
 
 ## What winning looks like in 24 months
-- <outcome metric 1>
-- <outcome metric 2>
-- <outcome metric 3>
+- repeated-task success measurably improves because agents reuse correct procedural and project memory
+- operators can inspect, diff, and verify every durable memory mutation without reading prompts
+- OpenDream is the default local-first memory substrate for coding-agent workflows across multiple repos and runtimes
 
 ## Product thesis
 We believe:
-- <thesis 1>
-- <thesis 2>
-- <thesis 3>
+- durable agent memory should be typed, provenance-preserving, and explicitly resistant to contradiction and staleness
+- local-first, auditable storage earns more operator trust than hidden remote memory systems
+- compact startup memory plus lazy topic loading is the right shape for long-running coding agents
 
 ## Strategic pillars
-1. <pillar 1>
-2. <pillar 2>
-3. <pillar 3>
+1. Trustworthy memory
+2. Operator control
+3. Portable clean-room implementation
 
 ## Non-goals
-- We are not building <x>.
-- We will not optimize for <y> in v1.
-- We will not support <z> without explicit re-evaluation.
+- We are not building a full autonomous software engineer that edits product code without operator control.
+- We will not optimize for multi-tenant cloud sync in v1.
+- We will not support hidden, unaudited durable memory mutation without explicit re-evaluation.
 
 ## Quality bar
 The product must feel:
-- <adjective 1>
-- <adjective 2>
-- <adjective 3>
+- deterministic
+- inspectable
+- boringly safe
 
 ## Durable constraints
 - Protect user trust over short-term velocity.
@@ -57,6 +57,6 @@ When tradeoffs conflict:
 
 ## Kill criteria
 We should reconsider the project if:
-- <criterion 1>
-- <criterion 2>
-- <criterion 3>
+- durable memory does not produce a meaningful improvement over append-only notes on repeated coding tasks
+- operators still do not trust the system because contradiction, staleness, or auditability failures remain common
+- the local-first approach cannot meet the product’s ergonomics without forcing an unwanted remote control plane
