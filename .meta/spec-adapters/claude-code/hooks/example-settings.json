@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "preTask": [
+      "sh .meta/spec-adapters/claude-code/scripts/opendream-pre-task.sh \"$CLAUDE_TASK\""
+    ],
+    "postTask": [
+      "sh .meta/spec-adapters/claude-code/scripts/opendream-post-task.sh \"$CLAUDE_SUMMARY\""
+    ]
+  }
+}
