@@ -10,7 +10,9 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OPEN_SPEC_ROOT = REPO_ROOT / "openspec" / "changes" / "401-autodream-style-memory-subsystem"
-SCHEMA_ROOT = OPEN_SPEC_ROOT / "schema"
+CANONICAL_SCHEMA_ROOT = REPO_ROOT / "specs" / "401-autodream-style-memory-subsystem" / "schema"
+SCHEMA_ROOT = Path(__file__).resolve().with_name("schema")
+FIXTURE_ROOT = Path(__file__).resolve().with_name("fixtures")
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 

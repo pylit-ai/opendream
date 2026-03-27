@@ -56,3 +56,114 @@ specs:
       - make verify passes
       - demo command produces deterministic memory artifacts
       - consolidation writes only within the memory store
+  - id: 402-release-hardening
+    title: release completeness, packaging, and artifact safety
+    status: implemented
+    owner: platform
+    created: 2026-03-26
+    touched_surfaces:
+      - packaging
+      - runtime-contract
+      - release-docs
+      - tests
+    depends_on:
+      - 401-autodream-style-memory-subsystem
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - pyproject.toml
+      - LICENSE
+      - CHANGELOG.md
+      - SECURITY.md
+    verification:
+      - make verify passes on a fresh checkout
+      - pip install . works in a clean venv
+      - packaged schemas match canonical spec schemas
+  - id: 403-runtime-integration-layer
+    title: thin runtime integration layer for event emission, maintenance, and prompt context
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - cli
+      - integration
+      - tests
+      - docs
+    depends_on:
+      - 401-autodream-style-memory-subsystem
+      - 402-release-hardening
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+    verification:
+      - make verify passes
+      - emit-event appends schema-valid events
+      - maintain skips cleanly when no work is pending
+      - prepare-context returns prompt-ready memory context
+  - id: 404-framework-adapter-pack
+    title: framework adapter packs for Claude Code, Codex, and OpenClaw
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - docs
+      - adapters
+      - tests
+    depends_on:
+      - 403-runtime-integration-layer
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - .meta/spec-adapters/
+    verification:
+      - adapter smoke checks pass
+      - framework READMEs are runnable
+      - adapter files remain non-normative
+  - id: 405-layered-memory-stores
+    title: layered global and project memory stores
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - cli
+      - integration
+      - storage
+      - tests
+      - docs
+      - adr
+    depends_on:
+      - 403-runtime-integration-layer
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - docs/adr/ADR-002-layered-memory-store-precedence.md
+    verification:
+      - make verify passes
+      - multi-store precedence tests pass
+      - global plus project manual flow works
+  - id: 406-scheduler-and-status-surface
+    title: cron-safe scheduler tick and status surface
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - cli
+      - integration
+      - storage
+      - tests
+      - docs
+    depends_on:
+      - 403-runtime-integration-layer
+      - 405-layered-memory-stores
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+    verification:
+      - make verify passes
+      - status and tick tests pass
+      - cron-style repeated invocation works

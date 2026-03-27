@@ -8,6 +8,15 @@ from typing import Any
 from .util import SCHEMA_ROOT
 
 
+REQUIRED_SCHEMA_FILES = (
+    "memory-event.schema.json",
+    "memory-candidate.schema.json",
+    "memory-topic.schema.json",
+    "memory-index.schema.json",
+    "consolidation-op.schema.json",
+)
+
+
 TYPE_MAP = {
     "object": dict,
     "array": list,
@@ -26,6 +35,10 @@ class SchemaValidationError(ValueError):
 def load_schema(name: str) -> dict[str, Any]:
     path = SCHEMA_ROOT / name
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def required_schema_files() -> tuple[str, ...]:
+    return REQUIRED_SCHEMA_FILES
 
 
 def _matches_type(expected: str | list[str], value: Any) -> bool:

@@ -1,5 +1,5 @@
 
-.PHONY: setup dev demo test lint typecheck verify
+.PHONY: setup dev demo test lint typecheck adapters-check verify release-check
 
 PYTHON ?= python3
 DEMO_WORKSPACE ?= .tmp/demo
@@ -25,5 +25,12 @@ lint:
 typecheck:
 	@$(PYTHON) scripts/typecheck.py
 
-verify: lint typecheck test
+adapters-check:
+	@$(PYTHON) scripts/check_adapters.py
+
+verify: lint typecheck test adapters-check
 	@echo "verify ok"
+
+release-check: verify
+	@$(PYTHON) -m unittest tests.test_release_artifact -v
+	@echo "release-check ok"

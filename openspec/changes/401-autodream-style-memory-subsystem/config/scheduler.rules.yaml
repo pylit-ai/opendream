@@ -1,0 +1,126 @@
+version: 2
+
+license_mode:
+  clean_room_only: true
+  third_party_code_reuse: false
+  third_party_prompt_reuse: false
+
+scheduler:
+  enabled: true
+  mode: background_non_blocking
+  single_writer: true
+
+modes:
+  bootstrap:
+    enabled: true
+    manual_only: true
+    max_batches_per_run: 10
+    max_events_per_batch: 500
+    review_required_before_apply: true
+    allow_raw_evidence_inventory: true
+    allow_durable_apply: true
+
+  scheduled:
+    enabled: true
+    non_blocking: true
+    bounded: true
+    max_candidates_per_run: 100
+    max_recent_sessions: 20
+
+locks:
+  provider: filelock
+  path: memory/locks/consolidator.lock
+  ttl_seconds: 1800
+  heartbeat_seconds: 30
+  on_stale_lock: break_after_ttl_if_no_heartbeat
+
+triggers:
+  bootstrap:
+    command_names:
+      - /memory-bootstrap
+
+  scheduled_manual:
+    command_names:
+      - /dream
+      - /memory-consolidate
+
+  inactivity_window:
+    enabled: true
+    min_hours_since_last_foreground_write: 12
+
+  session_count:
+    enabled: true
+    min_completed_sessions_since_last_run: 8
+
+  candidate_backlog:
+    enabled: true
+    min_pending_candidates: 50
+
+  hard_ceiling:
+    enabled: true
+    max_hours_between_runs: 48
+
+cooldowns:
+  min_minutes_between_runs: 30
+  skip_if_foreground_agent_busy: true
+  skip_if_repo_has_uncommitted_memory_conflict: true
+
+read_scope:
+  durable_memory:
+    - memory/MEMORY.md
+    - memory/topics/**/*.md
+    - memory/state/events/*.jsonl
+    - memory/state/candidates/*.jsonl
+  optional_recent_transcripts:
+    enabled: true
+    max_sessions: 20
+    max_total_events: 5000
+
+write_scope:
+  allowed:
+    - memory/MEMORY.md
+    - memory/topics/**/*.md
+    - memory/state/**/*.jsonl
+    - memory/audit/**/*.jsonl
+    - memory/locks/**/*.lock
+  denied:
+    - "**/src/**"
+    - "**/app/**"
+    - "**/*.py"
+    - "**/*.ts"
+    - "**/*.tsx"
+    - "**/*.js"
+    - "**/*.jsx"
+    - "**/*.rs"
+    - "**/*.go"
+    - "**/*.java"
+    - "**/*.sql"
+
+index_policy:
+  max_entries: 40
+  max_lines: 200
+  max_chars_per_summary: 140
+  require_path_or_id: true
+
+retention:
+  candidate_ttl_days: 14
+  pending_item_decay_days: 7
+  weak_memory_quarantine_days: 30
+  contested_review_days: 14
+
+promotion:
+  workflow_min_successful_recalls: 2
+  preference_min_confirmations: 1
+  decision_requires_explicit_signal: true
+
+conflict_policy:
+  prefer_stronger_provenance: true
+  allow_temporal_supersession: true
+  silent_overwrite: false
+  contested_excluded_from_startup_index: true
+
+audit:
+  emit_diff: true
+  emit_run_summary: true
+  emit_retrieval_trace: true
+  keep_days: 90
