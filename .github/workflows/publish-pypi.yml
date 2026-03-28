@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      contents: read # required for actions/checkout (id-token alone drops default read)
       id-token: write
     steps:
       - uses: actions/checkout@v4
