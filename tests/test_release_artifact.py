@@ -37,10 +37,21 @@ class ReleaseArtifactTests(unittest.TestCase):
             temp_path = Path(temp_dir)
             venv_dir = temp_path / "venv"
             workspace = temp_path / "demo-workspace"
+            dream_workspace = temp_path / "dream-workspace"
+            eval_workspace = temp_path / "eval-workspace"
+            transcript_fixture = temp_path / "transcript.jsonl"
             subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
             scripts_dir = "Scripts" if os.name == "nt" else "bin"
             venv_python = venv_dir / scripts_dir / "python"
             entrypoint = venv_dir / scripts_dir / "opendream-memory"
+            transcript_fixture.write_text(
+                (
+                    '{"timestamp":"2026-03-26T09:00:00Z","speaker":"user","text":"Use pnpm in this repo."}\n'
+                    '{"timestamp":"2026-03-26T09:15:00Z","speaker":"assistant","text":"Schema migration workflow: '
+                    'generate the SQL first, then apply it after review."}\n'
+                ),
+                encoding="utf-8",
+            )
 
             subprocess.run(
                 [str(venv_python), "-m", "pip", "install", "--no-deps", str(REPO_ROOT)],
@@ -67,6 +78,50 @@ class ReleaseArtifactTests(unittest.TestCase):
             )
             self.assertIn('"events_appended": 20', demo_run.stdout)
             self.assertTrue((workspace / "memory" / "MEMORY.md").exists())
+
+            dream_run = subprocess.run(
+                [
+                    str(entrypoint),
+                    "dream",
+                    "run",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--episodes",
+                    str(transcript_fixture),
+                    "--now",
+                    FIXED_NOW,
+                    "--compat-mode",
+                    "autodream",
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "completed"', dream_run.stdout)
+
+            fidelity_eval = subprocess.run(
+                [
+                    str(entrypoint),
+                    "eval",
+                    "dream-fidelity",
+                    "--workspace",
+                    str(eval_workspace),
+                    "--now",
+                    FIXED_NOW,
+                    "--compat-mode",
+                    "autodream",
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "passed"', fidelity_eval.stdout)
 
 
 if __name__ == "__main__":

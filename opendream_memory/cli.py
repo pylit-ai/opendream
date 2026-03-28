@@ -8,8 +8,8 @@ from typing import Any
 from . import __version__
 from .bootstrap import bootstrap_index
 from .consolidator import consolidate
-from .dream import dream_run
-from .evaluation import run_memory_quality_eval
+from .dream import dream_run, dream_tick
+from .evaluation import run_dream_fidelity_eval, run_memory_quality_eval
 from .extractor import extract_candidates
 from .integration import (
     emit_event,
@@ -55,6 +55,13 @@ def build_store(
 ) -> MemoryStore:
     hint = store_kind_hint if store_kind_hint in VALID_STORE_KINDS else None
     return MemoryStore(Path(workspace), store_kind_hint=hint, memory_dir=memory_dir, compat_mode=compat_mode)
+
+
+def resolve_episode_paths(store: MemoryStore, paths: list[str] | None) -> list[Path]:
+    if paths:
+        return [Path(path).expanduser() for path in paths]
+    store.ensure_layout()
+    return sorted(store.transcripts_dir.glob("*.jsonl"))
 
 
 def add_layout_arguments(parser: argparse.ArgumentParser) -> None:
@@ -406,13 +413,49 @@ def command_dream_run(args: argparse.Namespace) -> dict[str, Any]:
     )
     if not store.is_initialized():
         store.initialize(store_kind="project", compat_mode=args.compat_mode)
-    episode_paths = [Path(path) for path in args.episodes]
+    episode_paths = resolve_episode_paths(store, getattr(args, "episodes", None))
     result = dream_run(
         store,
         episode_paths=episode_paths,
         now=args.now,
         max_recent_episodes=args.max_recent_episodes,
         min_episode_signals=args.min_episode_signals,
+    )
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_dream_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    snapshot = store.status_snapshot(now=args.now)
+    return {
+        "workspace": str(store.workspace),
+        "memory_root": str(store.memory_root),
+        "dream": snapshot["dream"],
+    }
+
+
+def command_dream_tick(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    episode_paths = resolve_episode_paths(store, getattr(args, "episodes", None))
+    result = dream_tick(
+        store,
+        episode_paths=episode_paths,
+        now=args.now,
+        max_recent_episodes=args.max_recent_episodes,
+        min_episode_signals=args.min_episode_signals,
+        min_interval_seconds=args.min_interval_seconds,
     )
     result["workspace"] = str(store.workspace)
     result["memory_root"] = str(store.memory_root)
@@ -429,6 +472,18 @@ def command_eval_memory_quality(args: argparse.Namespace) -> dict[str, Any]:
         store.initialize(store_kind="project", compat_mode=args.compat_mode)
     fixture_path = Path(args.fixture) if args.fixture else None
     return run_memory_quality_eval(store, fixture_path=fixture_path, now=args.now)
+
+
+def command_eval_dream_fidelity(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode or "autodream",
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode or "autodream")
+    fixture_path = Path(args.fixture) if args.fixture else None
+    return run_dream_fidelity_eval(store, fixture_path=fixture_path, now=args.now)
 
 
 def command_index_observability(args: argparse.Namespace) -> dict[str, Any]:
@@ -580,12 +635,26 @@ def build_parser() -> argparse.ArgumentParser:
     dream_subparsers = dream_parser.add_subparsers(dest="dream_command", required=True)
     dream_run_parser = dream_subparsers.add_parser("run")
     dream_run_parser.add_argument("--workspace", required=True)
-    dream_run_parser.add_argument("--episodes", nargs="+", required=True)
+    dream_run_parser.add_argument("--episodes", nargs="*")
     dream_run_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     dream_run_parser.add_argument("--max-recent-episodes", type=int)
     dream_run_parser.add_argument("--min-episode-signals", type=int)
     add_layout_arguments(dream_run_parser)
     dream_run_parser.set_defaults(func=command_dream_run)
+    dream_status_parser = dream_subparsers.add_parser("status")
+    dream_status_parser.add_argument("--workspace", required=True)
+    dream_status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(dream_status_parser)
+    dream_status_parser.set_defaults(func=command_dream_status)
+    dream_tick_parser = dream_subparsers.add_parser("tick")
+    dream_tick_parser.add_argument("--workspace", required=True)
+    dream_tick_parser.add_argument("--episodes", nargs="*")
+    dream_tick_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    dream_tick_parser.add_argument("--max-recent-episodes", type=int)
+    dream_tick_parser.add_argument("--min-episode-signals", type=int)
+    dream_tick_parser.add_argument("--min-interval-seconds", type=int, default=0)
+    add_layout_arguments(dream_tick_parser)
+    dream_tick_parser.set_defaults(func=command_dream_tick)
 
     eval_parser = subparsers.add_parser("eval")
     eval_subparsers = eval_parser.add_subparsers(dest="eval_command", required=True)
@@ -595,6 +664,12 @@ def build_parser() -> argparse.ArgumentParser:
     eval_memory_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(eval_memory_parser)
     eval_memory_parser.set_defaults(func=command_eval_memory_quality)
+    eval_dream_parser = eval_subparsers.add_parser("dream-fidelity")
+    eval_dream_parser.add_argument("--workspace", required=True)
+    eval_dream_parser.add_argument("--fixture")
+    eval_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_dream_parser)
+    eval_dream_parser.set_defaults(func=command_eval_dream_fidelity)
 
     observe_parser = subparsers.add_parser("observe")
     observe_subparsers = observe_parser.add_subparsers(dest="observe_command", required=True)

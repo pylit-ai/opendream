@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import deque
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -30,20 +31,30 @@ MEMORY_WORTHY_MARKERS = (
 )
 
 
-def load_episode_rows(paths: list[Path]) -> list[dict[str, Any]]:
+def load_episode_rows(paths: list[Path], *, tail_limit: int | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in paths:
         text = path.expanduser().read_text(encoding="utf-8").strip()
         if not text:
             continue
-        for line in text.splitlines():
-            if line.strip():
-                payload = json.loads(line)
-                if isinstance(payload, dict):
-                    payload.setdefault("source_path", str(path.expanduser()))
-                    rows.append(payload)
+        if tail_limit is None:
+            candidate_lines = [line for line in text.splitlines() if line.strip()]
+        else:
+            candidate_lines = list(deque((line for line in text.splitlines() if line.strip()), maxlen=tail_limit))
+        for line in candidate_lines:
+            payload = json.loads(line)
+            if isinstance(payload, dict):
+                payload.setdefault("source_path", str(path.expanduser()))
+                rows.append(payload)
     rows.sort(key=lambda item: str(item.get("timestamp", "")))
     return rows
+
+
+def latest_episode_timestamp(paths: list[Path]) -> str | None:
+    rows = load_episode_rows(paths, tail_limit=1)
+    if not rows:
+        return None
+    return max(str(row.get("timestamp") or "") for row in rows if row.get("timestamp")) or None
 
 
 def normalize_relative_dates(text: str, reference_timestamp: str) -> str:

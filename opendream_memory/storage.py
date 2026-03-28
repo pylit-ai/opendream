@@ -143,6 +143,7 @@ class MemoryStore:
         self.compat_mode_hint = compat_mode
         self.topics_dir = self.memory_root / "topics"
         self.events_dir = self.memory_root / "state" / "events"
+        self.transcripts_dir = self.memory_root / "state" / "transcripts"
         self.candidates_dir = self.memory_root / "state" / "candidates"
         self.audit_consolidation_dir = self.memory_root / "audit" / "consolidation"
         self.audit_retrieval_dir = self.memory_root / "audit" / "retrieval"
@@ -248,6 +249,7 @@ class MemoryStore:
             self.memory_root,
             self.topics_dir,
             self.events_dir,
+            self.transcripts_dir,
             self.candidates_dir,
             self.audit_consolidation_dir,
             self.audit_retrieval_dir,
@@ -354,8 +356,14 @@ class MemoryStore:
                 "dream": {
                     "state": "never_ran",
                     "last_ran_at": None,
+                    "last_run_summary": None,
+                    "last_run_reason": None,
+                    "last_run_duration_ms": None,
+                    "last_episode_timestamp": None,
                     "lock": self.dream_lock_state(),
                     "policy": metadata["dream"],
+                    "transcript_dir": str(self.transcripts_dir),
+                    "available_episode_files": 0,
                 },
                 "next_eligible_reason": "not-initialized",
                 "next_eligible_at": None,
@@ -406,8 +414,14 @@ class MemoryStore:
             "dream": {
                 "state": dream_state.get("state", "never_ran"),
                 "last_ran_at": dream_state.get("last_ran_at"),
+                "last_run_summary": dream_state.get("last_run_summary"),
+                "last_run_reason": dream_state.get("last_run_reason"),
+                "last_run_duration_ms": dream_state.get("last_run_duration_ms"),
+                "last_episode_timestamp": dream_state.get("last_episode_timestamp"),
                 "lock": self.dream_lock_state(),
                 "policy": self.load_store_metadata()["dream"],
+                "transcript_dir": str(self.transcripts_dir),
+                "available_episode_files": len(list(self.transcripts_dir.glob("*.jsonl"))),
             },
             "next_eligible_reason": next_eligible_reason,
             "next_eligible_at": next_eligible_at,

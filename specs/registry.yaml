@@ -82,7 +82,7 @@ specs:
       - packaged schemas match canonical spec schemas
   - id: 403-runtime-integration-layer
     title: thin runtime integration layer for event emission, maintenance, and prompt context
-    status: implemented
+    status: superseded
     owner: platform
     created: 2026-03-27
     touched_surfaces:
@@ -169,7 +169,7 @@ specs:
       - cron-style repeated invocation works
   - id: 410-truthful-verification
     title: truthful verification and adversarial quality gates
-    status: implemented
+    status: superseded
     owner: platform
     created: 2026-03-27
     touched_surfaces:
@@ -192,7 +192,7 @@ specs:
       - memory writes and consolidation runs emit inspectable summaries and diffs
   - id: 411-autodream-fidelity
     title: transcript-guided DreamRunner and AutoDream-compatible memory flow
-    status: implemented
+    status: superseded
     owner: platform
     created: 2026-03-27
     touched_surfaces:
@@ -216,7 +216,7 @@ specs:
       - custom memory directory is honored by normal and dream writes
   - id: 412-memory-quality
     title: trustworthy retrieval, dedupe, contradiction handling, and evals
-    status: implemented
+    status: superseded
     owner: platform
     created: 2026-03-27
     touched_surfaces:
@@ -237,7 +237,7 @@ specs:
       - eval command emits deterministic benchmark output
   - id: 413-authoritative-release-gate
     title: authoritative, hermetic, and time-bounded release gate
-    status: implemented
+    status: superseded
     owner: platform
     created: 2026-03-27
     touched_surfaces:
@@ -340,3 +340,76 @@ specs:
       - review actions are explicit and auditable
       - fidelity diagnostics expose phases, coverage, and index budget
       - exports reconstruct runs and diffs offline
+  - id: 418-transcript-native-dream-engine
+    title: transcript-native DreamRunner as the canonical runtime path
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - cli
+      - memory-runtime
+      - storage
+      - tests
+      - docs
+    depends_on:
+      - 405-layered-memory-stores
+      - 406-scheduler-and-status-surface
+    conflicts_with: []
+    supersedes:
+      - 403-runtime-integration-layer
+      - 411-autodream-fidelity
+    promoted_outputs:
+      - README.md
+      - docs/architecture/overview.md
+    verification:
+      - transcript-only dream fixtures create durable memory
+      - dream status and dream tick expose bounded, inspectable state transitions
+      - dream summaries report searched transcript files without full-corpus replay
+  - id: 419-dream-fidelity-evals
+    title: machine-readable dream fidelity evals
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - evals
+      - cli
+      - tests
+      - packaging
+      - docs
+    depends_on:
+      - 418-transcript-native-dream-engine
+      - 405-layered-memory-stores
+    conflicts_with: []
+    supersedes:
+      - 412-memory-quality
+    promoted_outputs:
+      - README.md
+    verification:
+      - eval dream-fidelity emits deterministic machine-readable checks
+      - installed-package smoke runs the dream-fidelity eval successfully
+      - dream fidelity checks cover transcript emergence, date normalization, and retrieval from dream memory
+  - id: 420-truthful-verification-and-release
+    title: truthful verification and release gates for transcript-native dreaming
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - verification
+      - release-tooling
+      - packaging
+      - tests
+      - docs
+    depends_on:
+      - 418-transcript-native-dream-engine
+      - 419-dream-fidelity-evals
+    conflicts_with: []
+    supersedes:
+      - 410-truthful-verification
+      - 413-authoritative-release-gate
+    promoted_outputs:
+      - Makefile
+      - README.md
+    verification:
+      - make verify includes a dream-fidelity-eval stage and emits a verification report
+      - make release-check runs dream-run and eval-dream-fidelity in a clean venv
+      - release blocker resolution prefers the 418-420 canonical task bundles when present

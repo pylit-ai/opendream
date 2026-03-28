@@ -63,6 +63,17 @@ def tasks_complete(spec_ids: list[str]) -> dict[str, Any]:
     return {"name": "spec-blockers", "status": "PASS" if not incomplete else "FAIL", "incomplete_specs": incomplete}
 
 
+def preferred_release_blockers() -> list[str]:
+    next_gen = [
+        "418-transcript-native-dream-engine",
+        "419-dream-fidelity-evals",
+        "420-truthful-verification-and-release",
+    ]
+    if all((REPO_ROOT / "specs" / spec_id / "tasks.md").exists() for spec_id in next_gen):
+        return next_gen
+    return ["410-truthful-verification", "411-autodream-fidelity", "412-memory-quality"]
+
+
 def release_manifest(timeout_seconds: int) -> dict[str, Any]:
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
     stages: list[dict[str, Any]] = []
@@ -82,7 +93,7 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
                 timeout_seconds=timeout_seconds,
             )
         )
-        stages.append(tasks_complete(["410-truthful-verification", "411-autodream-fidelity", "412-memory-quality"]))
+        stages.append(tasks_complete(preferred_release_blockers()))
         stages.append(
             run_stage(
                 "build",
@@ -124,10 +135,50 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
             )
         )
         demo_workspace = temp_path / "demo-workspace"
+        dream_workspace = temp_path / "dream-workspace"
+        eval_workspace = temp_path / "eval-workspace"
         stages.append(
             run_stage(
                 "demo",
                 [str(venv_dir / scripts_dir / "opendream-memory"), "demo", "--workspace", str(demo_workspace)],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "dream-run",
+                [
+                    str(venv_dir / scripts_dir / "opendream-memory"),
+                    "dream",
+                    "run",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--episodes",
+                    str(REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"),
+                    "--compat-mode",
+                    "autodream",
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "eval-dream-fidelity",
+                [
+                    str(venv_dir / scripts_dir / "opendream-memory"),
+                    "eval",
+                    "dream-fidelity",
+                    "--workspace",
+                    str(eval_workspace),
+                    "--compat-mode",
+                    "autodream",
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
                 cwd=temp_path,
                 timeout_seconds=timeout_seconds,
             )

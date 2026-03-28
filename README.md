@@ -105,7 +105,7 @@ make verify
 make release-check
 ```
 
-`make verify` runs `scripts/verify.py` (Ruff lint, mypy on `opendream_memory` and `scripts`, unit tests, adapter example integrity, packaging smoke). `make release-check` adds the full release gate (wheel/sdist, clean venv install, and `tests.test_release_artifact`).
+`make verify` runs `scripts/verify.py` (Ruff lint, mypy on `opendream_memory` and `scripts`, unit tests, `eval dream-fidelity`, adapter example integrity, packaging smoke). `make release-check` adds the full release gate (wheel/sdist, clean venv install, `dream run`, `eval dream-fidelity`, and `tests.test_release_artifact`).
 
 **Verification limits:** This gate is **real** for CLI behavior and packaging, but it is still a **bounded** suite. It does not prove absence of every defect class you might care about in production. Treat failures as authoritative; treat PASS as “meets this repo’s bar,” not universal safety.
 
@@ -138,6 +138,9 @@ opendream-memory retrieve --workspace .tmp/workspace --query "package manager an
 opendream-memory emit-event --workspace .tmp/workspace --kind project_decision --content "Use pnpm in this repo" --message-ref manual-1 --tag key:package-manager
 opendream-memory maintain --workspace .tmp/workspace
 opendream-memory dream run --workspace .tmp/workspace --episodes tests/fixtures/transcript_only_dream.jsonl
+opendream-memory dream status --workspace .tmp/workspace
+opendream-memory dream tick --workspace .tmp/workspace --episodes tests/fixtures/transcript_only_dream.jsonl
+opendream-memory eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodream
 opendream-memory eval memory-quality --workspace .tmp/eval
 opendream-memory prepare-context --workspace .tmp/workspace --query "package manager and workflow"
 opendream-memory prepare-context --workspace .tmp/workspace --query "package manager and workflow" --include-global --global-workspace ~/.opendream-global
@@ -161,8 +164,8 @@ OpenDream is only "verified" when the scripted gate passes. The gate emits `.tmp
 - `make lint` — Ruff (`scripts/lint.py`)
 - `make typecheck` — mypy on `opendream_memory` and `scripts` (`scripts/typecheck.py`)
 - `make test` — unit tests
-- `make verify` — `scripts/verify.py` (lint, typecheck, tests, `scripts/check_adapters.py`, packaging smoke)
-- `make release-check` — authoritative release gate: artifacts, clean venv install, verification replay
+- `make verify` — `scripts/verify.py` (lint, typecheck, tests, `eval dream-fidelity`, `scripts/check_adapters.py`, packaging smoke)
+- `make release-check` — authoritative release gate: artifacts, clean venv install, `dream run`, `eval dream-fidelity`, verification replay
 
 `make release-check` emits:
 
@@ -187,6 +190,7 @@ For real agent use, treat OpenDream as a **CLI sidecar**:
 - emit memory-worthy events with **`emit-event`**
 - run **`maintain`** on a schedule or after sessions so extract + consolidate can run (structured skip reasons when there is nothing to do)
 - run **`dream run`** against transcript or log episodes when you want reflective consolidation
+- use **`dream status`** or **`dream tick`** when you want scheduler-safe DreamRunner state and backlog polling
 - use **`prepare-context`** to inject selected memory into the next planning prompt
 - call **`status`** when you want lock and pending-work visibility before prompting
 
@@ -239,11 +243,15 @@ opendream-memory dream run \
   --workspace "$PWD" \
   --episodes tests/fixtures/transcript_only_dream.jsonl \
   --compat-mode autodream
+
+opendream-memory dream status --workspace "$PWD" --compat-mode autodream
+opendream-memory dream tick --workspace "$PWD" --compat-mode autodream
 ```
 
-Memory quality can be benchmarked locally:
+Memory quality and dream fidelity can be benchmarked locally:
 
 ```bash
+opendream-memory eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodream
 opendream-memory eval memory-quality --workspace .tmp/eval
 ```
 

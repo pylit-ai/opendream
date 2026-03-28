@@ -510,6 +510,79 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(result["status"], "skipped")
         self.assertEqual(result["reason"], "lock-held")
 
+    def test_dream_status_and_tick_aliases_use_transcript_backlog(self) -> None:
+        fixture = REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"
+        run_cli(
+            "init",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+        )
+        transcript_dir = self.workspace / ".dream-memory" / "state" / "transcripts"
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        (transcript_dir / "session-1.jsonl").write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+
+        before = run_cli(
+            "dream",
+            "status",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--now",
+            FIXED_NOW,
+        )
+        first = run_cli(
+            "dream",
+            "tick",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+            "--now",
+            FIXED_NOW,
+            "--min-interval-seconds",
+            "60",
+        )
+        second = run_cli(
+            "dream",
+            "tick",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+            "--now",
+            "2026-03-26T12:00:10Z",
+            "--min-interval-seconds",
+            "60",
+        )
+        after = run_cli(
+            "dream",
+            "status",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--now",
+            "2026-03-26T12:00:10Z",
+        )
+
+        self.assertEqual(before["dream"]["state"], "never_ran")
+        self.assertEqual(first["status"], "completed")
+        self.assertEqual(first["trigger_class"], "transcript-backlog")
+        self.assertEqual(second["status"], "skipped")
+        self.assertEqual(second["reason"], "min-interval")
+        self.assertEqual(after["dream"]["state"], "idle")
+        self.assertEqual(after["dream"]["last_ran_at"], FIXED_NOW)
+        self.assertEqual(after["dream"]["last_run_reason"], "transcript-backlog")
+
     def test_tick_reports_status_and_repeated_invocation(self) -> None:
         run_cli("init", "--workspace", str(self.workspace))
         self.emit_runtime_event(
@@ -606,6 +679,23 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["paraphrase_hits"], result["query_count"])
         self.assertGreaterEqual(result["lexical_only_misses"], 1)
+
+    def test_eval_dream_fidelity_command(self) -> None:
+        result = run_cli(
+            "eval",
+            "dream-fidelity",
+            "--workspace",
+            str(self.workspace),
+            "--now",
+            FIXED_NOW,
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+        )
+        self.assertEqual(result["status"], "passed")
+        self.assertTrue(all(result["checks"].values()))
+        self.assertTrue(any("pnpm" in title.lower() for title in result["selected_titles"]))
 
 
 if __name__ == "__main__":
