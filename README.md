@@ -213,9 +213,22 @@ OpenDream is only "verified" when the scripted gate passes. The gate emits `.tmp
 
 Publishing matches the **agentic-devkit** pattern: **tag push** runs [`.github/workflows/publish-pypi.yml`](./.github/workflows/publish-pypi.yml) (`uv build` + `uv publish`) using **PyPI Trusted Publishing (OIDC)**—no API token stored in GitHub secrets.
 
-1. **PyPI:** Add a **trusted publisher** for `opendream`: either under an existing project’s settings, or as a **pending publisher** on your PyPI account (the project can be created on first successful OIDC publish—see [PyPI: creating a project through OIDC](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)). Use GitHub → `pylit-ai/opendream` → workflow `publish-pypi.yml` (and **environment** `pypi` if you use a GitHub Environment below).
-2. **GitHub:** Create an **environment** named `pypi` (optional but recommended) with any protection rules you want; the publish workflow targets `environment: pypi`.
-3. **Cut a release:** with a clean tree, run `make release-patch` (or `release-minor` / `release-major`), or bump with `make bump-patch` and push tag `vX.Y.Z` yourself. The tag must match `v[0-9]+.[0-9]+.[0-9]+`.
+### Agentic-devkit vs OpenDream (same *name*, different *binding*)
+
+- **GitHub Environment `pypi`:** There is one environment **per repository**. The `pypi` environment on **agent-dev-templates** does **not** apply to **pylit-ai/opendream**. This repo’s workflow uses `environment: pypi`, so **pylit-ai/opendream** must have its own environment named `pypi` (Settings → Environments). It can use the same *name* as other repos; it is still a separate object.
+- **PyPI trusted publisher:** Each **PyPI project** has its own publisher rules. The **opendream** project on PyPI must list **repository `pylit-ai/opendream`** and workflow **`publish-pypi.yml`**. A row that only allows **agent-dev-templates** / **agentic-devkit** will **not** publish **opendream**.
+
+### Checklist
+
+1. **PyPI (project `opendream`):** In PyPI, open the **opendream** project → **Settings** → **Publishing** → add **trusted publisher**:
+   - Owner: `pylit-ai`
+   - Repository: `opendream` (not `agent-dev-templates`)
+   - Workflow: `publish-pypi.yml`
+   - Environment name: `pypi` (must match the workflow; this workflow sets `environment: pypi`)
+2. **GitHub (`pylit-ai/opendream`):** Environment **`pypi`** exists (Settings → Environments). Add branch protection / required reviewers there if you want release gates.
+3. **Cut a release:** `pyproject.toml` version must be new on PyPI. Then either:
+   - `git tag -a v0.1.0 -m "Release v0.1.0"` and `git push origin v0.1.0` (version in tag and in `pyproject.toml` should agree), or
+   - `make release-patch` / `release-minor` / `release-major` (bumps version, commits `pyproject.toml` + `uv.lock`, tags, pushes).
 
 Local dry run: `uv build` (artifacts under `dist/`). **TestPyPI** is not wired by default; add a second job or workflow if you need it.
 

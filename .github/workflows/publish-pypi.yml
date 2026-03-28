@@ -5,7 +5,7 @@
 #   Owner: pylit-ai
 #   Repository: opendream
 #   Workflow: publish-pypi.yml
-#   Environment: pypi (optional; if set, match GitHub Environment name below)
+#   Environment: pypi (must match GitHub Environment name below — workflow uses environment: pypi)
 # See: https://docs.pypi.org/trusted-publishers/
 
 name: Publish to PyPI
