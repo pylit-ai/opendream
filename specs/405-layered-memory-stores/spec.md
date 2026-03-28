@@ -31,8 +31,8 @@ The runtime supported typed scopes in schemas, but storage and retrieval were ef
 - Framework adapters can call one command and receive precedence-aware composed context.
 
 ## Acceptance criteria
-- [x] AC-1: `opendream-memory init --workspace <repo>` continues to initialize a project store
-- [x] AC-2: `opendream-memory init --workspace ~/.opendream-global --store-kind global` initializes a global store
+- [x] AC-1: `opendream init --workspace <repo>` continues to initialize a project store
+- [x] AC-2: `opendream init --workspace ~/.opendream-global --store-kind global` initializes a global store
 - [x] AC-3: `prepare-context` supports multiple stores and returns precedence-aware merged context
 - [x] AC-4: `maintain` supports multiple stores or a store-group manifest
 - [x] AC-5: routing defaults preserve project-local isolation unless the operator opts into global routing

@@ -43,7 +43,7 @@ Improve retrieval and consolidation quality without adding external dependencies
 
 ## Verification plan
 - run: `python3 -m unittest tests.test_memory_cli tests.test_validation_and_models -v`
-- run: `opendream-memory eval memory-quality --workspace <tmp>`
+- run: `opendream eval memory-quality --workspace <tmp>`
 - run: `make verify`
 
 ## ADR needed?

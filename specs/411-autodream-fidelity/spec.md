@@ -21,7 +21,7 @@ OpenDream currently behaves like an event-driven memory kernel, not a reflective
 - full-text replay of arbitrary corpora on every run
 
 ## User-visible behavior
-- Operators can run `opendream-memory dream run` against transcript-only inputs and get durable memory.
+- Operators can run `opendream dream run` against transcript-only inputs and get durable memory.
 - `status` exposes dream state and last dream run information.
 - `MEMORY.md` stays lean while detail expands into topic files and optional compat views.
 
@@ -43,7 +43,7 @@ OpenDream currently behaves like an event-driven memory kernel, not a reflective
 - unit tests: yes, date normalization and dream state handling
 - integration tests: yes, transcript-only dream flow and custom-path flow
 - evals / scenario checks: no
-- manual verification: yes, run `opendream-memory dream run` on fixture transcripts
+- manual verification: yes, run `opendream dream run` on fixture transcripts
 
 ## Risks
 - dream scanning can become expensive if narrowing is not bounded

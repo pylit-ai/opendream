@@ -21,7 +21,7 @@ Promote the DreamRunner from a useful feature to the canonical runtime path. Reu
 - enrich dream audit summaries with bounded-search metadata and searched file lists
 
 ## Interfaces
-- input: `opendream-memory dream run|status|tick`
+- input: `opendream dream run|status|tick`
 - output: durable memory, compat views, dream audit summaries, and explicit scheduler-safe skip reasons
 
 ## Observability
@@ -47,9 +47,9 @@ Promote the DreamRunner from a useful feature to the canonical runtime path. Reu
 - run: `./.venv/bin/python -m unittest tests.test_memory_cli -v`
 - run: `make verify`
 - manual checks:
-  - run `opendream-memory dream run --workspace <path> --episodes <jsonl>`
-  - run `opendream-memory dream status --workspace <path>`
-  - run `opendream-memory dream tick --workspace <path>` with transcript files in `memory/state/transcripts/`
+  - run `opendream dream run --workspace <path> --episodes <jsonl>`
+  - run `opendream dream status --workspace <path>`
+  - run `opendream dream tick --workspace <path>` with transcript files in `memory/state/transcripts/`
 
 ## ADR needed?
 - no

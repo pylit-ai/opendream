@@ -3,7 +3,7 @@
 Reference only. Canonical behavior remains in `README.md` and `specs/403-406`.
 
 Before planning:
-`opendream-memory status --workspace "$OPENDREAM_WORKSPACE"`
+`opendream status --workspace "$OPENDREAM_WORKSPACE"`
 
 Inject memory:
-`opendream-memory prepare-context --workspace "$OPENDREAM_WORKSPACE" --query "$OPENCLAW_TASK" --include-global --global-workspace "$OPENDREAM_GLOBAL_WORKSPACE"`
+`opendream prepare-context --workspace "$OPENDREAM_WORKSPACE" --query "$OPENCLAW_TASK" --include-global --global-workspace "$OPENDREAM_GLOBAL_WORKSPACE"`

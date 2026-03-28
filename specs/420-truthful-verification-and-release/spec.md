@@ -28,7 +28,7 @@ Make verification and release authoritative for transcript-native dreaming
 - [x] AC-1: `make verify` emits `verification_report.json` and includes a `dream-fidelity-eval` stage
 - [x] AC-2: `make release-check` emits `release_manifest.json` and includes `cli-help`, `dream-run`, `eval-dream-fidelity`, and `verify-clean-venv`
 - [x] AC-3: release stages remain time-bounded and fail honestly on timeout or lock contention
-- [x] AC-4: clean-venv smoke can run `opendream-memory dream run` and `opendream-memory eval dream-fidelity`
+- [x] AC-4: clean-venv smoke can run `opendream dream run` and `opendream eval dream-fidelity`
 - [x] AC-5: release blocker resolution prefers `418-420` once those canonical task files exist
 - [x] AC-6: README verification and release language matches the actual scripted gates
 

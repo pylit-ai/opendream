@@ -19,7 +19,7 @@ Add a bounded DreamRunner on top of the existing event and consolidation runtime
 - add transcript/log episode fixture schema
 
 ## Interfaces
-- input: `opendream-memory dream run`, `status`, `tick`, transcript/log JSONL fixtures
+- input: `opendream dream run`, `status`, `tick`, transcript/log JSONL fixtures
 - output: durable memory, dream audits, status metadata, and compatibility markdown views
 
 ## Observability
@@ -45,7 +45,7 @@ Add a bounded DreamRunner on top of the existing event and consolidation runtime
 - run: `python3 -m unittest tests.test_memory_cli -v`
 - run: `make verify`
 - manual checks:
-  - run `opendream-memory dream run --episodes ...`
+  - run `opendream dream run --episodes ...`
   - inspect `status` and compat files
 
 ## ADR needed?

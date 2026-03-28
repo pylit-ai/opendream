@@ -11,7 +11,7 @@
 - [x] T3: implement episode ingestion for transcripts, logs, and existing events
 - [x] T4: implement DreamRunner with explicit phases and bounded signal gathering
 - [x] T5: add date normalization and dream status persistence
-- [x] T6: expose `opendream-memory dream run` and wire status or tick integration
+- [x] T6: expose `opendream dream run` and wire status or tick integration
 - [x] T7: add transcript-only, custom-path, and dream-lock tests
 - [x] T8: update README and architecture docs
 - [x] T9: run `make verify`

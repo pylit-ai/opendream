@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-COMMAND_RE = re.compile(r"\bopendream-memory\s+([a-z0-9-]+)")
+COMMAND_RE = re.compile(r"\bopendream\s+([a-z0-9-]+)")
 REQUIRED_FILES = [
     ".meta/spec-adapters/claude-code/README.md",
     ".meta/spec-adapters/claude-code/hooks/example-settings.json",

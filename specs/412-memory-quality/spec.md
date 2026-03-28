@@ -11,7 +11,7 @@ The current retrieval path is mostly lexical overlap plus recency, and consolida
 - semantic dedupe and candidate clustering
 - explicit `active`, `superseded`, `contested`, and `quarantined` durable statuses
 - structured retrieval explanations
-- deterministic eval corpus and `opendream-memory eval memory-quality`
+- deterministic eval corpus and `opendream eval memory-quality`
 
 ## Out of scope
 - remote embedding providers
@@ -40,7 +40,7 @@ The current retrieval path is mostly lexical overlap plus recency, and consolida
 - unit tests: yes, retrieval scoring, explanations, and contradiction states
 - integration tests: yes, noisy corpus consolidation and eval command
 - evals / scenario checks: yes, deterministic memory-quality eval corpus
-- manual verification: yes, run `opendream-memory eval memory-quality`
+- manual verification: yes, run `opendream eval memory-quality`
 
 ## Risks
 - hybrid scoring can become opaque if explanations are not kept in sync

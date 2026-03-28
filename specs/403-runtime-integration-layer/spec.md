@@ -23,9 +23,9 @@ OpenDream now has a working local memory engine, but practical day-to-day use st
 - A planner can request prompt-ready memory context for the next task rather than stitching together raw JSON manually.
 
 ## Acceptance criteria
-- [x] AC-1: `opendream-memory emit-event ...` appends a valid schema-compliant event directly to the workspace store
-- [x] AC-2: `opendream-memory maintain --workspace <path>` runs extract plus consolidate when work is pending and skips cleanly when nothing new qualifies
-- [x] AC-3: `opendream-memory prepare-context --workspace <path> --query "<text>"` returns selected memory ids plus a prompt-ready context block
+- [x] AC-1: `opendream emit-event ...` appends a valid schema-compliant event directly to the workspace store
+- [x] AC-2: `opendream maintain --workspace <path>` runs extract plus consolidate when work is pending and skips cleanly when nothing new qualifies
+- [x] AC-3: `opendream prepare-context --workspace <path> --query "<text>"` returns selected memory ids plus a prompt-ready context block
 - [x] AC-4: `make verify` includes automated coverage for event emission, maintenance scheduling behavior, and prompt-context rendering
 
 ## Edge cases
@@ -37,7 +37,7 @@ OpenDream now has a working local memory engine, but practical day-to-day use st
 - unit tests: yes, maintenance decision and prompt rendering logic
 - integration tests: yes, CLI emission and maintenance flows
 - evals / scenario checks: no
-- manual verification: yes, run `opendream-memory emit-event`, `maintain`, and `prepare-context` in a temp workspace
+- manual verification: yes, run `opendream emit-event`, `maintain`, and `prepare-context` in a temp workspace
 
 ## Risks
 - prompt-context rendering can become noisy if it dumps too much memory

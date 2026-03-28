@@ -10,7 +10,7 @@
 - [x] T2: implement hybrid retrieval with lexical, embedding-like, type, recency, and scope contributions
 - [x] T3: add candidate clustering, semantic dedupe, and contradiction handling
 - [x] T4: add structured retrieval explanations and audit payloads
-- [x] T5: add deterministic eval corpus plus `opendream-memory eval memory-quality`
+- [x] T5: add deterministic eval corpus plus `opendream eval memory-quality`
 - [x] T6: add paraphrase, contradiction, quarantine, and noisy-corpus tests
 - [x] T7: update README examples
 - [x] T8: run `make verify`

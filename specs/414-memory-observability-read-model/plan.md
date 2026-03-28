@@ -26,7 +26,7 @@ Build a typed, provenance-preserving read model on top of the existing filesyste
 
 ## Interfaces
 - new index/backfill command:
-  - `opendream-memory index-observability --workspace <path>`
+  - `opendream index-observability --workspace <path>`
 - optional output modes:
   - materialized JSON cache under the memory root
   - SQLite-backed read model for later APIs

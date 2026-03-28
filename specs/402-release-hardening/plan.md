@@ -18,7 +18,7 @@ Make the repository self-contained by moving runtime schema resolution to packag
 - runtime contract assets move from repo-relative proposal lookup to package-local lookup
 
 ## Interfaces
-- input: `pip install .`, `opendream-memory --help`, `opendream-memory demo --workspace <path>`
+- input: `pip install .`, `opendream --help`, `opendream demo --workspace <path>`
 - output: installed console entrypoint and deterministic demo artifacts
 
 ## Observability
@@ -48,7 +48,7 @@ Make the repository self-contained by moving runtime schema resolution to packag
 - run: `make verify`
 - manual checks:
   - create a clean venv and run `pip install .`
-  - run `opendream-memory --help`
+  - run `opendream --help`
 
 ## ADR needed?
 - no

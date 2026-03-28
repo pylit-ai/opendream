@@ -129,7 +129,7 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
         stages.append(
             run_stage(
                 "cli-help",
-                [str(venv_dir / scripts_dir / "opendream-memory"), "--help"],
+                [str(venv_dir / scripts_dir / "opendream"), "--help"],
                 cwd=temp_path,
                 timeout_seconds=timeout_seconds,
             )
@@ -140,7 +140,7 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
         stages.append(
             run_stage(
                 "demo",
-                [str(venv_dir / scripts_dir / "opendream-memory"), "demo", "--workspace", str(demo_workspace)],
+                [str(venv_dir / scripts_dir / "opendream"), "demo", "--workspace", str(demo_workspace)],
                 cwd=temp_path,
                 timeout_seconds=timeout_seconds,
             )
@@ -149,7 +149,7 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
             run_stage(
                 "dream-run",
                 [
-                    str(venv_dir / scripts_dir / "opendream-memory"),
+                    str(venv_dir / scripts_dir / "opendream"),
                     "dream",
                     "run",
                     "--workspace",
@@ -169,7 +169,7 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
             run_stage(
                 "eval-dream-fidelity",
                 [
-                    str(venv_dir / scripts_dir / "opendream-memory"),
+                    str(venv_dir / scripts_dir / "opendream"),
                     "eval",
                     "dream-fidelity",
                     "--workspace",

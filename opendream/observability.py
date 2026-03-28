@@ -128,7 +128,7 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
         "activation_diagnostics": {
             "auto_mode": True,
             "dream_state": store.load_dream_state(),
-            "manual_trigger": "opendream-memory dream run --workspace <path> --episodes <jsonl...>",
+            "manual_trigger": "opendream dream run --workspace <path> --episodes <jsonl...>",
             "queued_triggers": 0,
             "suppressed_trigger_reasons": [],
         },

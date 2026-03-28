@@ -7,8 +7,8 @@ Add a cron-safe scheduler tick and operator-visible status surface for OpenDream
 OpenDream has a local memory engine, runtime integration commands, and framework adapter packs. Operators still need a minimal scheduling and status surface so the system can run unattended in a boring, inspectable way. This change adds `tick` and `status` primitives rather than a heavyweight daemon.
 
 ## In scope
-- `opendream-memory tick`
-- `opendream-memory status`
+- `opendream tick`
+- `opendream status`
 - scheduler policy loading from store config
 - multi-store aware ticking
 - lock-state and last-run reporting
@@ -27,8 +27,8 @@ OpenDream has a local memory engine, runtime integration commands, and framework
 - Framework adapters can call `status` before prompting and `tick` after task completion or on cron.
 
 ## Acceptance criteria
-- [x] AC-1: `opendream-memory status --workspace <path>` returns pending events, pending candidates, last run time, and lock state
-- [x] AC-2: `opendream-memory tick --workspace <path>` is safe to call repeatedly and only runs maintenance when policy permits
+- [x] AC-1: `opendream status --workspace <path>` returns pending events, pending candidates, last run time, and lock state
+- [x] AC-2: `opendream tick --workspace <path>` is safe to call repeatedly and only runs maintenance when policy permits
 - [x] AC-3: `tick` supports multi-store manifests when layered stores are enabled
 - [x] AC-4: tests cover skip or run transitions, stale lock visibility, and repeated invocation
 - [x] AC-5: docs include runnable cron and hook examples using `tick` and `status`

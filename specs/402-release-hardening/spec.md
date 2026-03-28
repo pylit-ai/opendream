@@ -20,14 +20,14 @@ The runtime and tests currently depend on schema assets and repo layout assumpti
 
 ## User-visible behavior
 - A fresh checkout should pass `make verify` without recreating missing schema files.
-- `pip install .` should install the package and expose `opendream-memory`.
+- `pip install .` should install the package and expose `opendream`.
 - The installed CLI should run a deterministic demo without depending on repo-relative schema lookup.
 
 ## Acceptance criteria
 - [x] AC-1: runtime schema lookup resolves from packaged assets rather than `openspec/...` paths
 - [x] AC-2: canonical schema files exist under `specs/401-autodream-style-memory-subsystem/schema/`
-- [x] AC-3: `pip install .` succeeds in a clean virtual environment and `opendream-memory --help` works
-- [x] AC-4: install smoke test can run `opendream-memory demo --workspace <path>` and produce memory artifacts
+- [x] AC-3: `pip install .` succeeds in a clean virtual environment and `opendream --help` works
+- [x] AC-4: install smoke test can run `opendream demo --workspace <path>` and produce memory artifacts
 - [x] AC-5: release metadata exists for `LICENSE`, `CHANGELOG.md`, and `SECURITY.md`
 
 ## Edge cases
@@ -39,7 +39,7 @@ The runtime and tests currently depend on schema assets and repo layout assumpti
 - unit tests: yes, schema-presence and contract-drift checks
 - integration tests: yes, clean-venv install smoke test
 - evals / scenario checks: no
-- manual verification: yes, `make verify` and `opendream-memory --help` after local install
+- manual verification: yes, `make verify` and `opendream --help` after local install
 
 ## Risks
 - release metadata can imply a support or licensing posture that is broader than intended

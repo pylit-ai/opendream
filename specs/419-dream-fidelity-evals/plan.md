@@ -20,7 +20,7 @@ Add one explicit fidelity eval for the transcript-native DreamRunner rather than
 - add `eval dream-fidelity` JSON result contract with per-check booleans and embedded run summary
 
 ## Interfaces
-- input: `opendream-memory eval dream-fidelity --workspace <path>`
+- input: `opendream eval dream-fidelity --workspace <path>`
 - output: deterministic JSON verdict and check map
 
 ## Observability
@@ -46,7 +46,7 @@ Add one explicit fidelity eval for the transcript-native DreamRunner rather than
 - run: `./.venv/bin/python -m unittest tests.test_memory_cli tests.test_release_artifact -v`
 - run: `make verify`
 - manual checks:
-  - run `opendream-memory eval dream-fidelity --workspace <tmp> --compat-mode autodream`
+  - run `opendream eval dream-fidelity --workspace <tmp> --compat-mode autodream`
 
 ## ADR needed?
 - no

@@ -524,8 +524,8 @@ def command_observe_serve(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="opendream-memory")
-    parser.add_argument("--version", action="version", version=f"opendream-memory {__version__}")
+    parser = argparse.ArgumentParser(prog="opendream")
+    parser.add_argument("--version", action="version", version=f"opendream {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init")

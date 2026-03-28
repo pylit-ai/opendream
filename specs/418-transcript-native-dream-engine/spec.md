@@ -23,13 +23,13 @@ The thin integration layer in `403-runtime-integration-layer` and the first Drea
 - exact reproduction of private Anthropic heuristics
 
 ## User-visible behavior
-- `opendream-memory dream run` can create durable memory from transcript-only inputs.
-- `opendream-memory dream status` exposes `never_ran`, `dreaming`, and `idle` plus the last run summary.
-- `opendream-memory dream tick` can poll a transcript backlog safely and skip with explicit reasons when nothing new should run.
+- `opendream dream run` can create durable memory from transcript-only inputs.
+- `opendream dream status` exposes `never_ran`, `dreaming`, and `idle` plus the last run summary.
+- `opendream dream tick` can poll a transcript backlog safely and skip with explicit reasons when nothing new should run.
 - `MEMORY.md` stays lean while topic files and compat views hold the detail.
 
 ## Acceptance criteria
-- [x] AC-1: a transcript-only fixture with no structured `emit-event` usage still produces durable memory after `opendream-memory dream run`
+- [x] AC-1: a transcript-only fixture with no structured `emit-event` usage still produces durable memory after `opendream dream run`
 - [x] AC-2: dream runs emit the explicit four-phase lifecycle in their machine-readable summary
 - [x] AC-3: transcript relative dates are normalized to absolute dates in durable memory
 - [x] AC-4: `dream status` exposes `last_run_summary`, `last_run_reason`, `last_run_duration_ms`, and `last_episode_timestamp`
@@ -47,7 +47,7 @@ The thin integration layer in `403-runtime-integration-layer` and the first Drea
 ## Required verifiers
 - unit tests: yes, date normalization and dream-state persistence
 - integration tests: yes, transcript-only dream flow, `dream status`, `dream tick`, custom-path flow, and lock behavior
-- evals / scenario checks: yes, `opendream-memory eval dream-fidelity`
+- evals / scenario checks: yes, `opendream eval dream-fidelity`
 - manual verification: yes, run `dream run`, `dream status`, and `dream tick` against transcript fixtures
 
 ## Risks

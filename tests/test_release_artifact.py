@@ -43,7 +43,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
             scripts_dir = "Scripts" if os.name == "nt" else "bin"
             venv_python = venv_dir / scripts_dir / "python"
-            entrypoint = venv_dir / scripts_dir / "opendream-memory"
+            entrypoint = venv_dir / scripts_dir / "opendream"
             transcript_fixture.write_text(
                 (
                     '{"timestamp":"2026-03-26T09:00:00Z","speaker":"user","text":"Use pnpm in this repo."}\n'
@@ -67,7 +67,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-            self.assertIn("opendream-memory", help_run.stdout)
+            self.assertIn("opendream", help_run.stdout)
 
             demo_run = subprocess.run(
                 [str(entrypoint), "demo", "--workspace", str(workspace), "--now", FIXED_NOW],

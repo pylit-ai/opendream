@@ -31,7 +31,7 @@ OpenDream has a working local memory runtime plus a thin integration layer, but 
 - [x] AC-1: `.meta/spec-adapters/claude-code/README.md` exists with a runnable setup path using Claude hooks and skills
 - [x] AC-2: `.meta/spec-adapters/codex/README.md` exists with runnable setup using AGENTS layering and optional skill or wrapper integration
 - [x] AC-3: `.meta/spec-adapters/openclaw/README.md` exists with runnable event emission and context injection examples
-- [x] AC-4: each adapter pack includes at least one example payload or script that calls real `opendream-memory` commands
+- [x] AC-4: each adapter pack includes at least one example payload or script that calls real `opendream` commands
 - [x] AC-5: adapter files remain non-normative and point back to canonical sources rather than redefining policy
 - [x] AC-6: `make verify` includes adapter smoke checks
 
