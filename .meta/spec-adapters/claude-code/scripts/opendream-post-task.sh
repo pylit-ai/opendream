@@ -5,6 +5,6 @@ WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"
 SUMMARY="${1:-${OPENDREAM_SUMMARY:-Task completed.}}"
 MESSAGE_REF="${OPENDREAM_REF:-claude-post-task}"
 
-echo "[opendream] emit-event/tick $WORKSPACE" >&2
+echo "[opendream] emit-event/maintain $WORKSPACE" >&2
 opendream-memory emit-event --workspace "$WORKSPACE" --kind task_outcome --content "$SUMMARY" --message-ref "$MESSAGE_REF"
-opendream-memory tick --workspace "$WORKSPACE"
+opendream-memory maintain --workspace "$WORKSPACE"

@@ -9,4 +9,4 @@ Inject prompt-ready memory:
 `opendream-memory prepare-context --workspace "$OPENDREAM_WORKSPACE" --query "$OPENDREAM_QUERY"`
 
 After a task:
-`opendream-memory tick --workspace "$OPENDREAM_WORKSPACE"`
+`opendream-memory maintain --workspace "$OPENDREAM_WORKSPACE"`

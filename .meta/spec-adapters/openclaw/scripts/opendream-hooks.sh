@@ -17,12 +17,12 @@ case "$MODE" in
     fi
     ;;
   post-task)
-    echo "[opendream] emit-event/tick $WORKSPACE" >&2
+    echo "[opendream] emit-event/maintain $WORKSPACE" >&2
     opendream-memory emit-event --workspace "$WORKSPACE" --kind task_outcome --content "$PAYLOAD" --message-ref "${OPENCLAW_REF:-openclaw-post-task}"
     if [ -n "$GLOBAL" ]; then
-      opendream-memory tick --workspace "$WORKSPACE" --include-global --global-workspace "$GLOBAL"
+      opendream-memory maintain --workspace "$WORKSPACE" --include-global --global-workspace "$GLOBAL"
     else
-      opendream-memory tick --workspace "$WORKSPACE"
+      opendream-memory maintain --workspace "$WORKSPACE"
     fi
     ;;
   *)
