@@ -22,7 +22,7 @@ The **runtime** (hooks, scripts, IDE rules, or your own automation) decides **wh
 
 ## What’s in this repo
 
-- `opendream_memory/` — runtime package for events, candidates, consolidation, retrieval, and storage
+- `opendream/` — runtime package for events, candidates, consolidation, retrieval, and storage
 - `tests/` — fixture-driven integration and validation tests
 - `specs/401-autodream-style-memory-subsystem/` — canonical implementation spec
 - `openspec/changes/401-autodream-style-memory-subsystem/` — proposal bundle and design artifacts
@@ -45,7 +45,7 @@ opendream --help
 
 ## Operator path (install + smoke)
 
-Prefer the **console entrypoint** after install (`pyproject.toml` defines `opendream`). The **PyPI/pip** distribution name is `opendream`; importable Python code remains in package **`opendream_memory`** (so `python3 -m opendream_memory.cli` is only a fallback, not the primary UX).
+Prefer the **console entrypoint** after install (`pyproject.toml` defines `opendream`). The **PyPI distribution**, **Python package**, and **CLI** are all named **`opendream`** (`python3 -m opendream.cli` is the module fallback if the script is not on `PATH`).
 
 ### 1. Install the console entrypoint
 
@@ -142,7 +142,7 @@ make verify
 make release-check
 ```
 
-`make verify` runs `scripts/verify.py` (Ruff lint, mypy on `opendream_memory` and `scripts`, unit tests, `eval dream-fidelity`, adapter example integrity, packaging smoke). `make release-check` adds the full release gate (wheel/sdist, clean venv install, `dream run`, `eval dream-fidelity`, and `tests.test_release_artifact`).
+`make verify` runs `scripts/verify.py` (Ruff lint, mypy on `opendream` and `scripts`, unit tests, `eval dream-fidelity`, adapter example integrity, packaging smoke). `make release-check` adds the full release gate (wheel/sdist, clean venv install, `dream run`, `eval dream-fidelity`, and `tests.test_release_artifact`).
 
 **Verification limits:** This gate is **real** for CLI behavior and packaging, but it is still a **bounded** suite. It does not prove absence of every defect class you might care about in production. Treat failures as authoritative; treat PASS as “meets this repo’s bar,” not universal safety.
 
@@ -189,8 +189,8 @@ opendream observe serve --workspace .tmp/workspace --port 8000
 **Module fallback** (editable checkout without console script on `PATH`):
 
 ```bash
-python3 -m opendream_memory.cli --help
-python3 -m opendream_memory.cli init --workspace .tmp/workspace
+python3 -m opendream.cli --help
+python3 -m opendream.cli init --workspace .tmp/workspace
 # …same subcommands as opendream …
 ```
 
@@ -199,7 +199,7 @@ python3 -m opendream_memory.cli init --workspace .tmp/workspace
 OpenDream is only "verified" when the scripted gate passes. The gate emits `.tmp/verification/verification_report.json` with per-stage PASS or FAIL evidence.
 
 - `make lint` — Ruff (`scripts/lint.py`)
-- `make typecheck` — mypy on `opendream_memory` and `scripts` (`scripts/typecheck.py`)
+- `make typecheck` — mypy on `opendream` and `scripts` (`scripts/typecheck.py`)
 - `make test` — unit tests
 - `make verify` — `scripts/verify.py` (lint, typecheck, tests, `eval dream-fidelity`, `scripts/check_adapters.py`, packaging smoke)
 - `make release-check` — authoritative release gate: artifacts, clean venv install, `dream run`, `eval dream-fidelity`, verification replay

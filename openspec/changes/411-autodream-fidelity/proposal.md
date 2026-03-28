@@ -12,4 +12,4 @@ The implementation behaves more like a memory kernel than a reflective DreamRunn
 
 ## Impact
 - Affected specs: `411-autodream-fidelity`
-- Affected code: `opendream_memory/`, `tests/`, `README.md`, `docs/architecture/overview.md`
+- Affected code: `opendream/`, `tests/`, `README.md`, `docs/architecture/overview.md`

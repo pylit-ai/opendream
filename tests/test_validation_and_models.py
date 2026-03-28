@@ -5,8 +5,8 @@ import random
 import unittest
 from pathlib import Path
 
-from opendream_memory.extractor import extract_candidates
-from opendream_memory.validation import SchemaValidationError, validate_document
+from opendream.extractor import extract_candidates
+from opendream.validation import SchemaValidationError, validate_document
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXED_NOW = "2026-03-26T12:00:00Z"

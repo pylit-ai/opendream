@@ -5,8 +5,8 @@ Make the repository self-contained by moving runtime schema resolution to packag
 
 ## Architecture impact
 - touched components:
-  - `opendream_memory.util` and `opendream_memory.validation`
-  - packaged schema assets under `opendream_memory/schema/`
+  - `opendream.util` and `opendream.validation`
+  - packaged schema assets under `opendream/schema/`
   - canonical schema copies under `specs/401-autodream-style-memory-subsystem/schema/`
   - release metadata and packaging files at repo root
   - verification tests covering schema presence and installed CLI behavior

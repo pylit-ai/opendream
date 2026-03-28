@@ -11,4 +11,4 @@ A release gate that hangs or only passes in fragments is not a release gate. It 
 
 ## Impact
 - Affected specs: `413-authoritative-release-gate`
-- Affected code: `scripts/`, `Makefile`, `tests/`, `opendream_memory/`, `README.md`
+- Affected code: `scripts/`, `Makefile`, `tests/`, `opendream/`, `README.md`

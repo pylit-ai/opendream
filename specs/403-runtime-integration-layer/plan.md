@@ -5,7 +5,7 @@ Implement a thin integration layer in the existing CLI and runtime package. Keep
 
 ## Architecture impact
 - touched components:
-  - `opendream_memory.cli`
+  - `opendream.cli`
   - new integration helpers for maintenance and prompt rendering
   - tests and README examples
 - unchanged components:

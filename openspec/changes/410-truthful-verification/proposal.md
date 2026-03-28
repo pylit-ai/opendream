@@ -12,4 +12,4 @@ The current verification story is flattering to itself. Syntax survival is being
 
 ## Impact
 - Affected specs: `410-truthful-verification`
-- Affected code: `scripts/`, `Makefile`, `pyproject.toml`, `opendream_memory/`, `tests/`, `README.md`
+- Affected code: `scripts/`, `Makefile`, `pyproject.toml`, `opendream/`, `tests/`, `README.md`

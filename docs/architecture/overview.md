@@ -4,13 +4,13 @@
 Enduring technical structure of the system. Task-level implementation detail belongs in specs and plans.
 
 ## High-level components
-- `opendream_memory.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, dreaming, retrieval, evaluation, and release-oriented verification hooks
-- `opendream_memory.storage` — filesystem-backed memory store, lock handling, custom memory-root routing, markdown generation, and audit artifact emission
-- `opendream_memory.extractor` — deterministic conversion from immutable events into typed memory candidates
-- `opendream_memory.bootstrap` — first-pass historical indexing that stages candidates and category inventory without durable apply
-- `opendream_memory.consolidator` — single-writer durable-memory maintenance, supersession, contradiction handling, decay, and startup-index generation
-- `opendream_memory.dream` + `opendream_memory.episodes` — transcript and log ingestion plus four-phase reflective dreaming
-- `opendream_memory.retriever` — hybrid retrieval with lexical, semantic, scope, recency, and type-aware scoring plus structured retrieval explanations
+- `opendream.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, dreaming, retrieval, evaluation, and release-oriented verification hooks
+- `opendream.storage` — filesystem-backed memory store, lock handling, custom memory-root routing, markdown generation, and audit artifact emission
+- `opendream.extractor` — deterministic conversion from immutable events into typed memory candidates
+- `opendream.bootstrap` — first-pass historical indexing that stages candidates and category inventory without durable apply
+- `opendream.consolidator` — single-writer durable-memory maintenance, supersession, contradiction handling, decay, and startup-index generation
+- `opendream.dream` + `opendream.episodes` — transcript and log ingestion plus four-phase reflective dreaming
+- `opendream.retriever` — hybrid retrieval with lexical, semantic, scope, recency, and type-aware scoring plus structured retrieval explanations
 - `tests/fixtures/` + `tests/` — reproducible corpora and end-to-end verification harness for the subsystem
 
 ## Data flow

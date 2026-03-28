@@ -5,9 +5,9 @@ Add a thin scheduler and status layer on top of `maintain` rather than a long-ru
 
 ## Architecture impact
 - touched components:
-  - `opendream_memory.cli`
-  - `opendream_memory.integration`
-  - `opendream_memory.storage`
+  - `opendream.cli`
+  - `opendream.integration`
+  - `opendream.storage`
   - tests
   - `README.md`
   - adapter pack scripts and snippets

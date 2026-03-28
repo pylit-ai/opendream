@@ -33,7 +33,7 @@ REQUIRED_FILES = [
 
 
 def cli_commands() -> set[str]:
-    from opendream_memory.cli import build_parser
+    from opendream.cli import build_parser
 
     parser = build_parser()
     for action in parser._actions:

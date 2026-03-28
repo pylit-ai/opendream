@@ -8,10 +8,10 @@ import unittest
 import urllib.request
 from pathlib import Path
 
-from opendream_memory.integration import emit_event, maintain, prepare_context
-from opendream_memory.observability import index_observability
-from opendream_memory.storage import MemoryStore
-from opendream_memory.webapp import build_server
+from opendream.integration import emit_event, maintain, prepare_context
+from opendream.observability import index_observability
+from opendream.storage import MemoryStore
+from opendream.webapp import build_server
 
 FIXED_NOW = "2026-03-27T12:00:00Z"
 

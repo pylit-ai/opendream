@@ -5,7 +5,7 @@ Build a typed, provenance-preserving read model on top of the existing filesyste
 
 ## Architecture impact
 - touched components:
-  - `opendream_memory.models`
+  - `opendream.models`
   - storage and audit artifact readers
   - new read-model indexer or cache builder
   - tests and fixtures

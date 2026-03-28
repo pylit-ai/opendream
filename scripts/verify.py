@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from opendream_memory.util import write_json
+from opendream.util import write_json
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPORT_PATH = REPO_ROOT / ".tmp" / "verification" / "verification_report.json"
@@ -76,7 +76,7 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
             [
                 sys.executable,
                 "-m",
-                "opendream_memory.cli",
+                "opendream.cli",
                 "eval",
                 "dream-fidelity",
                 "--workspace",

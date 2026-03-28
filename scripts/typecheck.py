@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def main() -> int:
     result = subprocess.run(
-        [sys.executable, "-m", "mypy", "opendream_memory", "scripts"],
+        [sys.executable, "-m", "mypy", "opendream", "scripts"],
         cwd=REPO_ROOT,
         text=True,
     )

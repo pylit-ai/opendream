@@ -24,10 +24,10 @@ The repo now contains a proposal-grade OpenSpec bundle for durable agent memory,
 - When the consolidator runs, it should write only inside the memory store and emit audit artifacts.
 
 ## Acceptance criteria
-- [x] AC-1: `python3 -m opendream_memory.cli demo --workspace <path>` produces `memory/MEMORY.md`, topic markdown files, candidate/event JSONL, and audit outputs in a deterministic local run.
-- [x] AC-2: `python3 -m opendream_memory.cli bootstrap-index --workspace <path> --events <file>` produces category inventory and candidate artifacts without mutating durable topic memory before consolidation.
-- [x] AC-3: `python3 -m opendream_memory.cli consolidate --workspace <path>` enforces single-writer locking and writes only inside the memory store.
-- [x] AC-4: `python3 -m opendream_memory.cli retrieve --workspace <path> --query "<text>"` returns relevant durable memory with scores and emits retrieval audit output.
+- [x] AC-1: `python3 -m opendream.cli demo --workspace <path>` produces `memory/MEMORY.md`, topic markdown files, candidate/event JSONL, and audit outputs in a deterministic local run.
+- [x] AC-2: `python3 -m opendream.cli bootstrap-index --workspace <path> --events <file>` produces category inventory and candidate artifacts without mutating durable topic memory before consolidation.
+- [x] AC-3: `python3 -m opendream.cli consolidate --workspace <path>` enforces single-writer locking and writes only inside the memory store.
+- [x] AC-4: `python3 -m opendream.cli retrieve --workspace <path> --query "<text>"` returns relevant durable memory with scores and emits retrieval audit output.
 - [x] AC-5: `make verify` passes and includes automated coverage for deterministic consolidation, contradiction handling, bootstrap staging, retrieval, and concurrency safety.
 
 ## Edge cases
@@ -40,7 +40,7 @@ The repo now contains a proposal-grade OpenSpec bundle for durable agent memory,
 - unit tests: yes, deterministic logic for extraction, consolidation, retrieval, and validation
 - integration tests: yes, CLI end-to-end workflows on fixture corpora
 - evals / scenario checks: yes, acceptance-style fixture flows for bootstrap and recurring workflows
-- manual verification: yes, run `make verify` and `python3 -m opendream_memory.cli demo --workspace .tmp/demo`
+- manual verification: yes, run `make verify` and `python3 -m opendream.cli demo --workspace .tmp/demo`
 
 ## Risks
 - markdown generation and durable state can drift if both are not produced from the same canonical records

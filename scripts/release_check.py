@@ -11,8 +11,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from opendream_memory.storage import FileLock, LockError
-from opendream_memory.util import sha256_path, write_json
+from opendream.storage import FileLock, LockError
+from opendream.util import sha256_path, write_json
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT_ROOT = REPO_ROOT / ".tmp" / "release-check"

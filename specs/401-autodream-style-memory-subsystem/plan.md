@@ -5,7 +5,7 @@ Implement the subsystem as a standard-library Python package with a small CLI an
 
 ## Architecture impact
 - touched components:
-  - new Python runtime under `src/opendream_memory/`
+  - new Python runtime under `src/opendream/`
   - new automated tests and fixtures under `tests/`
   - repository commands in `Makefile`
   - canonical spec bundle for this change

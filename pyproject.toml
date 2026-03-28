@@ -42,28 +42,28 @@ dev = [
 ]
 
 [project.scripts]
-opendream = "opendream_memory.cli:main"
+opendream = "opendream.cli:main"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["opendream_memory*"]
+include = ["opendream*"]
 
 [tool.setuptools.package-data]
-opendream_memory = ["schema/*.json", "fixtures/*.json", "fixtures/*.jsonl"]
+opendream = ["schema/*.json", "fixtures/*.json", "fixtures/*.jsonl"]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-extend-exclude = ["dist", ".tmp", "opendream_memory/webapp.py"]
+extend-exclude = ["dist", ".tmp", "opendream/webapp.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B", "UP", "SIM"]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["opendream_memory", "scripts"]
+files = ["opendream", "scripts"]
 pretty = true
 show_error_codes = true
 check_untyped_defs = true
@@ -72,8 +72,8 @@ warn_redundant_casts = true
 warn_return_any = true
 no_implicit_optional = true
 disallow_any_generics = true
-exclude = ["^dist/", "^\\.tmp/", "^opendream_memory/webapp\\.py$", "^opendream_memory/observability\\.py$"]
+exclude = ["^dist/", "^\\.tmp/", "^opendream/webapp\\.py$", "^opendream/observability\\.py$"]
 
 [[tool.mypy.overrides]]
-module = ["opendream_memory.webapp", "opendream_memory.observability", "tests.*"]
+module = ["opendream.webapp", "opendream.observability", "tests.*"]
 ignore_errors = true

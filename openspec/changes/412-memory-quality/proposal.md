@@ -11,4 +11,4 @@ Even with dream ingestion, the repo does not deserve a release label if retrieva
 
 ## Impact
 - Affected specs: `412-memory-quality`
-- Affected code: `opendream_memory/retriever.py`, `opendream_memory/consolidator.py`, `tests/`, `README.md`
+- Affected code: `opendream/retriever.py`, `opendream/consolidator.py`, `tests/`, `README.md`

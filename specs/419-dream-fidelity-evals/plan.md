@@ -5,9 +5,9 @@ Add one explicit fidelity eval for the transcript-native DreamRunner rather than
 
 ## Architecture impact
 - touched components:
-  - `opendream_memory.evaluation`
-  - `opendream_memory.cli`
-  - packaged fixtures under `opendream_memory/fixtures/`
+  - `opendream.evaluation`
+  - `opendream.cli`
+  - packaged fixtures under `opendream/fixtures/`
   - `tests/test_memory_cli.py`
   - `tests/test_release_artifact.py`
   - `README.md`

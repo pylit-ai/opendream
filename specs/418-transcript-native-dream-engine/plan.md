@@ -5,10 +5,10 @@ Promote the DreamRunner from a useful feature to the canonical runtime path. Reu
 
 ## Architecture impact
 - touched components:
-  - `opendream_memory.dream`
-  - `opendream_memory.episodes`
-  - `opendream_memory.storage`
-  - `opendream_memory.cli`
+  - `opendream.dream`
+  - `opendream.episodes`
+  - `opendream.storage`
+  - `opendream.cli`
   - `tests/test_memory_cli.py`
   - `README.md`
 - unchanged components:

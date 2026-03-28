@@ -41,7 +41,7 @@ dev: demo
 
 demo:
 	@rm -rf $(DEMO_WORKSPACE)
-	@$(PYTHON) -m opendream_memory.cli demo --workspace $(DEMO_WORKSPACE) --now $(FIXED_NOW)
+	@$(PYTHON) -m opendream.cli demo --workspace $(DEMO_WORKSPACE) --now $(FIXED_NOW)
 
 test:
 	@$(PYTHON) -m unittest discover -s tests -v

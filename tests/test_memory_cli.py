@@ -10,9 +10,9 @@ import time
 import unittest
 from pathlib import Path
 
-from opendream_memory.consolidator import consolidate
-from opendream_memory.storage import MemoryStore
-from opendream_memory.validation import validate_document
+from opendream.consolidator import consolidate
+from opendream.storage import MemoryStore
+from opendream.validation import validate_document
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXED_NOW = "2026-03-26T12:00:00Z"
@@ -20,7 +20,7 @@ FIXED_NOW = "2026-03-26T12:00:00Z"
 
 def run_cli_raw(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "opendream_memory.cli", *args],
+        [sys.executable, "-m", "opendream.cli", *args],
         cwd=cwd or REPO_ROOT,
         check=check,
         capture_output=True,

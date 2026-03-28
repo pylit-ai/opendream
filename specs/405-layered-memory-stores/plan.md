@@ -5,9 +5,9 @@ Extend the runtime from single-store operation to explicit store kinds and store
 
 ## Architecture impact
 - touched components:
-  - `opendream_memory.storage`
-  - `opendream_memory.integration`
-  - `opendream_memory.cli`
+  - `opendream.storage`
+  - `opendream.integration`
+  - `opendream.cli`
   - tests and fixtures
   - `README.md`
   - `docs/adr/ADR-002-layered-memory-store-precedence.md`
