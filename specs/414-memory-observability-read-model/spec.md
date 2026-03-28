@@ -26,11 +26,11 @@ OpenDream now has a local memory runtime, layered stores, and scheduler visibili
 - Derived objects always point back to source artifact paths and object IDs.
 
 ## Acceptance criteria
-- [ ] AC-1: read-model schemas exist for `ContextAssembly`, `ConsolidationOp`, `Annotation`, `ReviewDecision`, and `PhaseTrace`
-- [ ] AC-2: a backfill command can index existing artifacts without mutating source memory files
-- [ ] AC-3: indexed records preserve provenance to source paths, run IDs, session IDs, and memory IDs where applicable
-- [ ] AC-4: broken or partial artifacts are tolerated and surfaced as warnings instead of crashing indexing
-- [ ] AC-5: overview aggregates expose current lock state, last run, recent sessions, recent runs, and counts by memory type and status
+- [x] AC-1: read-model schemas exist for `ContextAssembly`, `ConsolidationOp`, `Annotation`, `ReviewDecision`, and `PhaseTrace`
+- [x] AC-2: a backfill command can index existing artifacts without mutating source memory files
+- [x] AC-3: indexed records preserve provenance to source paths, run IDs, session IDs, and memory IDs where applicable
+- [x] AC-4: broken or partial artifacts are tolerated and surfaced as warnings instead of crashing indexing
+- [x] AC-5: overview aggregates expose current lock state, last run, recent sessions, recent runs, and counts by memory type and status
 
 ## Edge cases
 - missing retrieval or consolidation audit files

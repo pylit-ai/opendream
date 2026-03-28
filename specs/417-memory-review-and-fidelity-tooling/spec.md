@@ -27,11 +27,11 @@ The MVP UI makes current state visible, but the point of this product is not gen
 - Review actions, annotations, exports, and escalations remain explicit and auditable.
 
 ## Acceptance criteria
-- [ ] AC-1: review queue categories and actions exist with actor, rationale, and timestamp capture
-- [ ] AC-2: run detail exposes the explicit four-phase dream lifecycle with inputs, outputs, durations, warnings, and files consulted
-- [ ] AC-3: fidelity diagnostics expose transcript-vs-event coverage, activation diagnostics, and startup-index budget growth over time
-- [ ] AC-4: provenance graph supports focused neighborhood expansion, temporal filtering, side panels, and subgraph export without rendering the whole corpus
-- [ ] AC-5: eval and export surfaces support reproducible offline analysis with redaction and audit constraints
+- [x] AC-1: review queue categories and actions exist with actor, rationale, and timestamp capture
+- [x] AC-2: run detail exposes the explicit four-phase dream lifecycle with inputs, outputs, durations, warnings, and files consulted
+- [x] AC-3: fidelity diagnostics expose transcript-vs-event coverage, activation diagnostics, and startup-index budget growth over time
+- [x] AC-4: provenance graph supports focused neighborhood expansion, temporal filtering, side panels, and subgraph export without rendering the whole corpus
+- [x] AC-5: eval and export surfaces support reproducible offline analysis with redaction and audit constraints
 
 ## Edge cases
 - review actions against already-superseded records

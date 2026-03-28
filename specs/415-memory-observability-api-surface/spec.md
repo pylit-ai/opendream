@@ -26,11 +26,11 @@ The read model alone does not make the system inspectable by humans or tools. Op
 - Real-time consumers can observe active runs and lock state without polling raw files.
 
 ## Acceptance criteria
-- [ ] AC-1: read endpoints exist for overview, memories, runs, retrievals, sessions, context, reviews, evals, exports, and lineage
-- [ ] AC-2: filtering and pagination support memory explorer requirements including type, scope, status, salience, confidence, and time windows
-- [ ] AC-3: review and annotation writes require actor metadata and emit audit records
-- [ ] AC-4: API responses preserve provenance and never invent data not present in the read model or source artifacts
-- [ ] AC-5: real-time updates expose active run status, lock state, and newly completed retrievals
+- [x] AC-1: read endpoints exist for overview, memories, runs, retrievals, sessions, context, reviews, evals, exports, and lineage
+- [x] AC-2: filtering and pagination support memory explorer requirements including type, scope, status, salience, confidence, and time windows
+- [x] AC-3: review and annotation writes require actor metadata and emit audit records
+- [x] AC-4: API responses preserve provenance and never invent data not present in the read model or source artifacts
+- [x] AC-5: real-time updates expose active run status, lock state, and newly completed retrievals
 
 ## Edge cases
 - page requests against empty stores

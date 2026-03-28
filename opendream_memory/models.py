@@ -102,3 +102,91 @@ class ConsolidationOperation:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class ContextAssembly:
+    context_id: str
+    session_id: str
+    turn_id: str
+    retrieval_run_id: str
+    startup_index_snapshot: list[dict[str, Any]]
+    selected_memory_ids: list[str]
+    omitted_memory_ids: list[str]
+    omission_reasons: list[dict[str, Any]]
+    assembled_text: str
+    character_count: int
+    token_estimate: int
+    created_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class ObservabilityConsolidationOp:
+    id: str
+    run_id: str
+    phase: str
+    op_type: str
+    target_memory_id: str | None
+    source_candidate_ids: list[str]
+    before_snapshot: dict[str, Any]
+    after_snapshot: dict[str, Any]
+    reason: str
+    created_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class Annotation:
+    id: str
+    object_type: str
+    object_id: str
+    actor: str
+    label: str
+    score: float | None
+    note: str
+    created_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        if self.score is None:
+            payload.pop("score")
+        return payload
+
+
+@dataclass(slots=True)
+class ReviewDecision:
+    id: str
+    queue_item_type: str
+    queue_item_id: str
+    action: str
+    rationale: str
+    actor: str
+    created_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class PhaseTrace:
+    id: str
+    run_id: str
+    phase: str
+    started_at: str
+    ended_at: str
+    inputs_count: int
+    outputs_count: int
+    warning_count: int
+    error_count: int
+    files_consulted: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        if not self.files_consulted:
+            payload.pop("files_consulted")
+        return payload

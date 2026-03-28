@@ -27,11 +27,11 @@ The observability APIs still leave operators reading JSON. OpenDream needs a des
 - The app remains useful on large local datasets through indexed queries and capped graph behavior.
 
 ## Acceptance criteria
-- [ ] AC-1: routes exist for overview, memories, memory detail, sessions, session detail, runs, run detail, retrievals, retrieval detail, context detail, reviews, evals, exports, graph, and settings
-- [ ] AC-2: memory explorer supports full-text search, filters, sorting, split-pane detail, compare, visible status badges, and raw JSON
-- [ ] AC-3: consolidation inspector shows the phase timeline, op log, diff viewer, and cross-links to source candidates and resulting records
-- [ ] AC-4: retrieval detail and context viewer show selected memory objects, assembled context payload, omitted candidates, and omission reasons
-- [ ] AC-5: session timeline renders user turns, assistant turns, tool calls, retrievals, consolidation triggers, consolidation ops, and annotations chronologically
+- [x] AC-1: routes exist for overview, memories, memory detail, sessions, session detail, runs, run detail, retrievals, retrieval detail, context detail, reviews, evals, exports, graph, and settings
+- [x] AC-2: memory explorer supports full-text search, filters, sorting, split-pane detail, compare, visible status badges, and raw JSON
+- [x] AC-3: consolidation inspector shows the phase timeline, op log, diff viewer, and cross-links to source candidates and resulting records
+- [x] AC-4: retrieval detail and context viewer show selected memory objects, assembled context payload, omitted candidates, and omission reasons
+- [x] AC-5: session timeline renders user turns, assistant turns, tool calls, retrievals, consolidation triggers, consolidation ops, and annotations chronologically
 
 ## Edge cases
 - datasets with 10k memories and 100k events
