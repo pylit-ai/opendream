@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import time
-from collections import Counter, defaultdict
-from datetime import timedelta
 from typing import Any
 
 from .models import ConsolidationOperation, MemoryRecord, StartupIndexEntry
+from .planner import build_plan
 from .storage import LockError, MemoryStore
-from .util import parse_timestamp, semantic_tokens, stable_id, summarize, to_iso, utc_now
+from .util import semantic_tokens, stable_id, summarize, to_iso, utc_now
+from .verifier import verify_plan
 
 SUPERSEDE_TYPES = {"project_decision", "environment_requirement", "user_preference"}
 INDEX_TYPE_BOOSTS = {
@@ -119,10 +119,6 @@ def _make_operation(
     )
 
 
-def _same_body(existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
-    return str(existing["body"]).strip() == str(candidate["body"]).strip()
-
-
 def _build_startup_index(records: list[dict[str, Any]]) -> list[StartupIndexEntry]:
     entries: list[StartupIndexEntry] = []
     for record in records:
@@ -192,17 +188,18 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
         pending_candidates,
         float(store.config["retrieval"]["semantic_merge_threshold"]),
     )
-    existing_lookup = {
-        (item["scope"], item["type"], item["title"]): item
-        for item in existing_records
-        if item["status"] == "active"
-    }
-    workflow_evidence: Counter[tuple[str, str]] = Counter()
-    workflow_events: dict[tuple[str, str], set[str]] = defaultdict(set)
-    threshold = int(store.config["promotion"]["workflow_min_successful_recalls"])
-    candidate_ttl_days = int(store.config["retention"]["candidate_ttl_days"])
-    processed_candidate_ids: list[str] = []
-    operations: list[ConsolidationOperation] = []
+
+    plan = build_plan(
+        store,
+        run_id=run_id,
+        now=now,
+        pending_candidates=pending_candidates,
+        existing_records=existing_records,
+    )
+    plan_path = store.write_plan_audit(run_id, plan)
+    report = verify_plan(store, run_id=run_id, now=now, plan=plan, existing_records=existing_records)
+    report_path = store.write_verifier_report(run_id, report)
+
     summary = {
         "run_id": run_id,
         "generated_at": now,
@@ -213,237 +210,37 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
         "contested": 0,
         "quarantined": 0,
         "deleted": 0,
+        "planner_mode": plan.get("planner_mode", "builtin"),
+        "verifier_mode": report.get("verifier_mode", "builtin"),
+        "planner_artifact": str(plan_path.relative_to(store.workspace)),
+        "verifier_artifact": str(report_path.relative_to(store.workspace)),
+        "review_action_count": len(report.get("review_action_ids", [])),
+        "blocked_action_count": len(report.get("blocked_action_ids", [])),
     }
 
-    for record in existing_records:
-        if record["type"] == "procedural_workflow":
-            workflow_key = (record["scope"], record["title"])
-            workflow_evidence[workflow_key] += len(set(record["source_event_ids"]))
-            workflow_events[workflow_key].update(record["source_event_ids"])
+    if report.get("commit_verdict") == "block":
+        summary["status"] = "blocked"
+        summary["reason"] = "verifier-blocked"
+        summary["startup_index_entries"] = len(store.load_startup_index().get("entries", []))
+        summary["audit"] = store.write_consolidation_audit(run_id, [], summary, before_snapshot)
+        return summary
 
-    for candidate in pending_candidates:
-        if candidate["type"] == "procedural_workflow":
-            workflow_key = (candidate["scope"], candidate["title"])
-            workflow_evidence[workflow_key] += len(set(candidate["derived_from_event_ids"]))
-            workflow_events[workflow_key].update(candidate["derived_from_event_ids"])
+    operations: list[ConsolidationOperation] = []
+    processed_candidate_ids = [
+        action["payload"]["candidate"]["candidate_id"]
+        for action in plan.get("actions", [])
+        if isinstance(action.get("payload"), dict) and isinstance(action["payload"].get("candidate"), dict)
+    ]
 
-    for candidate in pending_candidates:
-        processed_candidate_ids.append(candidate["candidate_id"])
-        candidate_age = parse_timestamp(now) - parse_timestamp(candidate["created_at"])
-        if candidate_age > timedelta(days=candidate_ttl_days):
-            _bump(summary, "quarantined")
-            operations.append(
-                _make_operation(
-                    run_id,
-                    "quarantine",
-                    candidate["candidate_id"],
-                    "candidate expired before consolidation",
-                    candidate["derived_from_event_ids"],
-                    now=now,
-                )
-            )
-            continue
-
-        if candidate["confidence"] < 0.45:
-            _bump(summary, "quarantined")
-            operations.append(
-                _make_operation(
-                    run_id,
-                    "quarantine",
-                    candidate["candidate_id"],
-                    "candidate confidence below promotion threshold",
-                    candidate["derived_from_event_ids"],
-                    now=now,
-                )
-            )
-            continue
-
-        lookup_key = (candidate["scope"], candidate["type"], candidate["title"])
-        existing = existing_lookup.get(lookup_key)
-
-        if candidate["type"] == "procedural_workflow":
-            workflow_key = (candidate["scope"], candidate["title"])
-            if workflow_evidence[workflow_key] < threshold:
-                _bump(summary, "quarantined")
-                operations.append(
-                    _make_operation(
-                        run_id,
-                        "quarantine",
-                        candidate["candidate_id"],
-                        "workflow requires repeated successful evidence before promotion",
-                        candidate["derived_from_event_ids"],
-                        now=now,
-                    )
-                )
-                continue
-
-        if candidate["type"] == "contested_fact":
-            if existing:
-                existing["source_event_ids"] = sorted(
-                    set(existing["source_event_ids"]) | set(candidate["derived_from_event_ids"])
-                )
-                existing["conflicts_with"] = sorted(
-                    set(existing["conflicts_with"]) | set(candidate.get("conflicts_with", []))
-                )
-                existing["status"] = "contested"
-                existing["updated_at"] = now
-                _bump(summary, "contested")
-                operations.append(
-                    _make_operation(
-                        run_id,
-                        "mark_contested",
-                        existing["memory_id"],
-                        "updated contested memory with new evidence",
-                        candidate["derived_from_event_ids"],
-                        now=now,
-                    )
-                )
-            else:
-                record = _record_from_candidate(candidate, now=now, status="contested")
-                existing_records.append(record)
-                existing_lookup[lookup_key] = record
-                _bump(summary, "contested")
-                operations.append(
-                    _make_operation(
-                        run_id,
-                        "mark_contested",
-                        record["memory_id"],
-                        "created contested memory from contradiction signal",
-                        candidate["derived_from_event_ids"],
-                        now=now,
-                    )
-                )
-            continue
-
-        if existing and _same_body(existing, candidate):
-            existing["source_event_ids"] = sorted(
-                set(existing["source_event_ids"]) | set(candidate["derived_from_event_ids"])
-            )
-            existing["conflicts_with"] = sorted(
-                set(existing["conflicts_with"]) | set(candidate.get("conflicts_with", []))
-            )
-            existing["confidence"] = round(max(existing["confidence"], candidate["confidence"]), 2)
-            existing["salience"] = round(max(existing["salience"], candidate["salience"]), 2)
-            existing["updated_at"] = now
-            _bump(summary, "updated")
-            operations.append(
-                _make_operation(
-                    run_id,
-                    "update",
-                    existing["memory_id"],
-                    "merged duplicate durable evidence",
-                    candidate["derived_from_event_ids"],
-                    now=now,
-                )
-            )
-            continue
-
-        if existing and candidate["type"] in SUPERSEDE_TYPES:
-            existing["status"] = "superseded"
-            existing["valid_to"] = now
-            existing["updated_at"] = now
-            new_record = _record_from_candidate(candidate, now=now, supersedes=[existing["memory_id"]])
-            existing_records.append(new_record)
-            existing_lookup[lookup_key] = new_record
-            _bump(summary, "superseded")
-            _bump(summary, "created")
-            operations.append(
-                _make_operation(
-                    run_id,
-                    "supersede",
-                    existing["memory_id"],
-                    "superseded by stronger or newer explicit durable memory",
-                    candidate["derived_from_event_ids"],
-                    now=now,
-                    payload={"replacement_id": new_record["memory_id"]},
-                )
-            )
-            operations.append(
-                _make_operation(
-                    run_id,
-                    "create",
-                    new_record["memory_id"],
-                    "created replacement durable memory",
-                    candidate["derived_from_event_ids"],
-                    now=now,
-                )
-            )
-            continue
-
-        if existing and candidate["type"] not in SUPERSEDE_TYPES:
-            contested = _record_from_candidate(
-                candidate,
-                now=now,
-                status="contested",
-                conflicts_with=[existing["memory_id"], *candidate.get("conflicts_with", [])],
-            )
-            existing_records.append(contested)
-            _bump(summary, "contested")
-            operations.append(
-                _make_operation(
-                    run_id,
-                    "mark_contested",
-                    contested["memory_id"],
-                    "conflicting evidence kept as contested memory",
-                    candidate["derived_from_event_ids"],
-                    now=now,
-                )
-            )
-            continue
-
-        new_record = _record_from_candidate(candidate, now=now)
-        if candidate["type"] == "procedural_workflow":
-            workflow_key = (candidate["scope"], candidate["title"])
-            new_record["source_event_ids"] = sorted(workflow_events[workflow_key])
-        existing_records.append(new_record)
-        existing_lookup[lookup_key] = new_record
-        _bump(summary, "created")
-        operations.append(
-            _make_operation(
-                run_id,
-                "create",
-                new_record["memory_id"],
-                "created new durable memory",
-                candidate["derived_from_event_ids"],
-                now=now,
-            )
+    for action in plan.get("actions", []):
+        _apply_action(
+            action,
+            existing_records=existing_records,
+            operations=operations,
+            summary=summary,
+            run_id=run_id,
+            now=now,
         )
-
-    pending_decay_days = int(store.config["retention"]["pending_item_decay_days"])
-    weak_decay_days = int(store.config["retention"]["weak_memory_quarantine_days"])
-    now_dt = parse_timestamp(now)
-    for record in existing_records:
-        if record["status"] != "active":
-            continue
-        age_days = (now_dt - parse_timestamp(record["updated_at"])).days
-        if record["type"] == "pending_item" and age_days > pending_decay_days:
-            record["status"] = "quarantined"
-            record["updated_at"] = now
-            _bump(summary, "quarantined")
-            operations.append(
-                _make_operation(
-                    run_id,
-                    "quarantine",
-                    record["memory_id"],
-                    "stale pending item removed from startup index",
-                    record["source_event_ids"],
-                    now=now,
-                )
-            )
-        elif record["type"] == "semantic_fact" and record["confidence"] < 0.5 and age_days > weak_decay_days:
-            record["status"] = "quarantined"
-            record["updated_at"] = now
-            _bump(summary, "quarantined")
-            operations.append(
-                _make_operation(
-                    run_id,
-                    "quarantine",
-                    record["memory_id"],
-                    "stale low-confidence fact quarantined",
-                    record["source_event_ids"],
-                    now=now,
-                )
-            )
 
     record_models = [MemoryRecord(**record) for record in existing_records]
     store.save_durable_records(record_models)
@@ -451,6 +248,131 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
     store.save_startup_index(entries, generated_at=now)
     summary["startup_index_entries"] = len(entries[: int(store.config["index_policy"]["max_entries"])])
     audit = store.write_consolidation_audit(run_id, operations, summary, before_snapshot)
-    store.mark_candidates_processed(processed_candidate_ids)
+    if processed_candidate_ids:
+        store.mark_candidates_processed(processed_candidate_ids)
     summary["audit"] = audit
     return summary
+
+
+def _apply_action(
+    action: dict[str, Any],
+    *,
+    existing_records: list[dict[str, Any]],
+    operations: list[ConsolidationOperation],
+    summary: dict[str, Any],
+    run_id: str,
+    now: str,
+) -> None:
+    op = str(action["op"])
+    payload = action.get("payload", {})
+    candidate = payload.get("candidate") if isinstance(payload, dict) else None
+    target_id = action.get("target_id")
+    reason = str(action.get("reason", ""))
+    source_event_ids = list(action.get("source_event_ids", []))
+
+    if op == "ignore":
+        return
+
+    if op == "quarantine_candidate":
+        _bump(summary, "quarantined")
+        operations.append(_make_operation(run_id, "quarantine", str(target_id), reason, source_event_ids, now=now))
+        return
+
+    if op == "quarantine_memory":
+        record = _find_record(existing_records, str(target_id))
+        if record is None or record["status"] != "active":
+            return
+        record["status"] = "quarantined"
+        record["updated_at"] = now
+        _bump(summary, "quarantined")
+        operations.append(_make_operation(run_id, "quarantine", record["memory_id"], reason, source_event_ids, now=now))
+        return
+
+    if not isinstance(candidate, dict):
+        return
+
+    if op == "create":
+        new_record = _record_from_candidate(candidate, now=now)
+        existing_records.append(new_record)
+        _bump(summary, "created")
+        operations.append(_make_operation(run_id, "create", new_record["memory_id"], reason, source_event_ids, now=now))
+        return
+
+    if op == "update":
+        record = _find_record(existing_records, str(target_id))
+        if record is None:
+            return
+        record["source_event_ids"] = sorted(set(record["source_event_ids"]) | set(candidate["derived_from_event_ids"]))
+        record["conflicts_with"] = sorted(set(record["conflicts_with"]) | set(candidate.get("conflicts_with", [])))
+        record["confidence"] = round(max(record["confidence"], candidate["confidence"]), 2)
+        record["salience"] = round(max(record["salience"], candidate["salience"]), 2)
+        record["updated_at"] = now
+        _bump(summary, "updated")
+        operations.append(_make_operation(run_id, "update", record["memory_id"], reason, source_event_ids, now=now))
+        return
+
+    if op == "supersede":
+        record = _find_record(existing_records, str(target_id))
+        if record is None:
+            return
+        record["status"] = "superseded"
+        record["valid_to"] = now
+        record["updated_at"] = now
+        replacement = _record_from_candidate(candidate, now=now, supersedes=[record["memory_id"]])
+        existing_records.append(replacement)
+        _bump(summary, "superseded")
+        _bump(summary, "created")
+        operations.append(
+            _make_operation(
+                run_id,
+                "supersede",
+                record["memory_id"],
+                reason,
+                source_event_ids,
+                now=now,
+                payload={"replacement_id": replacement["memory_id"]},
+            )
+        )
+        operations.append(
+            _make_operation(
+                run_id,
+                "create",
+                replacement["memory_id"],
+                "created replacement durable memory",
+                source_event_ids,
+                now=now,
+            )
+        )
+        return
+
+    if op == "mark_contested":
+        record = _find_record(existing_records, str(target_id)) if target_id else None
+        if record is not None and record["type"] == "contested_fact":
+            record["source_event_ids"] = sorted(
+                set(record["source_event_ids"]) | set(candidate["derived_from_event_ids"])
+            )
+            record["conflicts_with"] = sorted(set(record["conflicts_with"]) | set(candidate.get("conflicts_with", [])))
+            record["status"] = "contested"
+            record["updated_at"] = now
+            _bump(summary, "contested")
+            operations.append(
+                _make_operation(run_id, "mark_contested", record["memory_id"], reason, source_event_ids, now=now)
+            )
+            return
+
+        conflicts = list(candidate.get("conflicts_with", []))
+        if record is not None:
+            conflicts = [record["memory_id"], *conflicts]
+        contested = _record_from_candidate(candidate, now=now, status="contested", conflicts_with=conflicts)
+        existing_records.append(contested)
+        _bump(summary, "contested")
+        operations.append(
+            _make_operation(run_id, "mark_contested", contested["memory_id"], reason, source_event_ids, now=now)
+        )
+
+
+def _find_record(records: list[dict[str, Any]], memory_id: str) -> dict[str, Any] | None:
+    for record in records:
+        if record["memory_id"] == memory_id:
+            return record
+    return None

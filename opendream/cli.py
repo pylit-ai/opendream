@@ -8,7 +8,7 @@ from typing import Any
 from . import __version__
 from .bootstrap import bootstrap_index
 from .consolidator import consolidate
-from .dream import dream_run, dream_tick
+from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
 from .evaluation import run_dream_fidelity_eval, run_memory_quality_eval
 from .extractor import extract_candidates
 from .integration import (
@@ -462,6 +462,50 @@ def command_dream_tick(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def command_dream_enqueue(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    episode_paths = resolve_episode_paths(store, getattr(args, "episodes", None))
+    result = enqueue_dream_job(
+        store,
+        episode_paths=episode_paths,
+        now=args.now,
+        max_recent_episodes=args.max_recent_episodes,
+        min_episode_signals=args.min_episode_signals,
+        trigger_class=args.trigger_class,
+    )
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_dream_worker(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = dream_worker(
+        store,
+        now=args.now,
+        interval_seconds=args.interval_seconds,
+        max_polls=1 if args.once else args.max_polls,
+        max_jobs_per_poll=args.max_jobs_per_poll,
+        idle_exit=args.idle_exit,
+        process_backlog=not args.no_backlog,
+    )
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
 def command_eval_memory_quality(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(
         args.workspace,
@@ -655,6 +699,37 @@ def build_parser() -> argparse.ArgumentParser:
     dream_tick_parser.add_argument("--min-interval-seconds", type=int, default=0)
     add_layout_arguments(dream_tick_parser)
     dream_tick_parser.set_defaults(func=command_dream_tick)
+    dream_enqueue_parser = dream_subparsers.add_parser("enqueue")
+    dream_enqueue_parser.add_argument("--workspace", required=True)
+    dream_enqueue_parser.add_argument("--episodes", nargs="*")
+    dream_enqueue_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    dream_enqueue_parser.add_argument("--max-recent-episodes", type=int)
+    dream_enqueue_parser.add_argument("--min-episode-signals", type=int)
+    dream_enqueue_parser.add_argument("--trigger-class", default="queued-manual")
+    add_layout_arguments(dream_enqueue_parser)
+    dream_enqueue_parser.set_defaults(func=command_dream_enqueue)
+    dream_worker_parser = dream_subparsers.add_parser("worker")
+    dream_worker_parser.add_argument("--workspace", required=True)
+    dream_worker_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    dream_worker_parser.add_argument("--interval-seconds", type=float, default=0.0)
+    dream_worker_parser.add_argument("--max-polls", type=int, default=1)
+    dream_worker_parser.add_argument("--max-jobs-per-poll", type=int)
+    dream_worker_parser.add_argument("--idle-exit", action="store_true", default=False)
+    dream_worker_parser.add_argument("--once", action="store_true")
+    dream_worker_parser.add_argument("--no-backlog", action="store_true")
+    add_layout_arguments(dream_worker_parser)
+    dream_worker_parser.set_defaults(func=command_dream_worker)
+    dream_daemon_parser = dream_subparsers.add_parser("daemon")
+    dream_daemon_parser.add_argument("--workspace", required=True)
+    dream_daemon_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    dream_daemon_parser.add_argument("--interval-seconds", type=float, default=30.0)
+    dream_daemon_parser.add_argument("--max-polls", type=int, default=1)
+    dream_daemon_parser.add_argument("--max-jobs-per-poll", type=int)
+    dream_daemon_parser.add_argument("--idle-exit", action="store_true", default=False)
+    dream_daemon_parser.add_argument("--once", action="store_true")
+    dream_daemon_parser.add_argument("--no-backlog", action="store_true")
+    add_layout_arguments(dream_daemon_parser)
+    dream_daemon_parser.set_defaults(func=command_dream_worker)
 
     eval_parser = subparsers.add_parser("eval")
     eval_subparsers = eval_parser.add_subparsers(dest="eval_command", required=True)

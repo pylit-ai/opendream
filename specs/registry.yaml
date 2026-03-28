@@ -413,3 +413,29 @@ specs:
       - make verify includes a dream-fidelity-eval stage and emits a verification report
       - make release-check runs dream-run and eval-dream-fidelity in a clean venv
       - release blocker resolution prefers the 418-420 canonical task bundles when present
+  - id: 430-sota-dream-runtime-bundle
+    title: auditable planner or verifier runtime and queue-backed dream worker
+    status: implemented
+    owner: platform
+    created: 2026-03-28
+    touched_surfaces:
+      - memory-runtime
+      - background-runtime
+      - verification
+      - adapters
+      - tests
+      - docs
+    depends_on:
+      - 404-framework-adapter-pack
+      - 417-memory-review-and-fidelity-tooling
+      - 418-transcript-native-dream-engine
+      - 420-truthful-verification-and-release
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - .meta/spec-adapters/
+    verification:
+      - consolidate emits plan and verifier artifacts before durable writes
+      - dream enqueue and dream worker drain queued jobs safely across restarts
+      - make release-check exercises the worker path

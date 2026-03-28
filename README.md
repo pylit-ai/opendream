@@ -5,7 +5,7 @@
 [![Python versions](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-see%20LICENSE-lightgrey.svg)](./LICENSE)
 
-**Local-first memory for coding agents** — capture evidence, consolidate durable memory with provenance, and retrieve prompt-ready context from the CLI. No bundled long-running daemon and no in-repo “decide what to remember” model service: **your** hooks or automation choose when to run OpenDream.
+**Local-first memory for coding agents** — capture evidence, consolidate durable memory with provenance, and retrieve prompt-ready context from the CLI. OpenDream now ships a queue-backed local dream worker plus planner or verifier audit artifacts; optional external planner or verifier adapters are operator-provided and stay local to your machine.
 
 | If you want to… | Start here |
 |-----------------|------------|
@@ -122,6 +122,7 @@ Use OpenDream as a **CLI sidecar**:
 - Emit memory-worthy events with **`emit-event`**
 - Run **`maintain`** on a schedule or after sessions (structured skip reasons when idle)
 - Run **`dream run`** on transcript/log episodes when you want reflective consolidation; use **`dream status`** / **`dream tick`** for scheduler-safe state
+- Use **`dream enqueue`** plus **`dream worker --once`** or **`dream daemon`** when you want a durable background queue rather than ad hoc manual runs
 - Run **`prepare-context`** before planning prompts
 - Call **`status`** for locks and pending-work visibility
 
@@ -167,6 +168,9 @@ opendream dream run \
 
 opendream dream status --workspace "$PWD" --compat-mode autodream
 opendream dream tick --workspace "$PWD" --compat-mode autodream
+opendream dream enqueue --workspace "$PWD" --episodes tests/fixtures/transcript_only_dream.jsonl
+opendream dream worker --workspace "$PWD" --once
+opendream dream daemon --workspace "$PWD" --interval-seconds 30 --max-polls 20
 ```
 
 Eval:
@@ -188,7 +192,7 @@ Cron example:
 
 ## Generated data
 
-By default, artifacts live under a workspace-local `memory/` directory. Use `--memory-dir <relative-path>` when a repo needs a different location; that path is honored across commands that read or write memory.
+By default, artifacts live under a workspace-local `memory/` directory. Use `--memory-dir <relative-path>` when a repo needs a different location; that path is honored across commands that read or write memory. Planner plans, verifier reports, dream queue state, and worker audits live under the same memory root.
 
 ---
 
@@ -346,4 +350,3 @@ python3 -m opendream.cli --help
 ```
 
 </details>
-

@@ -510,6 +510,120 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(result["status"], "skipped")
         self.assertEqual(result["reason"], "lock-held")
 
+    def test_consolidate_emits_plan_and_verifier_artifacts(self) -> None:
+        fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
+        run_cli("append-event", "--workspace", str(self.workspace), "--events", str(fixture))
+        run_cli("extract", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        result = run_cli("consolidate", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+
+        plan_path = self.workspace / result["planner_artifact"]
+        verifier_path = self.workspace / result["verifier_artifact"]
+        self.assertTrue(plan_path.exists())
+        self.assertTrue(verifier_path.exists())
+        validate_document("dream-plan.schema.json", json.loads(plan_path.read_text(encoding="utf-8")))
+        validate_document("verifier-report.schema.json", json.loads(verifier_path.read_text(encoding="utf-8")))
+
+    def test_dream_enqueue_and_worker_drain_queue_across_restarts(self) -> None:
+        fixture = REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"
+        run_cli(
+            "init",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+        )
+        first = run_cli(
+            "dream",
+            "enqueue",
+            "--workspace",
+            str(self.workspace),
+            "--episodes",
+            str(fixture),
+            "--now",
+            FIXED_NOW,
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+        )
+        second = run_cli(
+            "dream",
+            "enqueue",
+            "--workspace",
+            str(self.workspace),
+            "--episodes",
+            str(fixture),
+            "--now",
+            "2026-03-26T12:01:00Z",
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+        )
+        self.assertEqual(first["queue_depth"], 1)
+        self.assertEqual(second["queue_depth"], 2)
+
+        status_before = run_cli(
+            "dream",
+            "status",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(status_before["dream"]["queue_depth"], 2)
+
+        first_worker = run_cli(
+            "dream",
+            "worker",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+            "--now",
+            FIXED_NOW,
+            "--once",
+            "--max-jobs-per-poll",
+            "1",
+        )
+        second_worker = run_cli(
+            "dream",
+            "daemon",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+            "--now",
+            "2026-03-26T12:02:00Z",
+            "--once",
+            "--max-jobs-per-poll",
+            "1",
+        )
+        self.assertEqual(len(first_worker["processed_jobs"]), 1)
+        self.assertEqual(len(second_worker["processed_jobs"]), 1)
+
+        status_after = run_cli(
+            "dream",
+            "status",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--now",
+            "2026-03-26T12:02:00Z",
+        )
+        self.assertEqual(status_after["dream"]["queue_depth"], 0)
+        self.assertEqual(status_after["dream"]["worker"]["queue_depth"], 0)
+        self.assertTrue((self.workspace / ".dream-memory" / "state" / "dream_queue.json").exists())
+
     def test_dream_status_and_tick_aliases_use_transcript_backlog(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"
         run_cli(

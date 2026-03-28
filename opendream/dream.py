@@ -8,6 +8,7 @@ from .episodes import latest_episode_timestamp, load_episode_rows, looks_memory_
 from .integration import maintain
 from .storage import LockError, MemoryStore
 from .util import parse_timestamp, semantic_tokens, stable_id, to_iso, utc_now
+from .validation import validate_document
 
 
 def dream_run(
@@ -177,6 +178,118 @@ def dream_tick(
     return result
 
 
+def enqueue_dream_job(
+    store: MemoryStore,
+    *,
+    episode_paths: list[Path],
+    now: str | None = None,
+    max_recent_episodes: int | None = None,
+    min_episode_signals: int | None = None,
+    trigger_class: str = "queued-manual",
+) -> dict[str, Any]:
+    timestamp = now or to_iso(utc_now())
+    queue = store.load_dream_queue()
+    job = {
+        "job_id": stable_id("dream-job", store.store_id, timestamp, len(queue)),
+        "enqueued_at": timestamp,
+        "trigger_class": trigger_class,
+        "episode_paths": [str(path.expanduser()) for path in episode_paths],
+        "max_recent_episodes": max_recent_episodes,
+        "min_episode_signals": min_episode_signals,
+        "status": "queued",
+        "attempts": 0,
+        "last_polled_at": None,
+        "last_started_at": None,
+        "last_finished_at": None,
+        "last_result": None,
+        "run_id": None,
+        "error": None,
+    }
+    validate_document("dream-job.schema.json", job)
+    queue.append(job)
+    store.save_dream_queue(queue)
+    return {"status": "queued", "job": job, "queue_depth": len([item for item in queue if item["status"] == "queued"])}
+
+
+def dream_worker(
+    store: MemoryStore,
+    *,
+    now: str | None = None,
+    interval_seconds: float = 0.0,
+    max_polls: int = 1,
+    max_jobs_per_poll: int | None = None,
+    idle_exit: bool = True,
+    process_backlog: bool = True,
+) -> dict[str, Any]:
+    worker_run_id = stable_id("dream-worker", store.store_id, now or to_iso(utc_now()))
+    before_snapshot = store.snapshot_store_text()
+    processed_jobs: list[dict[str, Any]] = []
+    backlog_results: list[dict[str, Any]] = []
+    try:
+        with store.dream_worker_lock():
+            for poll_index in range(max_polls):
+                timestamp = now or to_iso(utc_now())
+                queue = store.load_dream_queue()
+                queued_jobs = [job for job in queue if job.get("status") == "queued"]
+                jobs_this_poll = 0
+
+                if queued_jobs:
+                    limit = max_jobs_per_poll or len(queued_jobs)
+                    for job in queued_jobs[:limit]:
+                        processed = _process_job(store, job, queue, now=timestamp)
+                        if processed is not None:
+                            processed_jobs.append(processed)
+                            jobs_this_poll += 1
+                elif process_backlog:
+                    backlog = dream_tick(
+                        store,
+                        episode_paths=sorted(store.transcripts_dir.glob("*.jsonl")),
+                        now=timestamp,
+                    )
+                    backlog_results.append(backlog)
+
+                pending_jobs = len([job for job in store.load_dream_queue() if job.get("status") == "queued"])
+                last_result = processed_jobs[-1]["result"]["status"] if processed_jobs else (
+                    backlog_results[-1]["status"] if backlog_results else "idle"
+                )
+                store.save_dream_worker_state(
+                    {
+                        "state": "idle" if pending_jobs == 0 else "queued",
+                        "last_polled_at": timestamp,
+                        "processed_jobs": len(processed_jobs),
+                        "last_job_id": processed_jobs[-1]["job_id"] if processed_jobs else None,
+                        "last_result": last_result,
+                        "queue_depth": pending_jobs,
+                    }
+                )
+
+                if idle_exit and jobs_this_poll == 0 and (
+                    not backlog_results or backlog_results[-1]["status"] == "skipped"
+                ):
+                    break
+                if poll_index + 1 < max_polls and interval_seconds > 0:
+                    time.sleep(interval_seconds)
+    except LockError:
+        return {
+            "run_id": worker_run_id,
+            "status": "skipped",
+            "reason": "worker-lock-held",
+            "processed_jobs": [],
+            "backlog_results": [],
+        }
+
+    summary = {
+        "run_id": worker_run_id,
+        "status": "completed",
+        "polls": max_polls,
+        "processed_jobs": processed_jobs,
+        "backlog_results": backlog_results,
+        "queue_depth": len([job for job in store.load_dream_queue() if job.get("status") == "queued"]),
+    }
+    summary["audit"] = store.write_worker_audit(worker_run_id, summary, before_snapshot)
+    return summary
+
+
 def _orient(store: MemoryStore) -> set[str]:
     tokens: set[str] = set()
     startup_index = store.load_startup_index()
@@ -239,3 +352,45 @@ def _build_search_plan(
         "orientation_token_sample": sorted(orientation_tokens)[:8],
         "files_consulted": files_consulted,
     }
+
+
+def _process_job(
+    store: MemoryStore,
+    job: dict[str, Any],
+    queue: list[dict[str, Any]],
+    *,
+    now: str,
+) -> dict[str, Any] | None:
+    job["status"] = "running"
+    job["attempts"] = int(job.get("attempts", 0)) + 1
+    job["last_polled_at"] = now
+    job["last_started_at"] = now
+    store.save_dream_queue(queue)
+
+    episode_paths = [Path(path).expanduser() for path in job.get("episode_paths", [])]
+    if not episode_paths:
+        episode_paths = sorted(store.transcripts_dir.glob("*.jsonl"))
+
+    result = dream_run(
+        store,
+        episode_paths=episode_paths,
+        now=now,
+        max_recent_episodes=job.get("max_recent_episodes"),
+        min_episode_signals=job.get("min_episode_signals"),
+        trigger_class=str(job.get("trigger_class") or "queued-manual"),
+    )
+    if result.get("reason") == "lock-held":
+        job["status"] = "queued"
+        job["last_result"] = "lock-held"
+        job["last_finished_at"] = now
+        store.save_dream_queue(queue)
+        return None
+
+    job["status"] = str(result.get("status", "completed"))
+    job["last_result"] = str(result.get("status", "completed"))
+    job["last_finished_at"] = now
+    job["run_id"] = result.get("run_id")
+    job["error"] = result.get("reason")
+    validate_document("dream-job.schema.json", job)
+    store.save_dream_queue(queue)
+    return {"job_id": job["job_id"], "result": result}

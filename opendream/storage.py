@@ -38,6 +38,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "locks": {"ttl_seconds": 1800},
     "index_policy": {"max_entries": 40, "max_chars_per_summary": 140},
     "dream": {"max_recent_episodes": 120, "min_episode_signals": 1},
+    "planner": {"mode": "builtin", "command": None, "timeout_seconds": 20},
+    "verifier": {"mode": "builtin", "command": None, "timeout_seconds": 20},
     "retrieval": {"embedding_enabled": True, "semantic_merge_threshold": 0.72},
     "retention": {
         "candidate_ttl_days": 14,
@@ -150,6 +152,9 @@ class MemoryStore:
         self.audit_context_dir = self.memory_root / "audit" / "context"
         self.audit_bootstrap_dir = self.memory_root / "audit" / "bootstrap"
         self.audit_dream_dir = self.memory_root / "audit" / "dream"
+        self.audit_plan_dir = self.memory_root / "audit" / "plans"
+        self.audit_verifier_dir = self.memory_root / "audit" / "verifier"
+        self.audit_worker_dir = self.memory_root / "audit" / "worker"
         self.audit_mutation_dir = self.memory_root / "audit" / "mutations"
         self.annotations_dir = self.memory_root / "audit" / "annotations"
         self.reviews_dir = self.memory_root / "audit" / "reviews"
@@ -164,6 +169,8 @@ class MemoryStore:
         self.extraction_state_path = self.state_dir / "processed_events.json"
         self.maintenance_state_path = self.state_dir / "maintenance_state.json"
         self.dream_state_path = self.state_dir / "dream_state.json"
+        self.dream_queue_path = self.state_dir / "dream_queue.json"
+        self.dream_worker_state_path = self.state_dir / "dream_worker_state.json"
         self.store_metadata_path = self.state_dir / "store.json"
 
     def default_store_metadata(self, *, store_kind: str | None = None) -> dict[str, Any]:
@@ -256,6 +263,9 @@ class MemoryStore:
             self.audit_context_dir,
             self.audit_bootstrap_dir,
             self.audit_dream_dir,
+            self.audit_plan_dir,
+            self.audit_verifier_dir,
+            self.audit_worker_dir,
             self.audit_mutation_dir,
             self.annotations_dir,
             self.reviews_dir,
@@ -323,6 +333,15 @@ class MemoryStore:
         ttl = int(self.config["locks"]["ttl_seconds"])
         return FileLock(self.locks_dir / "dream.lock", ttl_seconds=ttl).describe()
 
+    def dream_worker_lock(self) -> FileLock:
+        self.ensure_layout()
+        ttl = int(self.config["locks"]["ttl_seconds"])
+        return FileLock(self.locks_dir / "dream-worker.lock", ttl_seconds=ttl)
+
+    def dream_worker_lock_state(self) -> dict[str, Any]:
+        ttl = int(self.config["locks"]["ttl_seconds"])
+        return FileLock(self.locks_dir / "dream-worker.lock", ttl_seconds=ttl).describe()
+
     def pending_event_count(self) -> int:
         if not self.is_initialized():
             return 0
@@ -360,7 +379,11 @@ class MemoryStore:
                     "last_run_reason": None,
                     "last_run_duration_ms": None,
                     "last_episode_timestamp": None,
+                    "queue_depth": 0,
+                    "queued_jobs": [],
                     "lock": self.dream_lock_state(),
+                    "worker_lock": self.dream_worker_lock_state(),
+                    "worker": {"state": "idle", "processed_jobs": 0},
                     "policy": metadata["dream"],
                     "transcript_dir": str(self.transcripts_dir),
                     "available_episode_files": 0,
@@ -379,6 +402,8 @@ class MemoryStore:
         pending_events = self.pending_event_count()
         pending_candidates = len(self.load_pending_candidates())
         dream_state = self.load_dream_state()
+        dream_queue = self.load_dream_queue()
+        dream_worker_state = self.load_dream_worker_state()
         next_eligible_reason = "eligible"
         next_eligible_at = None
 
@@ -418,7 +443,11 @@ class MemoryStore:
                 "last_run_reason": dream_state.get("last_run_reason"),
                 "last_run_duration_ms": dream_state.get("last_run_duration_ms"),
                 "last_episode_timestamp": dream_state.get("last_episode_timestamp"),
+                "queue_depth": len([job for job in dream_queue if job.get("status") == "queued"]),
+                "queued_jobs": [job for job in dream_queue if job.get("status") == "queued"][:10],
                 "lock": self.dream_lock_state(),
+                "worker_lock": self.dream_worker_lock_state(),
+                "worker": dream_worker_state or {"state": "idle", "processed_jobs": 0},
                 "policy": self.load_store_metadata()["dream"],
                 "transcript_dir": str(self.transcripts_dir),
                 "available_episode_files": len(list(self.transcripts_dir.glob("*.jsonl"))),
@@ -505,6 +534,24 @@ class MemoryStore:
     def save_dream_state(self, payload: dict[str, Any]) -> None:
         self.ensure_layout()
         write_json(self.dream_state_path, payload)
+
+    def load_dream_queue(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        payload = read_json(self.dream_queue_path, [])
+        return payload if isinstance(payload, list) else []
+
+    def save_dream_queue(self, jobs: list[dict[str, Any]]) -> None:
+        self.ensure_layout()
+        write_json(self.dream_queue_path, jobs)
+
+    def load_dream_worker_state(self) -> dict[str, Any]:
+        self.ensure_layout()
+        payload = read_json(self.dream_worker_state_path, {})
+        return payload if isinstance(payload, dict) else {}
+
+    def save_dream_worker_state(self, payload: dict[str, Any]) -> None:
+        self.ensure_layout()
+        write_json(self.dream_worker_state_path, payload)
 
     def load_observability_index(self) -> dict[str, Any]:
         self.ensure_layout()
@@ -602,6 +649,31 @@ class MemoryStore:
             summary=summary,
             before_snapshot=before_snapshot,
             audit_dir=self.audit_dream_dir,
+        )
+
+    def write_plan_audit(self, run_id: str, payload: dict[str, Any]) -> Path:
+        path = self.audit_plan_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_verifier_report(self, run_id: str, payload: dict[str, Any]) -> Path:
+        path = self.audit_verifier_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_worker_audit(
+        self,
+        run_id: str,
+        summary: dict[str, Any],
+        before_snapshot: dict[str, str],
+    ) -> dict[str, str]:
+        return self.write_mutation_audit(
+            action="dream-worker",
+            run_id=run_id,
+            target_paths=[self.dream_queue_path, self.dream_worker_state_path, self.dream_state_path],
+            summary=summary,
+            before_snapshot=before_snapshot,
+            audit_dir=self.audit_worker_dir,
         )
 
     def append_annotation(self, annotation: Annotation) -> Path:

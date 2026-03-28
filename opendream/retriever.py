@@ -20,6 +20,7 @@ SCOPE_PRIORS = {
     "user": 0.75,
     "global": 0.7,
 }
+LEXICAL_NOISE_TOKENS = {"use", "which", "should", "setup"}
 
 
 def retrieve(
@@ -33,7 +34,7 @@ def retrieve(
 ) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
     records = store.load_durable_records()
-    query_tokens = tokenize(query)
+    query_tokens = tokenize(query) - LEXICAL_NOISE_TOKENS
     query_semantic = semantic_tokens(query)
     use_embeddings = store.config["retrieval"]["embedding_enabled"] if embedding_enabled is None else embedding_enabled
     scored: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
@@ -48,7 +49,7 @@ def retrieve(
             continue
 
         record_text = " ".join([record["title"], record["summary"], record["body"]])
-        record_tokens = tokenize(record_text)
+        record_tokens = tokenize(record_text) - LEXICAL_NOISE_TOKENS
         record_semantic = semantic_tokens(record_text)
         lexical_overlap = sorted(query_tokens & record_tokens)
         lexical_score = len(lexical_overlap) / max(1, len(query_tokens))

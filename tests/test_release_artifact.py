@@ -102,6 +102,49 @@ class ReleaseArtifactTests(unittest.TestCase):
             )
             self.assertIn('"status": "completed"', dream_run.stdout)
 
+            dream_enqueue = subprocess.run(
+                [
+                    str(entrypoint),
+                    "dream",
+                    "enqueue",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--episodes",
+                    str(transcript_fixture),
+                    "--now",
+                    FIXED_NOW,
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "queued"', dream_enqueue.stdout)
+
+            dream_worker = subprocess.run(
+                [
+                    str(entrypoint),
+                    "dream",
+                    "worker",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--now",
+                    FIXED_NOW,
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--once",
+                    "--max-jobs-per-poll",
+                    "1",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "completed"', dream_worker.stdout)
+
             fidelity_eval = subprocess.run(
                 [
                     str(entrypoint),

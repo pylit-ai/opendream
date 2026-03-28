@@ -69,6 +69,9 @@ def preferred_release_blockers() -> list[str]:
         "419-dream-fidelity-evals",
         "420-truthful-verification-and-release",
     ]
+    latest = [*next_gen, "430-sota-dream-runtime-bundle"]
+    if all((REPO_ROOT / "specs" / spec_id / "tasks.md").exists() for spec_id in latest):
+        return latest
     if all((REPO_ROOT / "specs" / spec_id / "tasks.md").exists() for spec_id in next_gen):
         return next_gen
     return ["410-truthful-verification", "411-autodream-fidelity", "412-memory-quality"]
@@ -160,6 +163,43 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
                     "autodream",
                     "--memory-dir",
                     ".dream-memory",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "dream-enqueue",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "dream",
+                    "enqueue",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--episodes",
+                    str(REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "dream-worker-once",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "dream",
+                    "worker",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--once",
+                    "--max-jobs-per-poll",
+                    "1",
                 ],
                 cwd=temp_path,
                 timeout_seconds=timeout_seconds,
