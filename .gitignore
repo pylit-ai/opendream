@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .tmp/
+tmp/
 .DS_Store
 build/
 dist/

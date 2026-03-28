@@ -102,6 +102,12 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertGreater(result["extract"]["created_candidates"], 0)
         self.assertGreater(len(result["retrieve"]["selected_memory_ids"]), 0)
 
+    def test_no_subcommand_error_includes_next_step_hint(self) -> None:
+        completed = run_cli_raw(check=False)
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("opendream init --workspace .tmp/ws", completed.stderr)
+        self.assertIn("opendream demo --workspace .tmp/ws", completed.stderr)
+
     def test_bootstrap_index_stages_without_topic_writes(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "bootstrap_events.jsonl"
         result = run_cli(
@@ -510,6 +516,25 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(result["status"], "skipped")
         self.assertEqual(result["reason"], "lock-held")
 
+    def test_dream_run_without_episodes_returns_explicit_skip(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        result = run_cli("dream", "run", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        status_snapshot = run_cli("dream", "status", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "no-episodes")
+        self.assertEqual(status_snapshot["dream"]["last_run_reason"], "no-episodes")
+
+    def test_dream_enqueue_without_episodes_returns_explicit_skip(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        result = run_cli("dream", "enqueue", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        status_snapshot = run_cli("dream", "status", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "no-episodes")
+        self.assertEqual(result["queue_depth"], 0)
+        self.assertEqual(status_snapshot["dream"]["queue_depth"], 0)
+
     def test_consolidate_emits_plan_and_verifier_artifacts(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
         run_cli("append-event", "--workspace", str(self.workspace), "--events", str(fixture))
@@ -697,6 +722,17 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(after["dream"]["last_ran_at"], FIXED_NOW)
         self.assertEqual(after["dream"]["last_run_reason"], "transcript-backlog")
 
+    def test_dream_help_clarifies_worker_and_daemon_roles(self) -> None:
+        dream_help = run_cli_raw("dream", "-h", check=False)
+        worker_help = run_cli_raw("dream", "worker", "-h", check=False)
+        daemon_help = run_cli_raw("dream", "daemon", "-h", check=False)
+
+        self.assertEqual(dream_help.returncode, 0)
+        self.assertIn("one-shot or bounded worker poll", dream_help.stdout)
+        self.assertIn("supervisor-friendly looping", dream_help.stdout)
+        self.assertIn("Use `--once` for a single poll.", worker_help.stdout)
+        self.assertIn("worker --once", daemon_help.stdout)
+
     def test_tick_reports_status_and_repeated_invocation(self) -> None:
         run_cli("init", "--workspace", str(self.workspace))
         self.emit_runtime_event(
@@ -793,6 +829,22 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["paraphrase_hits"], result["query_count"])
         self.assertGreaterEqual(result["lexical_only_misses"], 1)
+
+    def test_eval_memory_quality_failure_exits_nonzero(self) -> None:
+        run_cli("demo", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        completed = run_cli_raw(
+            "eval",
+            "memory-quality",
+            "--workspace",
+            str(self.workspace),
+            "--now",
+            FIXED_NOW,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["status"], "failed")
 
     def test_eval_dream_fidelity_command(self) -> None:
         result = run_cli(

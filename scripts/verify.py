@@ -66,33 +66,34 @@ def run_typecheck_probe(*, timeout_seconds: int) -> dict[str, Any]:
 
 
 def build_report(*, timeout_seconds: int) -> dict[str, Any]:
-    eval_workspace = REPO_ROOT / ".tmp" / "dream-fidelity-eval"
-    stages = [
-        ("lint", [sys.executable, "scripts/lint.py"]),
-        ("typecheck", [sys.executable, "scripts/typecheck.py"]),
-        ("tests", [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]),
-        (
-            "dream-fidelity-eval",
-            [
-                sys.executable,
-                "-m",
-                "opendream.cli",
-                "eval",
-                "dream-fidelity",
-                "--workspace",
-                str(eval_workspace),
-                "--compat-mode",
-                "autodream",
-            ],
-        ),
-        ("adapters-check", [sys.executable, "scripts/check_adapters.py"]),
-        ("packaging-smoke", [sys.executable, "-m", "unittest", "tests.test_release_artifact", "-v"]),
-    ]
     results: list[dict[str, Any]] = []
-    for name, command in stages:
-        result = run_command(command, timeout_seconds=timeout_seconds)
-        result["stage"] = name
-        results.append(result)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        eval_workspace = Path(temp_dir) / "dream-fidelity-eval"
+        stages = [
+            ("lint", [sys.executable, "scripts/lint.py"]),
+            ("typecheck", [sys.executable, "scripts/typecheck.py"]),
+            ("tests", [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]),
+            (
+                "dream-fidelity-eval",
+                [
+                    sys.executable,
+                    "-m",
+                    "opendream.cli",
+                    "eval",
+                    "dream-fidelity",
+                    "--workspace",
+                    str(eval_workspace),
+                    "--compat-mode",
+                    "autodream",
+                ],
+            ),
+            ("adapters-check", [sys.executable, "scripts/check_adapters.py"]),
+            ("packaging-smoke", [sys.executable, "-m", "unittest", "tests.test_release_artifact", "-v"]),
+        ]
+        for name, command in stages:
+            result = run_command(command, timeout_seconds=timeout_seconds)
+            result["stage"] = name
+            results.append(result)
 
     probe_results = [
         {"stage": "lint-probe", **run_lint_probe(timeout_seconds=timeout_seconds)},

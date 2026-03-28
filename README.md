@@ -173,12 +173,16 @@ opendream dream worker --workspace "$PWD" --once
 opendream dream daemon --workspace "$PWD" --interval-seconds 30 --max-polls 20
 ```
 
+Use `dream worker --once` for a single queue drain inside hooks, scripts, or CI. Use `dream daemon` when a supervisor should keep polling over time. `dream daemon` is a foreground loop (like `observe serve`); run it under **launchd**, a **systemd user unit**, or e.g. `nohup opendream dream daemon --workspace "$PWD" >>~/.opendream-dream.log 2>&1 &` so it stays in the background.
+
 Eval:
 
 ```bash
 opendream eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodream
 opendream eval memory-quality --workspace .tmp/eval
 ```
+
+Both eval subcommands print JSON to stdout; if the report includes `"status": "failed"`, the process exits **non-zero** (typically `1`) so scripts and CI can fail the step without parsing the payload.
 
 Cron example:
 
@@ -292,7 +296,7 @@ Authoritative when the scripted gate passes; report at `.tmp/verification/verifi
 | `make lint` | Ruff (`scripts/lint.py`) |
 | `make typecheck` | mypy on `opendream` and `scripts` |
 | `make test` | Unit tests |
-| `make verify` | Lint, typecheck, tests, `eval dream-fidelity`, `scripts/check_adapters.py`, packaging smoke |
+| `make verify` | Lint, typecheck, tests, `eval dream-fidelity` (fresh temp workspace), `scripts/check_adapters.py`, packaging smoke |
 | `make release-check` | Release gate: artifacts, clean venv install, `dream run`, `eval dream-fidelity`, verification replay |
 
 `make release-check` also writes `.tmp/release-check/release_manifest.json` and `release_summary.md`.

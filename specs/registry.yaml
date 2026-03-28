@@ -439,3 +439,28 @@ specs:
       - consolidate emits plan and verifier artifacts before durable writes
       - dream enqueue and dream worker drain queued jobs safely across restarts
       - make release-check exercises the worker path
+  - id: 431-cli-ux-polish
+    title: CLI onboarding, eval exits, and dream-help polish
+    status: implemented
+    owner: platform
+    created: 2026-03-28
+    touched_surfaces:
+      - cli
+      - docs
+      - verification
+      - tests
+    depends_on:
+      - 418-transcript-native-dream-engine
+      - 419-dream-fidelity-evals
+      - 420-truthful-verification-and-release
+      - 430-sota-dream-runtime-bundle
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - CHANGELOG.md
+    verification:
+      - failed eval subcommands exit non-zero
+      - bare CLI invocation includes an actionable next-step hint
+      - dream run and dream enqueue report explicit no-episodes results
+      - make verify and make release-check remain green after the exit-semantics change

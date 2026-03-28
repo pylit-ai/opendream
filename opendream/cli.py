@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from . import __version__
 from .bootstrap import bootstrap_index
@@ -28,6 +29,34 @@ from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, 
 from .util import FIXTURE_ROOT, json_dumps, stable_id, to_iso, utc_now
 from .validation import validate_document
 from .webapp import build_server
+
+TOP_LEVEL_EXAMPLES = """Examples:
+  opendream init --workspace .tmp/ws
+  opendream demo --workspace .tmp/ws
+  opendream dream worker --workspace .tmp/ws --once
+"""
+
+
+class OpenDreamArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        detail = f"{self.prog}: error: {message}\n"
+        hint = _error_hint(self.prog, message)
+        if hint:
+            detail += f"Hint: {hint}\n"
+        self.exit(2, detail)
+
+
+def _error_hint(prog: str, message: str) -> str | None:
+    if prog == "opendream" and "required: command" in message:
+        return (
+            "try `opendream init --workspace .tmp/ws` or "
+            "`opendream demo --workspace .tmp/ws`; use `opendream -h` "
+            "for the full command tree"
+        )
+    if prog == "opendream dream" and "required: dream_command" in message:
+        return "try `opendream dream status --workspace .tmp/ws` or `opendream dream worker --workspace .tmp/ws --once`"
+    return None
 
 
 def load_event_payloads(path: Path) -> list[dict[str, Any]]:
@@ -471,6 +500,14 @@ def command_dream_enqueue(args: argparse.Namespace) -> dict[str, Any]:
     if not store.is_initialized():
         store.initialize(store_kind="project", compat_mode=args.compat_mode)
     episode_paths = resolve_episode_paths(store, getattr(args, "episodes", None))
+    if not episode_paths:
+        return {
+            "status": "skipped",
+            "reason": "no-episodes",
+            "queue_depth": len([item for item in store.load_dream_queue() if item.get("status") == "queued"]),
+            "workspace": str(store.workspace),
+            "memory_root": str(store.memory_root),
+        }
     result = enqueue_dream_job(
         store,
         episode_paths=episode_paths,
@@ -568,11 +605,16 @@ def command_observe_serve(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="opendream")
+    parser = OpenDreamArgumentParser(
+        prog="opendream",
+        description="Local-first memory runtime for coding agents.",
+        epilog=TOP_LEVEL_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"opendream {__version__}")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True, title="commands")
 
-    init_parser = subparsers.add_parser("init")
+    init_parser = subparsers.add_parser("init", help="Create the memory layout in a workspace")
     init_parser.add_argument("--workspace", required=True)
     init_parser.add_argument("--store-kind", choices=sorted(VALID_STORE_KINDS), default="project")
     add_layout_arguments(init_parser)
@@ -617,14 +659,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(bootstrap_parser)
     bootstrap_parser.set_defaults(func=command_bootstrap_index)
 
-    consolidate_parser = subparsers.add_parser("consolidate")
+    consolidate_parser = subparsers.add_parser("consolidate", help="Apply planned durable-memory consolidation")
     consolidate_parser.add_argument("--workspace", required=True)
     consolidate_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     consolidate_parser.add_argument("--sleep-before-write", type=float, default=0.0, help=argparse.SUPPRESS)
     add_layout_arguments(consolidate_parser)
     consolidate_parser.set_defaults(func=command_consolidate)
 
-    maintain_parser = subparsers.add_parser("maintain")
+    maintain_parser = subparsers.add_parser("maintain", help="Run extract plus consolidate when policy allows")
     maintain_parser.add_argument("--workspace", required=True)
     maintain_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     maintain_parser.add_argument("--min-new-events", type=int)
@@ -633,7 +675,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_store_group_arguments(maintain_parser)
     maintain_parser.set_defaults(func=command_maintain)
 
-    retrieve_parser = subparsers.add_parser("retrieve")
+    retrieve_parser = subparsers.add_parser("retrieve", help="Retrieve relevant durable memory records")
     retrieve_parser.add_argument("--workspace", required=True)
     retrieve_parser.add_argument("--query", required=True)
     retrieve_parser.add_argument("--limit", type=int, default=5)
@@ -642,7 +684,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(retrieve_parser)
     retrieve_parser.set_defaults(func=command_retrieve)
 
-    prepare_context_parser = subparsers.add_parser("prepare-context")
+    prepare_context_parser = subparsers.add_parser("prepare-context", help="Assemble prompt-ready memory context")
     prepare_context_parser.add_argument("--workspace", required=True)
     prepare_context_parser.add_argument("--query", required=True)
     prepare_context_parser.add_argument("--limit", type=int, default=5)
@@ -651,7 +693,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_store_group_arguments(prepare_context_parser)
     prepare_context_parser.set_defaults(func=command_prepare_context)
 
-    status_parser = subparsers.add_parser("status")
+    status_parser = subparsers.add_parser("status", help="Inspect scheduler, lock, and dream state")
     status_parser.add_argument("--workspace", required=True)
     status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     status_parser.add_argument("--min-new-events", type=int)
@@ -660,7 +702,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_store_group_arguments(status_parser)
     status_parser.set_defaults(func=command_status)
 
-    tick_parser = subparsers.add_parser("tick")
+    tick_parser = subparsers.add_parser("tick", help="Run one scheduler-safe maintenance poll")
     tick_parser.add_argument("--workspace", required=True)
     tick_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     tick_parser.add_argument("--min-new-events", type=int)
@@ -669,15 +711,18 @@ def build_parser() -> argparse.ArgumentParser:
     add_store_group_arguments(tick_parser)
     tick_parser.set_defaults(func=command_tick)
 
-    demo_parser = subparsers.add_parser("demo")
+    demo_parser = subparsers.add_parser("demo", help="Seed a deterministic demo workspace")
     demo_parser.add_argument("--workspace", required=True)
     demo_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(demo_parser)
     demo_parser.set_defaults(func=command_demo)
 
-    dream_parser = subparsers.add_parser("dream")
+    dream_parser = subparsers.add_parser("dream", help="Transcript-native dream commands")
     dream_subparsers = dream_parser.add_subparsers(dest="dream_command", required=True)
-    dream_run_parser = dream_subparsers.add_parser("run")
+    dream_run_parser = dream_subparsers.add_parser(
+        "run",
+        help="Run a single dream pass from explicit episodes or transcript files",
+    )
     dream_run_parser.add_argument("--workspace", required=True)
     dream_run_parser.add_argument("--episodes", nargs="*")
     dream_run_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
@@ -685,12 +730,12 @@ def build_parser() -> argparse.ArgumentParser:
     dream_run_parser.add_argument("--min-episode-signals", type=int)
     add_layout_arguments(dream_run_parser)
     dream_run_parser.set_defaults(func=command_dream_run)
-    dream_status_parser = dream_subparsers.add_parser("status")
+    dream_status_parser = dream_subparsers.add_parser("status", help="Inspect dream, queue, and worker state")
     dream_status_parser.add_argument("--workspace", required=True)
     dream_status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(dream_status_parser)
     dream_status_parser.set_defaults(func=command_dream_status)
-    dream_tick_parser = dream_subparsers.add_parser("tick")
+    dream_tick_parser = dream_subparsers.add_parser("tick", help="Run one scheduler-safe transcript backlog poll")
     dream_tick_parser.add_argument("--workspace", required=True)
     dream_tick_parser.add_argument("--episodes", nargs="*")
     dream_tick_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
@@ -699,7 +744,10 @@ def build_parser() -> argparse.ArgumentParser:
     dream_tick_parser.add_argument("--min-interval-seconds", type=int, default=0)
     add_layout_arguments(dream_tick_parser)
     dream_tick_parser.set_defaults(func=command_dream_tick)
-    dream_enqueue_parser = dream_subparsers.add_parser("enqueue")
+    dream_enqueue_parser = dream_subparsers.add_parser(
+        "enqueue",
+        help="Queue dream work for later worker or daemon processing",
+    )
     dream_enqueue_parser.add_argument("--workspace", required=True)
     dream_enqueue_parser.add_argument("--episodes", nargs="*")
     dream_enqueue_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
@@ -708,7 +756,15 @@ def build_parser() -> argparse.ArgumentParser:
     dream_enqueue_parser.add_argument("--trigger-class", default="queued-manual")
     add_layout_arguments(dream_enqueue_parser)
     dream_enqueue_parser.set_defaults(func=command_dream_enqueue)
-    dream_worker_parser = dream_subparsers.add_parser("worker")
+    dream_worker_parser = dream_subparsers.add_parser(
+        "worker",
+        help="Drain queued jobs in a one-shot or bounded worker poll",
+        description=(
+            "Drain queued dream jobs. Use `--once` for a single poll. "
+            "Use `dream daemon` for a supervisor-style loop."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     dream_worker_parser.add_argument("--workspace", required=True)
     dream_worker_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     dream_worker_parser.add_argument("--interval-seconds", type=float, default=0.0)
@@ -719,7 +775,15 @@ def build_parser() -> argparse.ArgumentParser:
     dream_worker_parser.add_argument("--no-backlog", action="store_true")
     add_layout_arguments(dream_worker_parser)
     dream_worker_parser.set_defaults(func=command_dream_worker)
-    dream_daemon_parser = dream_subparsers.add_parser("daemon")
+    dream_daemon_parser = dream_subparsers.add_parser(
+        "daemon",
+        help="Run the dream worker in a supervisor-friendly looping mode",
+        description=(
+            "Alias over the worker loop for longer-running supervision. "
+            "Use `worker --once` for single-poll automation."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     dream_daemon_parser.add_argument("--workspace", required=True)
     dream_daemon_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     dream_daemon_parser.add_argument("--interval-seconds", type=float, default=30.0)
@@ -731,20 +795,26 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(dream_daemon_parser)
     dream_daemon_parser.set_defaults(func=command_dream_worker)
 
-    eval_parser = subparsers.add_parser("eval")
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Run machine-readable quality and fidelity evaluations",
+    )
     eval_subparsers = eval_parser.add_subparsers(dest="eval_command", required=True)
-    eval_memory_parser = eval_subparsers.add_parser("memory-quality")
+    eval_memory_parser = eval_subparsers.add_parser(
+        "memory-quality",
+        help="Run retrieval and contradiction quality checks",
+    )
     eval_memory_parser.add_argument("--workspace", required=True)
     eval_memory_parser.add_argument("--fixture")
     eval_memory_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(eval_memory_parser)
-    eval_memory_parser.set_defaults(func=command_eval_memory_quality)
-    eval_dream_parser = eval_subparsers.add_parser("dream-fidelity")
+    eval_memory_parser.set_defaults(func=command_eval_memory_quality, result_failure_statuses=("failed",))
+    eval_dream_parser = eval_subparsers.add_parser("dream-fidelity", help="Run transcript-native dream fidelity checks")
     eval_dream_parser.add_argument("--workspace", required=True)
     eval_dream_parser.add_argument("--fixture")
     eval_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(eval_dream_parser)
-    eval_dream_parser.set_defaults(func=command_eval_dream_fidelity)
+    eval_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
 
     observe_parser = subparsers.add_parser("observe")
     observe_subparsers = observe_parser.add_subparsers(dest="observe_command", required=True)
@@ -771,6 +841,10 @@ def main() -> int:
     args = parser.parse_args()
     result = args.func(args)
     print(json_dumps(result))
+    if isinstance(result, dict):
+        failure_statuses = set(getattr(args, "result_failure_statuses", ()))
+        if failure_statuses and str(result.get("status", "")) in failure_statuses:
+            return 1
     return 0
 
 

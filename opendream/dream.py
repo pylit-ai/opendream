@@ -28,8 +28,41 @@ def dream_run(
         min_episode_signals=min_episode_signals,
     )
     started_at = time.monotonic()
+    summary: dict[str, Any]
     try:
         with store.dream_lock():
+            if not episode_paths:
+                summary = {
+                    "run_id": run_id,
+                    "status": "skipped",
+                    "reason": "no-episodes",
+                    "phases": ["orient"],
+                    "policy": policy,
+                    "trigger_class": trigger_class,
+                    "search_plan": {
+                        "strategy": "bounded-tail-search",
+                        "full_corpus_replay": False,
+                        "max_recent_episodes": policy["max_recent_episodes"],
+                        "orientation_token_sample": [],
+                        "files_consulted": [],
+                    },
+                    "files_consulted": [],
+                    "latest_episode_timestamp": None,
+                }
+                store.save_dream_state(
+                    {
+                        "state": "idle",
+                        "last_ran_at": timestamp,
+                        "run_id": run_id,
+                        "last_result": summary["status"],
+                        "last_run_summary": summary,
+                        "last_run_reason": summary["reason"],
+                        "last_run_duration_ms": 0,
+                        "last_episode_timestamp": None,
+                    }
+                )
+                store.write_dream_audit(run_id, summary, before_snapshot)
+                return summary
             store.save_dream_state({"state": "dreaming", "last_started_at": timestamp, "run_id": run_id})
             rows = load_episode_rows(episode_paths, tail_limit=policy["max_recent_episodes"])
             orientation_tokens = _orient(store)
