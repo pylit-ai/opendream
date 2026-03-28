@@ -11,7 +11,6 @@ from pathlib import Path
 from opendream_memory.util import CANONICAL_SCHEMA_ROOT, OPEN_SPEC_ROOT, SCHEMA_ROOT
 from opendream_memory.validation import required_schema_files
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXED_NOW = "2026-03-26T12:00:00Z"
 

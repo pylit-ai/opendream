@@ -167,3 +167,176 @@ specs:
       - make verify passes
       - status and tick tests pass
       - cron-style repeated invocation works
+  - id: 410-truthful-verification
+    title: truthful verification and adversarial quality gates
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - verification
+      - tooling
+      - tests
+      - docs
+    depends_on:
+      - 401-autodream-style-memory-subsystem
+      - 402-release-hardening
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - Makefile
+      - README.md
+      - pyproject.toml
+    verification:
+      - make verify fails on seeded type and lint regressions
+      - verification report is emitted with deterministic verdict
+      - memory writes and consolidation runs emit inspectable summaries and diffs
+  - id: 411-autodream-fidelity
+    title: transcript-guided DreamRunner and AutoDream-compatible memory flow
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - cli
+      - storage
+      - memory-runtime
+      - tests
+      - docs
+    depends_on:
+      - 405-layered-memory-stores
+      - 406-scheduler-and-status-surface
+      - 410-truthful-verification
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - docs/architecture/overview.md
+    verification:
+      - transcript-only dream fixtures create durable memory
+      - dream status and scheduler transitions are observable
+      - custom memory directory is honored by normal and dream writes
+  - id: 412-memory-quality
+    title: trustworthy retrieval, dedupe, contradiction handling, and evals
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - retrieval
+      - consolidation
+      - tests
+      - evals
+      - docs
+    depends_on:
+      - 411-autodream-fidelity
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+    verification:
+      - paraphrase retrieval beats lexical-only fallback on the eval corpus
+      - conflicting memories surface with explicit status and explanation
+      - eval command emits deterministic benchmark output
+  - id: 413-authoritative-release-gate
+    title: authoritative, hermetic, and time-bounded release gate
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - release-tooling
+      - packaging
+      - tests
+      - docs
+    depends_on:
+      - 410-truthful-verification
+      - 411-autodream-fidelity
+      - 412-memory-quality
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - Makefile
+      - README.md
+    verification:
+      - make release-check emits a release manifest on every run
+      - release-check is time-bounded and deterministic on seeded failures
+      - release readiness remains blocked unless 410-412 are complete
+  - id: 414-memory-observability-read-model
+    title: canonical observability read model for memory introspection
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - observability
+      - storage
+      - indexing
+      - tests
+      - docs
+    depends_on:
+      - 401-autodream-style-memory-subsystem
+      - 405-layered-memory-stores
+      - 406-scheduler-and-status-surface
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs: []
+    verification:
+      - backfill indexes existing artifacts without mutating source files
+      - provenance survives from source artifacts into the read model
+      - broken artifacts warn and do not crash indexing
+  - id: 415-memory-observability-api-surface
+    title: thin observability API surface for memory, runs, retrievals, and context
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - observability
+      - api
+      - tests
+      - docs
+    depends_on:
+      - 414-memory-observability-read-model
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs: []
+    verification:
+      - API endpoints preserve provenance and filtering semantics
+      - annotation and review writes are auditable
+      - realtime status updates reflect run and lock state
+  - id: 416-memory-observability-webapp-mvp
+    title: desktop-first observability web app MVP
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - observability-ui
+      - api
+      - tests
+      - docs
+    depends_on:
+      - 415-memory-observability-api-surface
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs: []
+    verification:
+      - operators can inspect memory, runs, retrievals, and context without reading raw files
+      - diff and raw JSON remain available from detail surfaces
+      - deep links and URL filters remain stable
+  - id: 417-memory-review-and-fidelity-tooling
+    title: review workflows and advanced fidelity diagnostics
+    status: implemented
+    owner: platform
+    created: 2026-03-27
+    touched_surfaces:
+      - observability-ui
+      - observability
+      - api
+      - evals
+      - exports
+      - tests
+      - docs
+    depends_on:
+      - 416-memory-observability-webapp-mvp
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs: []
+    verification:
+      - review actions are explicit and auditable
+      - fidelity diagnostics expose phases, coverage, and index budget
+      - exports reconstruct runs and diffs offline

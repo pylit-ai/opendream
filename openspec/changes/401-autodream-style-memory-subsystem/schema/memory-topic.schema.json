@@ -39,7 +39,7 @@
     "body": { "type": "string" },
     "status": {
       "type": "string",
-      "enum": ["active", "contested", "superseded", "deprecated", "deleted"]
+      "enum": ["active", "contested", "superseded", "quarantined", "deleted"]
     },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
     "salience": { "type": "number", "minimum": 0, "maximum": 1 },

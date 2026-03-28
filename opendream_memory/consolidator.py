@@ -7,8 +7,7 @@ from typing import Any
 
 from .models import ConsolidationOperation, MemoryRecord, StartupIndexEntry
 from .storage import LockError, MemoryStore
-from .util import parse_timestamp, stable_id, summarize, to_iso, utc_now
-
+from .util import parse_timestamp, semantic_tokens, stable_id, summarize, to_iso, utc_now
 
 SUPERSEDE_TYPES = {"project_decision", "environment_requirement", "user_preference"}
 INDEX_TYPE_BOOSTS = {
@@ -20,6 +19,51 @@ INDEX_TYPE_BOOSTS = {
     "pending_item": 2.5,
     "semantic_fact": 1.5,
 }
+
+
+def _candidate_similarity(left: dict[str, Any], right: dict[str, Any]) -> float:
+    left_tokens = semantic_tokens(" ".join([left["title"], left["summary"], left["body"]]))
+    right_tokens = semantic_tokens(" ".join([right["title"], right["summary"], right["body"]]))
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def _merge_candidate_cluster(cluster: list[dict[str, Any]]) -> dict[str, Any]:
+    ordered = sorted(cluster, key=lambda item: (item["created_at"], item["candidate_id"]))
+    primary = dict(ordered[0])
+    primary["derived_from_event_ids"] = sorted(
+        {event_id for item in ordered for event_id in item["derived_from_event_ids"]}
+    )
+    primary["memory_refs"] = sorted({memory_id for item in ordered for memory_id in item.get("memory_refs", [])})
+    primary["conflicts_with"] = sorted(
+        {memory_id for item in ordered for memory_id in item.get("conflicts_with", [])}
+    )
+    primary["confidence"] = round(max(item["confidence"] for item in ordered), 2)
+    primary["salience"] = round(max(item["salience"] for item in ordered), 2)
+    primary["summary"] = summarize(" ".join(item["summary"] for item in ordered), 140)
+    primary["body"] = max((item["body"] for item in ordered), key=len)
+    primary["status"] = "merged" if len(ordered) > 1 else primary["status"]
+    return primary
+
+
+def _cluster_candidates(candidates: list[dict[str, Any]], threshold: float) -> list[dict[str, Any]]:
+    clustered: list[list[dict[str, Any]]] = []
+    for candidate in candidates:
+        placed = False
+        for cluster in clustered:
+            exemplar = cluster[0]
+            if (
+                exemplar["scope"] == candidate["scope"]
+                and exemplar["type"] == candidate["type"]
+                and _candidate_similarity(exemplar, candidate) >= threshold
+            ):
+                cluster.append(candidate)
+                placed = True
+                break
+        if not placed:
+            clustered.append([candidate])
+    return [_merge_candidate_cluster(cluster) for cluster in clustered]
 
 
 def _record_from_candidate(
@@ -76,7 +120,7 @@ def _make_operation(
 
 
 def _same_body(existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
-    return existing["body"].strip() == candidate["body"].strip()
+    return str(existing["body"]).strip() == str(candidate["body"]).strip()
 
 
 def _build_startup_index(records: list[dict[str, Any]]) -> list[StartupIndexEntry]:
@@ -104,6 +148,10 @@ def _build_startup_index(records: list[dict[str, Any]]) -> list[StartupIndexEntr
             )
         )
     return sorted(entries, key=lambda item: (-item.priority, item.title))
+
+
+def _bump(summary: dict[str, Any], key: str, amount: int = 1) -> None:
+    summary[key] = int(summary.get(key, 0)) + amount
 
 
 def consolidate(
@@ -136,9 +184,20 @@ def consolidate(
 def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[str, Any]:
     before_snapshot = store.snapshot_memory_text()
     existing_records = [dict(item) for item in store.load_durable_records()]
-    pending_candidates = sorted(store.load_pending_candidates(), key=lambda item: (item["created_at"], item["candidate_id"]))
-    existing_lookup = {(item["scope"], item["type"], item["title"]): item for item in existing_records if item["status"] == "active"}
-    workflow_evidence = Counter()
+    pending_candidates = sorted(
+        store.load_pending_candidates(),
+        key=lambda item: (item["created_at"], item["candidate_id"]),
+    )
+    pending_candidates = _cluster_candidates(
+        pending_candidates,
+        float(store.config["retrieval"]["semantic_merge_threshold"]),
+    )
+    existing_lookup = {
+        (item["scope"], item["type"], item["title"]): item
+        for item in existing_records
+        if item["status"] == "active"
+    }
+    workflow_evidence: Counter[tuple[str, str]] = Counter()
     workflow_events: dict[tuple[str, str], set[str]] = defaultdict(set)
     threshold = int(store.config["promotion"]["workflow_min_successful_recalls"])
     candidate_ttl_days = int(store.config["retention"]["candidate_ttl_days"])
@@ -172,7 +231,7 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
         processed_candidate_ids.append(candidate["candidate_id"])
         candidate_age = parse_timestamp(now) - parse_timestamp(candidate["created_at"])
         if candidate_age > timedelta(days=candidate_ttl_days):
-            summary["quarantined"] += 1
+            _bump(summary, "quarantined")
             operations.append(
                 _make_operation(
                     run_id,
@@ -186,7 +245,7 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
             continue
 
         if candidate["confidence"] < 0.45:
-            summary["quarantined"] += 1
+            _bump(summary, "quarantined")
             operations.append(
                 _make_operation(
                     run_id,
@@ -205,7 +264,7 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
         if candidate["type"] == "procedural_workflow":
             workflow_key = (candidate["scope"], candidate["title"])
             if workflow_evidence[workflow_key] < threshold:
-                summary["quarantined"] += 1
+                _bump(summary, "quarantined")
                 operations.append(
                     _make_operation(
                         run_id,
@@ -220,11 +279,15 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
 
         if candidate["type"] == "contested_fact":
             if existing:
-                existing["source_event_ids"] = sorted(set(existing["source_event_ids"]) | set(candidate["derived_from_event_ids"]))
-                existing["conflicts_with"] = sorted(set(existing["conflicts_with"]) | set(candidate.get("conflicts_with", [])))
+                existing["source_event_ids"] = sorted(
+                    set(existing["source_event_ids"]) | set(candidate["derived_from_event_ids"])
+                )
+                existing["conflicts_with"] = sorted(
+                    set(existing["conflicts_with"]) | set(candidate.get("conflicts_with", []))
+                )
                 existing["status"] = "contested"
                 existing["updated_at"] = now
-                summary["contested"] += 1
+                _bump(summary, "contested")
                 operations.append(
                     _make_operation(
                         run_id,
@@ -239,7 +302,7 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
                 record = _record_from_candidate(candidate, now=now, status="contested")
                 existing_records.append(record)
                 existing_lookup[lookup_key] = record
-                summary["contested"] += 1
+                _bump(summary, "contested")
                 operations.append(
                     _make_operation(
                         run_id,
@@ -253,12 +316,16 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
             continue
 
         if existing and _same_body(existing, candidate):
-            existing["source_event_ids"] = sorted(set(existing["source_event_ids"]) | set(candidate["derived_from_event_ids"]))
-            existing["conflicts_with"] = sorted(set(existing["conflicts_with"]) | set(candidate.get("conflicts_with", [])))
+            existing["source_event_ids"] = sorted(
+                set(existing["source_event_ids"]) | set(candidate["derived_from_event_ids"])
+            )
+            existing["conflicts_with"] = sorted(
+                set(existing["conflicts_with"]) | set(candidate.get("conflicts_with", []))
+            )
             existing["confidence"] = round(max(existing["confidence"], candidate["confidence"]), 2)
             existing["salience"] = round(max(existing["salience"], candidate["salience"]), 2)
             existing["updated_at"] = now
-            summary["updated"] += 1
+            _bump(summary, "updated")
             operations.append(
                 _make_operation(
                     run_id,
@@ -278,8 +345,8 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
             new_record = _record_from_candidate(candidate, now=now, supersedes=[existing["memory_id"]])
             existing_records.append(new_record)
             existing_lookup[lookup_key] = new_record
-            summary["superseded"] += 1
-            summary["created"] += 1
+            _bump(summary, "superseded")
+            _bump(summary, "created")
             operations.append(
                 _make_operation(
                     run_id,
@@ -311,7 +378,7 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
                 conflicts_with=[existing["memory_id"], *candidate.get("conflicts_with", [])],
             )
             existing_records.append(contested)
-            summary["contested"] += 1
+            _bump(summary, "contested")
             operations.append(
                 _make_operation(
                     run_id,
@@ -330,7 +397,7 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
             new_record["source_event_ids"] = sorted(workflow_events[workflow_key])
         existing_records.append(new_record)
         existing_lookup[lookup_key] = new_record
-        summary["created"] += 1
+        _bump(summary, "created")
         operations.append(
             _make_operation(
                 run_id,
@@ -350,9 +417,9 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
             continue
         age_days = (now_dt - parse_timestamp(record["updated_at"])).days
         if record["type"] == "pending_item" and age_days > pending_decay_days:
-            record["status"] = "deprecated"
+            record["status"] = "quarantined"
             record["updated_at"] = now
-            summary["quarantined"] += 1
+            _bump(summary, "quarantined")
             operations.append(
                 _make_operation(
                     run_id,
@@ -364,9 +431,9 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
                 )
             )
         elif record["type"] == "semantic_fact" and record["confidence"] < 0.5 and age_days > weak_decay_days:
-            record["status"] = "deprecated"
+            record["status"] = "quarantined"
             record["updated_at"] = now
-            summary["quarantined"] += 1
+            _bump(summary, "quarantined")
             operations.append(
                 _make_operation(
                     run_id,
@@ -383,6 +450,7 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
     entries = _build_startup_index(existing_records)
     store.save_startup_index(entries, generated_at=now)
     summary["startup_index_entries"] = len(entries[: int(store.config["index_policy"]["max_entries"])])
-    store.write_consolidation_audit(run_id, operations, summary, before_snapshot)
+    audit = store.write_consolidation_audit(run_id, operations, summary, before_snapshot)
     store.mark_candidates_processed(processed_candidate_ids)
+    summary["audit"] = audit
     return summary

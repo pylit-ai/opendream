@@ -4,20 +4,22 @@
 Enduring technical structure of the system. Task-level implementation detail belongs in specs and plans.
 
 ## High-level components
-- `opendream_memory.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, bootstrap indexing, consolidation, retrieval, and demo runs
-- `opendream_memory.storage` — filesystem-backed memory store, lock handling, markdown generation, and audit artifact emission
+- `opendream_memory.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, dreaming, retrieval, evaluation, and release-oriented verification hooks
+- `opendream_memory.storage` — filesystem-backed memory store, lock handling, custom memory-root routing, markdown generation, and audit artifact emission
 - `opendream_memory.extractor` — deterministic conversion from immutable events into typed memory candidates
 - `opendream_memory.bootstrap` — first-pass historical indexing that stages candidates and category inventory without durable apply
 - `opendream_memory.consolidator` — single-writer durable-memory maintenance, supersession, contradiction handling, decay, and startup-index generation
-- `opendream_memory.retriever` — bounded lexical retrieval with task-aware type boosts and retrieval audit output
+- `opendream_memory.dream` + `opendream_memory.episodes` — transcript and log ingestion plus four-phase reflective dreaming
+- `opendream_memory.retriever` — hybrid retrieval with lexical, semantic, scope, recency, and type-aware scoring plus structured retrieval explanations
 - `tests/fixtures/` + `tests/` — reproducible corpora and end-to-end verification harness for the subsystem
 
 ## Data flow
-- events are appended as JSONL evidence under `memory/state/events/`
+- events are appended as JSONL evidence under the configured memory root
+- transcript or log episodes are narrowed into dream-worthy signal before event staging
 - extraction produces typed candidates under `memory/state/candidates/`
 - consolidation promotes candidates into durable records in `memory/state/durable_records.json`
-- durable records are rendered to `memory/MEMORY.md` and `memory/topics/*.md`
-- consolidation and retrieval emit audit artifacts under `memory/audit/`
+- durable records are rendered to `MEMORY.md`, topic markdown, and optional AutoDream compatibility views
+- direct writes, dream runs, consolidation, retrieval, and release checks emit audit artifacts
 
 ## Boundaries
 - no external network or database boundary in the default implementation

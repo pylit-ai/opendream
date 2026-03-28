@@ -5,7 +5,6 @@ from typing import Any
 from .models import MemoryCandidate
 from .util import first_tag, parse_tags, stable_id, summarize, to_iso, utc_now
 
-
 TYPE_CONFIDENCE = {
     "user_preference": 0.8,
     "project_decision": 0.9,
@@ -38,7 +37,9 @@ def classify_event(event: dict[str, Any]) -> str | None:
         return "pending_item"
     if kind in {"workflow_step", "task_outcome"} and "workflow" in tags:
         return "procedural_workflow"
-    if kind in {"debug_outcome", "tool_failure"} and ("anti-pattern" in content or "avoid" in content or "anti-pattern" in tags):
+    if kind in {"debug_outcome", "tool_failure"} and (
+        "anti-pattern" in content or "avoid" in content or "anti-pattern" in tags
+    ):
         return "anti_pattern"
     if kind in {"debug_outcome", "task_outcome", "tool_failure"}:
         return "semantic_fact"

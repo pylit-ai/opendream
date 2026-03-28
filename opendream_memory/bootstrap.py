@@ -43,10 +43,14 @@ def bootstrap_index(
         ],
         "candidates": [candidate.to_dict() for candidate in accepted],
         "raw_only_ids": sorted(raw_only_ids),
-        "quarantine_ids": sorted(candidate.candidate_id for candidate in quarantined if candidate.candidate_id not in accepted_by_id),
+        "quarantine_ids": sorted(
+            candidate.candidate_id
+            for candidate in quarantined
+            if candidate.candidate_id not in accepted_by_id
+        ),
     }
 
-    store.write_bootstrap_report(report["run_id"], report)
+    store.write_bootstrap_report(str(report["run_id"]), report)
     if accepted:
-        store.append_candidates(accepted, report["run_id"])
+        store.append_candidates(accepted, str(report["run_id"]))
     return report

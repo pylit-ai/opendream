@@ -4,19 +4,41 @@ import difflib
 import json
 import os
 import time
+from collections.abc import Iterable
 from contextlib import AbstractContextManager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from .models import ConsolidationOperation, MemoryCandidate, MemoryEvent, MemoryRecord, StartupIndexEntry
-from .util import ensure_relative_to, parse_timestamp, read_json, stable_id, summarize, to_iso, utc_now, write_json
+from .models import (
+    Annotation,
+    ConsolidationOperation,
+    ContextAssembly,
+    MemoryCandidate,
+    MemoryEvent,
+    MemoryRecord,
+    ReviewDecision,
+    StartupIndexEntry,
+)
+from .util import (
+    append_jsonl,
+    atomic_write_text,
+    ensure_relative_to,
+    parse_timestamp,
+    read_json,
+    stable_id,
+    summarize,
+    to_iso,
+    utc_now,
+    write_json,
+)
 from .validation import validate_document
-
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "locks": {"ttl_seconds": 1800},
     "index_policy": {"max_entries": 40, "max_chars_per_summary": 140},
+    "dream": {"max_recent_episodes": 120, "min_episode_signals": 1},
+    "retrieval": {"embedding_enabled": True, "semantic_merge_threshold": 0.72},
     "retention": {
         "candidate_ttl_days": 14,
         "pending_item_decay_days": 7,
@@ -64,7 +86,7 @@ class FileLock(AbstractContextManager["FileLock"]):
                 self.path.unlink(missing_ok=True)
                 fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             else:
-                raise LockError(f"lock already held: {self.path}")
+                raise LockError(f"lock already held: {self.path}") from None
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             payload = {"pid": os.getpid(), "acquired_at": to_iso(utc_now())}
             handle.write(json.dumps(payload))
@@ -94,7 +116,7 @@ class FileLock(AbstractContextManager["FileLock"]):
             self.path.unlink(missing_ok=True)
             self.acquired = False
 
-    def __enter__(self) -> "FileLock":
+    def __enter__(self) -> FileLock:
         self.acquire()
         return self
 
@@ -103,25 +125,44 @@ class FileLock(AbstractContextManager["FileLock"]):
 
 
 class MemoryStore:
-    def __init__(self, workspace: Path, config: dict[str, Any] | None = None, store_kind_hint: str | None = None) -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        config: dict[str, Any] | None = None,
+        store_kind_hint: str | None = None,
+        memory_dir: str | None = None,
+        compat_mode: str | None = None,
+    ) -> None:
         self.workspace = Path(workspace).expanduser()
-        self.memory_root = self.workspace / "memory"
+        self.memory_dir_name = memory_dir or "memory"
+        if Path(self.memory_dir_name).is_absolute():
+            raise ValueError("memory_dir must be relative to the workspace")
+        self.memory_root = self.workspace / self.memory_dir_name
         self.config = _deep_merge(DEFAULT_CONFIG, config or {})
         self.store_kind_hint = store_kind_hint
+        self.compat_mode_hint = compat_mode
         self.topics_dir = self.memory_root / "topics"
         self.events_dir = self.memory_root / "state" / "events"
         self.candidates_dir = self.memory_root / "state" / "candidates"
         self.audit_consolidation_dir = self.memory_root / "audit" / "consolidation"
         self.audit_retrieval_dir = self.memory_root / "audit" / "retrieval"
+        self.audit_context_dir = self.memory_root / "audit" / "context"
         self.audit_bootstrap_dir = self.memory_root / "audit" / "bootstrap"
+        self.audit_dream_dir = self.memory_root / "audit" / "dream"
+        self.audit_mutation_dir = self.memory_root / "audit" / "mutations"
+        self.annotations_dir = self.memory_root / "audit" / "annotations"
+        self.reviews_dir = self.memory_root / "audit" / "reviews"
+        self.exports_dir = self.memory_root / "audit" / "exports"
         self.locks_dir = self.memory_root / "locks"
         self.state_dir = self.memory_root / "state"
         self.durable_records_path = self.state_dir / "durable_records.json"
         self.index_json_path = self.state_dir / "index.json"
+        self.observability_index_path = self.state_dir / "observability_index.json"
         self.memory_md_path = self.memory_root / "MEMORY.md"
         self.processed_candidates_path = self.state_dir / "processed_candidates.json"
         self.extraction_state_path = self.state_dir / "processed_events.json"
         self.maintenance_state_path = self.state_dir / "maintenance_state.json"
+        self.dream_state_path = self.state_dir / "dream_state.json"
         self.store_metadata_path = self.state_dir / "store.json"
 
     def default_store_metadata(self, *, store_kind: str | None = None) -> dict[str, Any]:
@@ -134,9 +175,17 @@ class MemoryStore:
             "store_kind": resolved_kind,
             "workspace": str(self.workspace),
             "created_at": to_iso(utc_now()),
+            "layout": {
+                "memory_dir": self.memory_dir_name,
+                "compat_mode": self.compat_mode_hint or "canonical",
+            },
             "scheduler": {
                 "min_new_events": int(scheduler["min_new_events"]),
                 "min_interval_seconds": int(scheduler["min_interval_seconds"]),
+            },
+            "dream": {
+                "max_recent_episodes": int(self.config["dream"]["max_recent_episodes"]),
+                "min_episode_signals": int(self.config["dream"]["min_episode_signals"]),
             },
         }
 
@@ -155,6 +204,8 @@ class MemoryStore:
             if key in payload:
                 merged[key] = payload[key]
         merged["scheduler"] = _deep_merge(metadata["scheduler"], payload.get("scheduler", {}))
+        merged["dream"] = _deep_merge(metadata["dream"], payload.get("dream", {}))
+        merged["layout"] = _deep_merge(metadata["layout"], payload.get("layout", {}))
         return merged
 
     @property
@@ -165,11 +216,20 @@ class MemoryStore:
     def store_id(self) -> str:
         return str(self.load_store_metadata()["store_id"])
 
-    def initialize(self, *, store_kind: str = "project") -> dict[str, Any]:
+    @property
+    def compat_mode(self) -> str:
+        return str(self.load_store_metadata()["layout"]["compat_mode"])
+
+    def initialize(self, *, store_kind: str = "project", compat_mode: str | None = None) -> dict[str, Any]:
         metadata = self.load_store_metadata()
         metadata["store_kind"] = store_kind
         metadata["store_id"] = stable_id("store", self.workspace.resolve(), store_kind)
         metadata["workspace"] = str(self.workspace)
+        metadata.setdefault("layout", {})
+        metadata["layout"]["memory_dir"] = self.memory_dir_name
+        metadata["layout"]["compat_mode"] = compat_mode or self.compat_mode_hint or metadata["layout"].get(
+            "compat_mode", "canonical"
+        )
         if not self.store_metadata_path.exists():
             metadata["created_at"] = to_iso(utc_now())
         self._ensure_directories()
@@ -191,7 +251,13 @@ class MemoryStore:
             self.candidates_dir,
             self.audit_consolidation_dir,
             self.audit_retrieval_dir,
+            self.audit_context_dir,
             self.audit_bootstrap_dir,
+            self.audit_dream_dir,
+            self.audit_mutation_dir,
+            self.annotations_dir,
+            self.reviews_dir,
+            self.exports_dir,
             self.locks_dir,
             self.state_dir,
         ]:
@@ -202,8 +268,10 @@ class MemoryStore:
             write_json(self.durable_records_path, [])
         if not self.index_json_path.exists():
             write_json(self.index_json_path, {"generated_at": to_iso(utc_now()), "entries": []})
+        if not self.observability_index_path.exists():
+            write_json(self.observability_index_path, {"generated_at": to_iso(utc_now()), "entities": {}})
         if not self.memory_md_path.exists():
-            self.memory_md_path.write_text("# Startup Memory Index\n\n", encoding="utf-8")
+            atomic_write_text(self.memory_md_path, "# Startup Memory Index\n\n")
 
     def scheduler_policy(
         self,
@@ -219,14 +287,39 @@ class MemoryStore:
             ),
         }
 
+    def dream_policy(
+        self,
+        *,
+        max_recent_episodes: int | None = None,
+        min_episode_signals: int | None = None,
+    ) -> dict[str, int]:
+        dream = self.load_store_metadata()["dream"]
+        return {
+            "max_recent_episodes": int(
+                max_recent_episodes if max_recent_episodes is not None else dream["max_recent_episodes"]
+            ),
+            "min_episode_signals": int(
+                min_episode_signals if min_episode_signals is not None else dream["min_episode_signals"]
+            ),
+        }
+
     def lock(self) -> FileLock:
         self.ensure_layout()
         ttl = int(self.config["locks"]["ttl_seconds"])
         return FileLock(self.locks_dir / "consolidator.lock", ttl_seconds=ttl)
 
+    def dream_lock(self) -> FileLock:
+        self.ensure_layout()
+        ttl = int(self.config["locks"]["ttl_seconds"])
+        return FileLock(self.locks_dir / "dream.lock", ttl_seconds=ttl)
+
     def lock_state(self) -> dict[str, Any]:
         ttl = int(self.config["locks"]["ttl_seconds"])
         return FileLock(self.locks_dir / "consolidator.lock", ttl_seconds=ttl).describe()
+
+    def dream_lock_state(self) -> dict[str, Any]:
+        ttl = int(self.config["locks"]["ttl_seconds"])
+        return FileLock(self.locks_dir / "dream.lock", ttl_seconds=ttl).describe()
 
     def pending_event_count(self) -> int:
         if not self.is_initialized():
@@ -258,6 +351,12 @@ class MemoryStore:
                     min_new_events=min_new_events,
                     min_interval_seconds=min_interval_seconds,
                 ),
+                "dream": {
+                    "state": "never_ran",
+                    "last_ran_at": None,
+                    "lock": self.dream_lock_state(),
+                    "policy": metadata["dream"],
+                },
                 "next_eligible_reason": "not-initialized",
                 "next_eligible_at": None,
             }
@@ -271,6 +370,7 @@ class MemoryStore:
         last_run_at = maintenance_state.get("last_run_at")
         pending_events = self.pending_event_count()
         pending_candidates = len(self.load_pending_candidates())
+        dream_state = self.load_dream_state()
         next_eligible_reason = "eligible"
         next_eligible_at = None
 
@@ -303,6 +403,12 @@ class MemoryStore:
             "last_run_at": last_run_at,
             "lock": lock,
             "policy": policy,
+            "dream": {
+                "state": dream_state.get("state", "never_ran"),
+                "last_ran_at": dream_state.get("last_ran_at"),
+                "lock": self.dream_lock_state(),
+                "policy": self.load_store_metadata()["dream"],
+            },
             "next_eligible_reason": next_eligible_reason,
             "next_eligible_at": next_eligible_at,
         }
@@ -313,8 +419,7 @@ class MemoryStore:
         validate_document("memory-event.schema.json", payload)
         month = parse_timestamp(event.timestamp).strftime("%Y-%m")
         path = self.events_dir / f"events-{month}.jsonl"
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, sort_keys=True) + "\n")
+        append_jsonl(path, [payload])
         return path
 
     def load_events(self) -> list[dict[str, Any]]:
@@ -327,11 +432,12 @@ class MemoryStore:
     def append_candidates(self, candidates: Iterable[MemoryCandidate], run_id: str) -> Path:
         self.ensure_layout()
         path = self.candidates_dir / f"{run_id}.jsonl"
-        with path.open("a", encoding="utf-8") as handle:
-            for candidate in candidates:
-                payload = candidate.to_dict()
-                validate_document("memory-candidate.schema.json", payload)
-                handle.write(json.dumps(payload, sort_keys=True) + "\n")
+        rows: list[dict[str, Any]] = []
+        for candidate in candidates:
+            payload = candidate.to_dict()
+            validate_document("memory-candidate.schema.json", payload)
+            rows.append(payload)
+        append_jsonl(path, rows)
         return path
 
     def load_pending_candidates(self) -> list[dict[str, Any]]:
@@ -360,19 +466,40 @@ class MemoryStore:
 
     def load_durable_records(self) -> list[dict[str, Any]]:
         self.ensure_layout()
-        return read_json(self.durable_records_path, [])
+        payload = read_json(self.durable_records_path, [])
+        return payload if isinstance(payload, list) else []
 
     def load_startup_index(self) -> dict[str, Any]:
         self.ensure_layout()
-        return read_json(self.index_json_path, {"generated_at": to_iso(utc_now()), "entries": []})
+        payload = read_json(self.index_json_path, {"generated_at": to_iso(utc_now()), "entries": []})
+        return payload if isinstance(payload, dict) else {"generated_at": to_iso(utc_now()), "entries": []}
 
     def load_maintenance_state(self) -> dict[str, Any]:
         self.ensure_layout()
-        return read_json(self.maintenance_state_path, {})
+        payload = read_json(self.maintenance_state_path, {})
+        return payload if isinstance(payload, dict) else {}
 
     def save_maintenance_state(self, payload: dict[str, Any]) -> None:
         self.ensure_layout()
         write_json(self.maintenance_state_path, payload)
+
+    def load_dream_state(self) -> dict[str, Any]:
+        self.ensure_layout()
+        payload = read_json(self.dream_state_path, {})
+        return payload if isinstance(payload, dict) else {}
+
+    def save_dream_state(self, payload: dict[str, Any]) -> None:
+        self.ensure_layout()
+        write_json(self.dream_state_path, payload)
+
+    def load_observability_index(self) -> dict[str, Any]:
+        self.ensure_layout()
+        payload = read_json(self.observability_index_path, {"generated_at": to_iso(utc_now()), "entities": {}})
+        return payload if isinstance(payload, dict) else {"generated_at": to_iso(utc_now()), "entities": {}}
+
+    def save_observability_index(self, payload: dict[str, Any]) -> None:
+        self.ensure_layout()
+        write_json(self.observability_index_path, payload)
 
     def save_durable_records(self, records: list[MemoryRecord]) -> None:
         serialized = [record.to_dict() for record in sorted(records, key=lambda item: item.memory_id)]
@@ -381,6 +508,7 @@ class MemoryStore:
         write_json(self.durable_records_path, serialized)
         for record in serialized:
             self._write_topic_markdown(record)
+        self._write_compat_views(serialized)
 
     def save_startup_index(self, entries: list[StartupIndexEntry], generated_at: str) -> None:
         policy = self.config["index_policy"]
@@ -396,7 +524,7 @@ class MemoryStore:
         for entry in limited_entries:
             summary = summarize(entry.summary, int(policy["max_chars_per_summary"]))
             lines.append(f"- [{entry.type}] {entry.title} :: {summary} ({entry.path})")
-        self.memory_md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        atomic_write_text(self.memory_md_path, "\n".join(lines) + "\n")
 
     def write_consolidation_audit(
         self,
@@ -404,17 +532,130 @@ class MemoryStore:
         operations: list[ConsolidationOperation],
         summary: dict[str, Any],
         before_snapshot: dict[str, str],
-    ) -> None:
+    ) -> dict[str, str]:
         self.ensure_layout()
         op_path = self.audit_consolidation_dir / f"{run_id}.jsonl"
-        with op_path.open("w", encoding="utf-8") as handle:
-            for operation in operations:
-                payload = operation.to_dict()
-                validate_document("consolidation-op.schema.json", payload)
-                handle.write(json.dumps(payload, sort_keys=True) + "\n")
-        write_json(self.audit_consolidation_dir / f"{run_id}-summary.json", summary)
+        rows: list[dict[str, Any]] = []
+        for operation in operations:
+            payload = operation.to_dict()
+            validate_document("consolidation-op.schema.json", payload)
+            rows.append(payload)
+        append_jsonl(op_path, rows)
+        return self.write_mutation_audit(
+            action="consolidation",
+            run_id=run_id,
+            target_paths=[op_path, self.durable_records_path, self.index_json_path, self.memory_md_path],
+            summary=summary,
+            before_snapshot=before_snapshot,
+            audit_dir=self.audit_consolidation_dir,
+        )
 
-        after_snapshot = self.snapshot_memory_text()
+    def write_bootstrap_report(self, run_id: str, report: dict[str, Any]) -> Path:
+        path = self.audit_bootstrap_dir / f"{run_id}.json"
+        write_json(path, report)
+        return path
+
+    def write_retrieval_audit(self, run_id: str, payload: dict[str, Any]) -> Path:
+        path = self.audit_retrieval_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_context_assembly(self, assembly: ContextAssembly) -> Path:
+        path = self.audit_context_dir / f"{assembly.context_id}.json"
+        write_json(path, assembly.to_dict())
+        return path
+
+    def load_context_assemblies(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        assemblies: list[dict[str, Any]] = []
+        for path in sorted(self.audit_context_dir.glob("*.json")):
+            payload = read_json(path, {})
+            if isinstance(payload, dict):
+                payload.setdefault("source_path", str(path))
+                assemblies.append(payload)
+        return assemblies
+
+    def write_dream_audit(
+        self,
+        run_id: str,
+        summary: dict[str, Any],
+        before_snapshot: dict[str, str],
+    ) -> None:
+        self.write_mutation_audit(
+            action="dream",
+            run_id=run_id,
+            target_paths=[self.events_dir, self.durable_records_path, self.index_json_path, self.memory_md_path],
+            summary=summary,
+            before_snapshot=before_snapshot,
+            audit_dir=self.audit_dream_dir,
+        )
+
+    def append_annotation(self, annotation: Annotation) -> Path:
+        path = self.annotations_dir / f"{annotation.created_at[:10]}.jsonl"
+        append_jsonl(path, [annotation.to_dict()])
+        return path
+
+    def load_annotations(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        rows: list[dict[str, Any]] = []
+        for path in sorted(self.annotations_dir.glob("*.jsonl")):
+            rows.extend(self._load_jsonl(path))
+        return rows
+
+    def append_review_decision(self, decision: ReviewDecision) -> Path:
+        path = self.reviews_dir / f"{decision.created_at[:10]}.jsonl"
+        append_jsonl(path, [decision.to_dict()])
+        return path
+
+    def load_review_decisions(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        rows: list[dict[str, Any]] = []
+        for path in sorted(self.reviews_dir.glob("*.jsonl")):
+            rows.extend(self._load_jsonl(path))
+        return rows
+
+    def write_export_record(self, export_id: str, payload: dict[str, Any]) -> Path:
+        path = self.exports_dir / f"{export_id}.json"
+        write_json(path, payload)
+        return path
+
+    def load_export_records(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        rows: list[dict[str, Any]] = []
+        for path in sorted(self.exports_dir.glob("*.json")):
+            payload = read_json(path, {})
+            if isinstance(payload, dict):
+                payload.setdefault("source_path", str(path))
+                rows.append(payload)
+        return rows
+
+    def write_mutation_audit(
+        self,
+        *,
+        action: str,
+        run_id: str,
+        target_paths: list[Path],
+        summary: dict[str, Any],
+        before_snapshot: dict[str, str],
+        audit_dir: Path | None = None,
+    ) -> dict[str, str]:
+        destination = audit_dir or self.audit_mutation_dir
+        self.ensure_layout()
+        summary_payload = {
+            "action": action,
+            "run_id": run_id,
+            "workspace": str(self.workspace),
+            "memory_root": str(self.memory_root),
+            "target_paths": [
+                str(path.relative_to(self.workspace)) if path.is_absolute() and path.exists() else str(path)
+                for path in target_paths
+            ],
+            "summary": summary,
+        }
+        summary_path = destination / f"{run_id}-summary.json"
+        write_json(summary_path, summary_payload)
+
+        after_snapshot = self.snapshot_store_text()
         diff_lines: list[str] = []
         for relative_path in sorted(set(before_snapshot) | set(after_snapshot)):
             before = before_snapshot.get(relative_path, "").splitlines(keepends=True)
@@ -429,25 +670,27 @@ class MemoryStore:
                     tofile=f"after/{relative_path}",
                 )
             )
-        (self.audit_consolidation_dir / f"{run_id}.diff").write_text("".join(diff_lines), encoding="utf-8")
+        diff_path = destination / f"{run_id}.diff"
+        atomic_write_text(diff_path, "".join(diff_lines))
+        return {
+            "summary_path": str(summary_path.relative_to(self.workspace)),
+            "diff_path": str(diff_path.relative_to(self.workspace)),
+        }
 
-    def write_bootstrap_report(self, run_id: str, report: dict[str, Any]) -> Path:
-        path = self.audit_bootstrap_dir / f"{run_id}.json"
-        write_json(path, report)
-        return path
-
-    def write_retrieval_audit(self, run_id: str, payload: dict[str, Any]) -> Path:
-        path = self.audit_retrieval_dir / f"{run_id}.json"
-        write_json(path, payload)
-        return path
-
-    def snapshot_memory_text(self) -> dict[str, str]:
+    def snapshot_store_text(self) -> dict[str, str]:
         snapshot: dict[str, str] = {}
-        if self.memory_md_path.exists():
-            snapshot[str(self.memory_md_path.relative_to(self.workspace))] = self.memory_md_path.read_text(encoding="utf-8")
-        for path in sorted(self.topics_dir.glob("*.md")):
+        if not self.memory_root.exists():
+            return snapshot
+        for path in sorted(self.memory_root.rglob("*")):
+            if not path.is_file():
+                continue
+            if path.suffix not in {".md", ".json", ".jsonl", ".diff"}:
+                continue
             snapshot[str(path.relative_to(self.workspace))] = path.read_text(encoding="utf-8")
         return snapshot
+
+    def snapshot_memory_text(self) -> dict[str, str]:
+        return self.snapshot_store_text()
 
     def iter_memory_paths(self) -> list[Path]:
         if not self.memory_root.exists():
@@ -484,7 +727,28 @@ class MemoryStore:
         if record["conflicts_with"]:
             lines.extend(["", "## Conflicts"])
             lines.extend(f"- {item}" for item in record["conflicts_with"])
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        atomic_write_text(path, "\n".join(lines) + "\n")
+
+    def _write_compat_views(self, records: list[dict[str, Any]]) -> None:
+        if self.compat_mode != "autodream":
+            return
+        grouped = {
+            "project.md": [
+                record
+                for record in records
+                if record["status"] == "active" and record["scope"] == "project"
+            ],
+            "user.md": [
+                record
+                for record in records
+                if record["status"] == "active" and record["scope"] in {"user", "global"}
+            ],
+        }
+        for filename, selected in grouped.items():
+            lines = [f"# {filename.replace('.md', '').title()} Memory", ""]
+            for record in selected:
+                lines.append(f"- [{record['type']}] {record['title']} :: {record['summary']}")
+            atomic_write_text(self.memory_root / filename, "\n".join(lines).rstrip() + "\n")
 
     @staticmethod
     def _load_jsonl(path: Path) -> list[dict[str, Any]]:

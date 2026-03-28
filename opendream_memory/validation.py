@@ -7,7 +7,6 @@ from typing import Any
 
 from .util import SCHEMA_ROOT
 
-
 REQUIRED_SCHEMA_FILES = (
     "memory-event.schema.json",
     "memory-candidate.schema.json",
@@ -17,7 +16,10 @@ REQUIRED_SCHEMA_FILES = (
 )
 
 
-TYPE_MAP = {
+ClassInfo = type[Any] | tuple[type[Any], ...]
+
+
+TYPE_MAP: dict[str, ClassInfo] = {
     "object": dict,
     "array": list,
     "string": str,
@@ -34,7 +36,10 @@ class SchemaValidationError(ValueError):
 
 def load_schema(name: str) -> dict[str, Any]:
     path = SCHEMA_ROOT / name
-    return json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise SchemaValidationError(f"schema {name} must decode to an object")
+    return payload
 
 
 def required_schema_files() -> tuple[str, ...]:

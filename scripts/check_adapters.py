@@ -11,9 +11,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from opendream_memory.cli import build_parser
-
-
 COMMAND_RE = re.compile(r"\bopendream-memory\s+([a-z0-9-]+)")
 REQUIRED_FILES = [
     ".meta/spec-adapters/claude-code/README.md",
@@ -36,6 +33,8 @@ REQUIRED_FILES = [
 
 
 def cli_commands() -> set[str]:
+    from opendream_memory.cli import build_parser
+
     parser = build_parser()
     for action in parser._actions:
         if isinstance(action, _SubParsersAction):

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OPEN_SPEC_ROOT = REPO_ROOT / "openspec" / "changes" / "401-autodream-style-memory-subsystem"
@@ -15,6 +15,62 @@ SCHEMA_ROOT = Path(__file__).resolve().with_name("schema")
 FIXTURE_ROOT = Path(__file__).resolve().with_name("fixtures")
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "be",
+    "for",
+    "from",
+    "in",
+    "into",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "this",
+    "to",
+    "use",
+    "we",
+    "with",
+}
+SEMANTIC_SYNONYMS = {
+    "package": "dependency",
+    "packages": "dependency",
+    "dependency": "dependency",
+    "dependencies": "dependency",
+    "installer": "dependency",
+    "manager": "dependency",
+    "npm": "dependency",
+    "pnpm": "dependency",
+    "uv": "dependency",
+    "workflow": "workflow",
+    "process": "workflow",
+    "procedure": "workflow",
+    "steps": "workflow",
+    "migrate": "migration",
+    "migration": "migration",
+    "migrations": "migration",
+    "schema": "migration",
+    "redis": "redis",
+    "cache": "redis",
+    "caching": "redis",
+    "summary": "summary",
+    "summaries": "summary",
+    "concise": "brief",
+    "brief": "brief",
+    "pager": "pager",
+    "paging": "pager",
+    "bat": "pager",
+    "ripgrep": "search",
+    "search": "search",
+    "find": "search",
+}
 
 
 def utc_now() -> datetime:
@@ -54,6 +110,15 @@ def tokenize(text: str) -> set[str]:
     return {token for token in TOKEN_RE.findall(text.lower()) if len(token) > 1}
 
 
+def semantic_tokens(text: str) -> set[str]:
+    normalized: set[str] = set()
+    for token in tokenize(text):
+        if token in STOPWORDS:
+            continue
+        normalized.add(SEMANTIC_SYNONYMS.get(token, token))
+    return normalized
+
+
 def parse_tags(tags: list[str] | None) -> dict[str, list[str]]:
     parsed: dict[str, list[str]] = {}
     for tag in tags or []:
@@ -80,9 +145,35 @@ def read_json(path: Path, default: Any) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_json(path: Path, data: Any) -> None:
+def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json_dumps(data) + "\n", encoding="utf-8")
+    temp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    with temp_path.open("w", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp_path, path)
+
+
+def write_json(path: Path, data: Any) -> None:
+    atomic_write_text(path, json_dumps(data) + "\n")
+
+
+def append_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def ensure_relative_to(path: Path, base: Path) -> None:

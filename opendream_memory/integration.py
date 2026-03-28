@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from .consolidator import consolidate
 from .extractor import extract_candidates
-from .models import MemoryEvent
+from .models import ContextAssembly, MemoryEvent
 from .retriever import retrieve
-from .storage import MemoryStore, STORE_KIND_PRECEDENCE, store_sort_key
+from .storage import STORE_KIND_PRECEDENCE, MemoryStore, store_sort_key
 from .util import parse_timestamp, stable_id, summarize, to_iso, utc_now
 from .validation import validate_document
-
 
 GLOBAL_ROUTE_BLOCKED_SENSITIVITY = {"secret", "sensitive", "do_not_store"}
 
@@ -24,9 +24,9 @@ def _store_descriptor(store: MemoryStore) -> dict[str, Any]:
 
 
 def _memory_key(record: dict[str, Any]) -> str:
-    _, _, suffix = record["title"].partition(":")
-    candidate = suffix.strip().lower() or record["title"].strip().lower()
-    return candidate
+    title = str(record.get("title", ""))
+    _, _, suffix = title.partition(":")
+    return suffix.strip().lower() or title.strip().lower()
 
 
 def emit_event(
@@ -69,7 +69,15 @@ def emit_event(
     )
     payload = event.to_dict()
     validate_document("memory-event.schema.json", payload)
+    before_snapshot = store.snapshot_store_text()
     path = store.append_event(event)
+    audit = store.write_mutation_audit(
+        action="emit-event",
+        run_id=stable_id("emit", computed_event_id, event_timestamp),
+        target_paths=[path],
+        summary={"status": "appended", "event_id": computed_event_id, "kind": kind, "scope": scope},
+        before_snapshot=before_snapshot,
+    )
     return {
         "status": "appended",
         "workspace": str(store.workspace),
@@ -77,6 +85,7 @@ def emit_event(
         "store_kind": store.store_kind,
         "event_id": computed_event_id,
         "event_path": str(path.relative_to(store.workspace)),
+        "audit": audit,
     }
 
 
@@ -281,11 +290,14 @@ def prepare_context(
     store_list = [stores] if isinstance(stores, MemoryStore) else sorted(stores, key=store_sort_key)
     merged_candidates: list[dict[str, Any]] = []
     startup_entries: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    retrieval_run_ids: list[str] = []
 
     for store in store_list:
         if not store.is_initialized():
             continue
         retrieval = retrieve(store, query=query, limit=max(limit * 3, limit), now=timestamp)
+        retrieval_run_ids.append(str(retrieval.get("run_id", "")))
         records = {record["memory_id"]: record for record in store.load_durable_records()}
         for reason in retrieval["why"]:
             record = records.get(reason["memory_id"])
@@ -300,6 +312,16 @@ def prepare_context(
                     "body": record["body"],
                     "score": reason["score"],
                     "reason": reason["reason"],
+                    "store_id": store.store_id,
+                    "store_kind": store.store_kind,
+                    "workspace": str(store.workspace),
+                }
+            )
+        for item in retrieval.get("excluded", []):
+            excluded.append(
+                {
+                    "memory_id": item.get("memory_id"),
+                    "reason": item.get("reason"),
                     "store_id": store.store_id,
                     "store_kind": store.store_kind,
                     "workspace": str(store.workspace),
@@ -392,11 +414,34 @@ def prepare_context(
         ]
     ).strip()
 
+    primary_store = store_list[0]
+    selected_ids = [item["memory_id"] for item in selected]
+    omitted = [item for item in excluded if item.get("memory_id") not in selected_ids]
+    context_id = stable_id("context", timestamp, query, ",".join(selected_ids))
+    assembly = ContextAssembly(
+        context_id=context_id,
+        session_id=stable_id("session", query),
+        turn_id=stable_id("turn", timestamp, query),
+        retrieval_run_id=",".join(run_id for run_id in retrieval_run_ids if run_id),
+        startup_index_snapshot=filtered_startup_entries,
+        selected_memory_ids=selected_ids,
+        omitted_memory_ids=[str(item.get("memory_id") or "") for item in omitted if item.get("memory_id")],
+        omission_reasons=omitted,
+        assembled_text=prompt_context,
+        character_count=len(prompt_context),
+        token_estimate=max(1, len(prompt_context.split())),
+        created_at=timestamp,
+    )
+    if primary_store.is_initialized():
+        primary_store.write_context_assembly(assembly)
+
     return {
         "workspace": str(store_list[0].workspace) if len(store_list) == 1 else None,
         "stores": [_store_descriptor(store) for store in store_list],
-        "selected_memory_ids": [item["memory_id"] for item in selected],
+        "context_id": context_id,
+        "selected_memory_ids": selected_ids,
         "selected_memories": selected,
+        "omitted": omitted,
         "why": [
             {
                 "memory_id": item["memory_id"],

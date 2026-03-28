@@ -14,7 +14,6 @@ from opendream_memory.consolidator import consolidate
 from opendream_memory.storage import MemoryStore
 from opendream_memory.validation import validate_document
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXED_NOW = "2026-03-26T12:00:00Z"
 
@@ -127,7 +126,9 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         global_result = run_cli("init", "--workspace", str(self.global_workspace), "--store-kind", "global")
 
         project_store = json.loads((self.workspace / "memory" / "state" / "store.json").read_text(encoding="utf-8"))
-        global_store = json.loads((self.global_workspace / "memory" / "state" / "store.json").read_text(encoding="utf-8"))
+        global_store = json.loads(
+            (self.global_workspace / "memory" / "state" / "store.json").read_text(encoding="utf-8")
+        )
 
         self.assertEqual(project_result["store_kind"], "project")
         self.assertEqual(global_result["store_kind"], "global")
@@ -175,7 +176,9 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         )
         records = {
             record["memory_id"]: record
-            for record in json.loads((self.workspace / "memory" / "state" / "durable_records.json").read_text(encoding="utf-8"))
+            for record in json.loads(
+                (self.workspace / "memory" / "state" / "durable_records.json").read_text(encoding="utf-8")
+            )
         }
         selected_titles = {records[memory_id]["title"] for memory_id in retrieval["selected_memory_ids"]}
         self.assertIn("Preference: package-manager", selected_titles)
@@ -239,6 +242,30 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         event = json.loads(event_files[0].read_text(encoding="utf-8").splitlines()[0])
         validate_document("memory-event.schema.json", event)
         self.assertEqual(event["kind"], "project_decision")
+        summary_path = self.workspace / result["audit"]["summary_path"]
+        diff_path = self.workspace / result["audit"]["diff_path"]
+        self.assertTrue(summary_path.exists())
+        self.assertTrue(diff_path.exists())
+
+    def test_custom_memory_dir_is_honored_for_direct_writes(self) -> None:
+        result = run_cli(
+            "emit-event",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--kind",
+            "project_decision",
+            "--content",
+            "Use the dedicated custom memory directory.",
+            "--message-ref",
+            "runtime-msg-custom-dir",
+            "--timestamp",
+            FIXED_NOW,
+        )
+        self.assertEqual(result["status"], "appended")
+        self.assertTrue((self.workspace / ".dream-memory" / "state" / "events").exists())
+        self.assertFalse((self.workspace / "memory").exists())
 
     def test_emit_event_can_route_to_global_store(self) -> None:
         run_cli("init", "--workspace", str(self.global_workspace), "--store-kind", "global")
@@ -414,6 +441,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         uninitialized = run_cli("status", "--workspace", str(self.workspace), "--now", FIXED_NOW)
         self.assertFalse(uninitialized["initialized"])
         self.assertEqual(uninitialized["state"], "uninitialized")
+        self.assertEqual(uninitialized["dream"]["state"], "never_ran")
 
         run_cli("init", "--workspace", str(self.workspace))
         lock_path = self.workspace / "memory" / "locks" / "consolidator.lock"
@@ -426,6 +454,61 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertTrue(snapshot["initialized"])
         self.assertTrue(snapshot["lock"]["present"])
         self.assertTrue(snapshot["lock"]["stale"])
+
+    def test_dream_run_ingests_transcript_only_fixture_and_normalizes_dates(self) -> None:
+        fixture = REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"
+        result = run_cli(
+            "dream",
+            "run",
+            "--workspace",
+            str(self.workspace),
+            "--episodes",
+            str(fixture),
+            "--now",
+            FIXED_NOW,
+            "--memory-dir",
+            ".dream-memory",
+            "--compat-mode",
+            "autodream",
+        )
+        self.assertEqual(result["status"], "completed")
+        memory_root = self.workspace / ".dream-memory"
+        self.assertTrue((memory_root / "MEMORY.md").exists())
+        self.assertTrue((memory_root / "project.md").exists())
+        self.assertTrue((memory_root / "user.md").exists())
+        records = json.loads((memory_root / "state" / "durable_records.json").read_text(encoding="utf-8"))
+        self.assertTrue(any("2026-03-27" in record["body"] for record in records))
+        status_snapshot = run_cli(
+            "status",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            ".dream-memory",
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(status_snapshot["dream"]["state"], "idle")
+        self.assertEqual(status_snapshot["dream"]["last_ran_at"], FIXED_NOW)
+
+    def test_dream_run_skips_when_lock_is_held(self) -> None:
+        fixture = REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"
+        run_cli("init", "--workspace", str(self.workspace))
+        lock_path = self.workspace / "memory" / "locks" / "dream.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text(json.dumps({"pid": 9999, "acquired_at": FIXED_NOW}), encoding="utf-8")
+
+        result = run_cli(
+            "dream",
+            "run",
+            "--workspace",
+            str(self.workspace),
+            "--episodes",
+            str(fixture),
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "lock-held")
 
     def test_tick_reports_status_and_repeated_invocation(self) -> None:
         run_cli("init", "--workspace", str(self.workspace))
@@ -510,6 +593,19 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(first["status"], "completed")
         self.assertTrue(all(item["status"] == "completed" for item in first["stores"]))
         self.assertEqual(second["status"], "skipped")
+
+    def test_eval_memory_quality_command(self) -> None:
+        result = run_cli(
+            "eval",
+            "memory-quality",
+            "--workspace",
+            str(self.workspace),
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["paraphrase_hits"], result["query_count"])
+        self.assertGreaterEqual(result["lexical_only_misses"], 1)
 
 
 if __name__ == "__main__":
