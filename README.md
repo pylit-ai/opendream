@@ -1,110 +1,233 @@
 # OpenDream
 
-OpenDream is a local-first memory subsystem for coding agents. It captures immutable evidence, derives typed memory candidates, consolidates durable memory with provenance, and exposes reproducible CLI workflows for bootstrap, dreaming, retrieval, evaluation, and release checks.
+[![CI](https://github.com/pylit-ai/opendream/actions/workflows/ci.yml/badge.svg)](https://github.com/pylit-ai/opendream/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/opendream?label=PyPI)](https://pypi.org/project/opendream/)
+[![Python versions](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-see%20LICENSE-lightgrey.svg)](./LICENSE)
 
-## Integration model (canonical surface)
+**Local-first memory for coding agents** — capture evidence, consolidate durable memory with provenance, and retrieve prompt-ready context from the CLI. No bundled long-running daemon and no in-repo “decide what to remember” model service: **your** hooks or automation choose when to run OpenDream.
 
-OpenDream’s **core product** is a **local CLI-first memory engine** plus the thin runtime integration layer from spec **403**. It does **not** ship a long-running daemon or an in-repo model-driven “decide what to remember” service.
+| If you want to… | Start here |
+|-----------------|------------|
+| Try it in a few commands | [Quick start](#quick-start) |
+| Wire it into an agent runtime | [Integration at a glance](#integration-at-a-glance) |
+| Browse memory in a browser | [Observability UI](#observability-ui) |
+| Hack on the repo | [Contributing](#contributing) (expandable) |
 
-The **practical integration contract** is:
+---
 
-- **`emit-event`** — append schema-valid evidence to the store.
-- **`maintain`** — cron-/idle-/session-end-friendly wrapper that runs extract plus consolidate when work qualifies, with structured **`status`** and **`reason`** when it skips (not a silent no-op).
-- **`prepare-context`** — prompt-ready retrieval surface for the next task.
-
-The **runtime** (hooks, scripts, IDE rules, or your own automation) decides **when** to call these commands. OpenDream validates, extracts, consolidates, retrieves, and writes audit artifacts **once invoked**.
-
-**Corrections vs loose descriptions elsewhere:**
-
-- Prefer **`maintain`** as the documented maintenance entrypoint (spec **403**). The CLI may expose additional commands; treat **`maintain`** as the integration anchor.
-- **First-party product surface** = this **generic CLI**. Runtime-specific hook or script glue is **operator-owned** unless you add it yourself.
-- **No first-party MCP server** ships in this repo; [`docs/mcp/servers.md`](./docs/mcp/servers.md) is a template for inventorying MCP, not an OpenDream server spec.
-
-## What’s in this repo
-
-- `opendream/` — runtime package for events, candidates, consolidation, retrieval, and storage
-- `tests/` — fixture-driven integration and validation tests
-- `specs/401-autodream-style-memory-subsystem/` — canonical implementation spec
-- `openspec/changes/401-autodream-style-memory-subsystem/` — proposal bundle and design artifacts
-- `docs/` — repo-wide architecture and governance docs
-
-Governance reserves `.meta/spec-adapters/` as the **preferred location for optional, non-normative** framework examples (see [`AGENTS.md`](./AGENTS.md)). Those files are **not** part of the packaged product API; `scripts/check_adapters.py` only checks that example paths and documented CLI strings stay consistent.
-
-## Quick start (contributors)
+## Quick start
 
 ```bash
-make sync
-# or: make setup
-make demo
-make verify
-make release-check
-opendream --help
+uv tool install opendream   # or: pipx install opendream
+opendream init --workspace .tmp/ws
+opendream emit-event --workspace .tmp/ws --kind project_decision \
+  --content "Use uv for Python" --message-ref demo-1 --tag key:tooling
+opendream maintain --workspace .tmp/ws
+opendream prepare-context --workspace .tmp/ws --query "tooling choices"
 ```
 
-`make sync` uses **uv** and matches CI (`uv sync --group dev`). `make setup` uses **pip** in a fresh `python3 -m venv`. Use `.venv/bin/opendream` if you skip activating the venv.
+Bleeding-edge from Git: `uv tool install "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
 
-## Operator path (install + smoke)
+<details>
+<summary><strong>Install options</strong> (venv, editable checkout, PEP 668)</summary>
 
-Prefer the **console entrypoint** after install (`pyproject.toml` defines `opendream`). The **PyPI distribution**, **Python package**, and **CLI** are all named **`opendream`** (`python3 -m opendream.cli` is the module fallback if the script is not on `PATH`).
-
-### 1. Install the console entrypoint
-
-**PyPI (recommended once published):** install into an isolated tool environment so you avoid Homebrew’s system Python (**PEP 668**).
+**PyPI (recommended once published)** — use an isolated tool env to avoid system Python restrictions (PEP 668):
 
 ```bash
 uv tool install opendream
 # or: pipx install opendream
-# or: python3 -m venv .venv && .venv/bin/pip install opendream
 opendream --help
 ```
 
-**Bleeding edge from Git** (same isolation; no PyPI required):
-
-**[uv](https://docs.astral.sh/uv/guides/tools/):**
+**From Git** (same idea; pin with `@main` / `@v0.1.0` where your installer allows):
 
 ```bash
 uv tool install "opendream @ git+https://github.com/pylit-ai/opendream.git"
-opendream --help
+# or: pipx install git+https://github.com/pylit-ai/opendream.git
 ```
 
-**[pipx](https://pipx.pypa.io/):**
-
-```bash
-pipx install git+https://github.com/pylit-ai/opendream.git
-opendream --help
-```
-
-To pin a branch or tag, use a PEP 508 URL suffix (e.g. `@main` or `@v0.1.0`) where your installer allows it.
-
-**Local checkout (contributors or editable hack):** from the OpenDream root, use the repo venv (avoids `externally-managed-environment` on system `python3`):
+**Repo checkout** (contributors):
 
 ```bash
 make setup
 .venv/bin/opendream --help
 ```
 
-**Manual venv** (same as `make setup`, any checkout path):
+Manual equivalent: `python3 -m venv .venv && .venv/bin/pip install -e .` from the repo root. Module fallback: `python3 -m opendream.cli --help`.
+
+If `python3` is missing, install from [python.org](https://www.python.org/downloads/) or your OS package manager.
+
+</details>
+
+---
+
+## Integration at a glance
+
+OpenDream is a **CLI-first engine**. The runtime you already have (hooks, IDE rules, cron, session-end scripts) decides **when** to call it.
+
+| Command | Role |
+|---------|------|
+| `emit-event` | Append schema-valid evidence to the store |
+| `maintain` | Run extract + consolidate when work qualifies; returns structured **`status`** / **`reason`** when skipping (not a silent no-op) |
+| `prepare-context` | Retrieval surface for the next task (prompt-ready output) |
+
+Corrections worth knowing:
+
+- Treat **`maintain`** as the documented maintenance entrypoint even if the CLI exposes more commands.
+- **First-party surface** = this CLI. Hook/script glue is **operator-owned** unless you add it.
+- **No first-party MCP server** in this repo; [`docs/mcp/servers.md`](./docs/mcp/servers.md) is a template for inventorying MCP, not a shipped server.
+
+<details>
+<summary><strong>Agent / spec cross-references</strong> (optional reading)</summary>
+
+Human-facing behavior is described in this README and in [`AGENTS.md`](./AGENTS.md). Numbered trees under `specs/` and `openspec/changes/` (e.g. design bundles for the memory subsystem) are for **design traceability and tooling**, not required reading to use the CLI.
+
+</details>
+
+---
+
+## Observability UI
+
+Nothing starts a server unless you ask. The UI reads **one** workspace’s `memory/` tree.
 
 ```bash
-cd /path/to/opendream
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/opendream --help
+opendream observe index --workspace "$PWD"
+opendream observe serve --workspace "$PWD" --port 8000
 ```
 
-After `source .venv/bin/activate`, you can run `opendream` without the prefix.
+Then open `http://127.0.0.1:8000/overview` on the same machine. `observe serve` blocks until Ctrl+C.
 
-If `python3` is missing, install Python from [python.org](https://www.python.org/downloads/) or your OS package manager. On macOS, `python` is often absent while `python3` is present.
+<details>
+<summary><strong>What the observability app exposes</strong></summary>
 
-### 2. Initialize a workspace
+Built from the same on-disk artifacts as the runtime (read model is derived; filesystem remains source of truth):
+
+- Index at `memory/state/observability_index.json`
+- Read APIs: overview, memories, runs, retrievals, sessions, context, graph, reviews, evals, exports
+- Audited writes: annotations, review decisions, exports
+- SSE at `/api/stream/status`
+- Desktop-first routes: `/overview`, `/memories`, `/runs`, `/retrievals`, `/sessions`, `/reviews`, `/graph`, `/evals`, `/exports`
+
+`prepare-context` persists context-assembly artifacts so the context viewer can show what the agent actually saw.
+
+</details>
+
+---
+
+## Runtime integration (checklist)
+
+Use OpenDream as a **CLI sidecar**:
+
+- Emit memory-worthy events with **`emit-event`**
+- Run **`maintain`** on a schedule or after sessions (structured skip reasons when idle)
+- Run **`dream run`** on transcript/log episodes when you want reflective consolidation; use **`dream status`** / **`dream tick`** for scheduler-safe state
+- Run **`prepare-context`** before planning prompts
+- Call **`status`** for locks and pending-work visibility
+
+<details>
+<summary><strong>Layered stores</strong> (project + optional global)</summary>
+
+```bash
+opendream init --workspace "$PWD"
+opendream init --workspace ~/.opendream-global --store-kind global
+```
+
+Route preferences to global, then merge with project precedence via `prepare-context --include-global`:
+
+```bash
+opendream emit-event \
+  --workspace "$PWD" --route global --global-workspace ~/.opendream-global \
+  --scope global --kind preference_signal \
+  --content "Prefer concise summaries across repos." \
+  --message-ref manual-global-1 --tag key:summary-style
+
+opendream prepare-context \
+  --workspace "$PWD" --query "package manager and summary style" \
+  --include-global --global-workspace ~/.opendream-global
+```
+
+</details>
+
+<details>
+<summary><strong>Scheduler-friendly commands</strong></summary>
+
+```bash
+opendream status --workspace "$PWD"
+opendream maintain --workspace "$PWD"
+```
+
+Dream (explicit, bounded):
+
+```bash
+opendream dream run \
+  --workspace "$PWD" \
+  --episodes tests/fixtures/transcript_only_dream.jsonl \
+  --compat-mode autodream
+
+opendream dream status --workspace "$PWD" --compat-mode autodream
+opendream dream tick --workspace "$PWD" --compat-mode autodream
+```
+
+Eval:
+
+```bash
+opendream eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodream
+opendream eval memory-quality --workspace .tmp/eval
+```
+
+Cron example:
+
+```bash
+*/10 * * * * cd /path/to/repo && opendream maintain --workspace "$PWD" --include-global --global-workspace ~/.opendream-global
+```
+
+</details>
+
+---
+
+## Generated data
+
+By default, artifacts live under a workspace-local `memory/` directory. Use `--memory-dir <relative-path>` when a repo needs a different location; that path is honored across commands that read or write memory.
+
+---
+
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| [NORTHSTAR.md](./NORTHSTAR.md) | Product direction |
+| [PRD.md](./PRD.md) | Requirements |
+| [CONSTITUTION.md](./CONSTITUTION.md) | Governance |
+| [AGENTS.md](./AGENTS.md) | AI assistant / agent conventions |
+
+---
+
+## Contributing
+
+<details>
+<summary><strong>Contributor workflow</strong></summary>
+
+```bash
+make sync    # or: make setup — uv vs pip venv
+make demo
+make verify
+make release-check
+opendream --help
+```
+
+`make sync` matches CI (`uv sync --group dev`). Use `.venv/bin/opendream` if you skip activating the venv.
+
+</details>
+
+<details>
+<summary><strong>Step-by-step smoke test</strong> (init → emit → maintain → context)</summary>
 
 ```bash
 opendream init --workspace .tmp/ws
 ```
 
-Expected: `memory/` under the workspace, including `memory/state/durable_records.json`, `memory/state/index.json`, and `memory/MEMORY.md`.
-
-### 3. Emit one event manually
+Expect `memory/` with `memory/state/durable_records.json`, `memory/state/index.json`, and `memory/MEMORY.md`.
 
 ```bash
 opendream emit-event \
@@ -115,17 +238,13 @@ opendream emit-event \
   --tag key:package-manager
 ```
 
-Expected: JSON with `"status": "appended"`, and new JSONL under `memory/state/events/`.
-
-### 4. Run maintenance
+Expect JSON `"status": "appended"` and new JSONL under `memory/state/events/`.
 
 ```bash
 opendream maintain --workspace .tmp/ws
 ```
 
-Expected: JSON output with `extract.processed_events > 0` when events were pending, `consolidate.status` of `completed` or an explicit skip reason, and `memory/state/maintenance_state.json` updated when work runs. After consolidation, topic files and the startup index appear when promotion rules allow.
-
-### 5. Prepare prompt context
+Expect JSON with `extract.processed_events > 0` when pending, `consolidate.status` completed or an explicit skip, and `memory/state/maintenance_state.json` updated when work runs.
 
 ```bash
 opendream prepare-context \
@@ -133,37 +252,71 @@ opendream prepare-context \
   --query "package manager and workflow"
 ```
 
-Expected: `selected_memory_ids`, `why`, and `prompt_context` (startup index section plus selected durable memory).
-
-### 6. Run the repo verifiers
+Expect `selected_memory_ids`, `why`, and `prompt_context`.
 
 ```bash
 make verify
 make release-check
 ```
 
-`make verify` runs `scripts/verify.py` (Ruff lint, mypy on `opendream` and `scripts`, unit tests, `eval dream-fidelity`, adapter example integrity, packaging smoke). `make release-check` adds the full release gate (wheel/sdist, clean venv install, `dream run`, `eval dream-fidelity`, and `tests.test_release_artifact`).
+**Verification limits:** The gate is real for CLI and packaging behavior but bounded. PASS means “meets this repo’s bar,” not universal safety.
 
-**Verification limits:** This gate is **real** for CLI behavior and packaging, but it is still a **bounded** suite. It does not prove absence of every defect class you might care about in production. Treat failures as authoritative; treat PASS as “meets this repo’s bar,” not universal safety.
+</details>
 
-### Observability UI (run it yourself)
+<details>
+<summary><strong>What’s in this repo</strong></summary>
 
-Nothing starts a browser or background server for you: **you** run the CLI on your machine. The UI reads **one** workspace’s `memory/` tree (the path you pass to `--workspace`), not every repo at once.
+| Path | Contents |
+|------|----------|
+| `opendream/` | Runtime: events, candidates, consolidation, retrieval, storage |
+| `tests/` | Fixture-driven integration and validation |
+| `specs/` | Canonical implementation spec tree |
+| `openspec/changes/` | Proposal bundle and design artifacts |
+| `docs/` | Architecture and governance |
 
-After install:
+Optional, **non-normative** framework examples may live under `.meta/spec-adapters/` (see [`AGENTS.md`](./AGENTS.md)). They are not part of the packaged product API; `scripts/check_adapters.py` keeps example paths and documented CLI strings consistent.
 
-```bash
-opendream observe index --workspace "$PWD"
-opendream observe serve --workspace "$PWD" --port 8000
-```
+</details>
 
-`observe serve` **blocks the terminal** until you stop it (Ctrl+C). On the same machine, open **http://127.0.0.1:8000/overview** (adjust `--port` / `--host` if needed).
+<details>
+<summary><strong>Verification targets</strong></summary>
 
-More detail: [Observability web app](#observability-web-app).
+Authoritative when the scripted gate passes; report at `.tmp/verification/verification_report.json`.
 
-## CLI
+| Target | What it runs |
+|--------|----------------|
+| `make lint` | Ruff (`scripts/lint.py`) |
+| `make typecheck` | mypy on `opendream` and `scripts` |
+| `make test` | Unit tests |
+| `make verify` | Lint, typecheck, tests, `eval dream-fidelity`, `scripts/check_adapters.py`, packaging smoke |
+| `make release-check` | Release gate: artifacts, clean venv install, `dream run`, `eval dream-fidelity`, verification replay |
 
-**Primary invocation** (after `pip install -e .` or `make setup`):
+`make release-check` also writes `.tmp/release-check/release_manifest.json` and `release_summary.md`.
+
+</details>
+
+<details>
+<summary><strong>Releasing (maintainers)</strong></summary>
+
+Publishing follows the **tag push** pattern: [`.github/workflows/publish-pypi.yml`](./.github/workflows/publish-pypi.yml) runs `uv build` + `uv publish` with **PyPI Trusted Publishing (OIDC)**.
+
+**GitHub vs PyPI binding**
+
+- Each repo has its **own** GitHub Environment named `pypi` (the one on another org/repo does not apply here).
+- On PyPI, the **opendream** project must list **repository `pylit-ai/opendream`** and workflow **`publish-pypi.yml`**. A trusted publisher row for a different repo will not publish this package.
+
+**Checklist**
+
+1. PyPI → **opendream** → **Publishing** → trusted publisher: owner `pylit-ai`, repository `pylit-ai/opendream`, workflow `publish-pypi.yml`, environment `pypi`.
+2. GitHub → **Environments** → ensure **`pypi`** exists; add protection/reviewers if desired.
+3. Bump `pyproject.toml` to a new version, then `git tag -a v0.1.0 -m "Release v0.1.0"` and `git push origin v0.1.0`, or use `make release-patch` / `release-minor` / `release-major`.
+
+Local dry run: `uv build` → `dist/`. TestPyPI is not wired by default.
+
+</details>
+
+<details>
+<summary><strong>Full CLI examples</strong> (copy-paste reference)</summary>
 
 ```bash
 opendream init --workspace .tmp/workspace
@@ -186,163 +339,11 @@ opendream observe index --workspace .tmp/workspace
 opendream observe serve --workspace .tmp/workspace --port 8000
 ```
 
-**Module fallback** (editable checkout without console script on `PATH`):
+Module fallback:
 
 ```bash
 python3 -m opendream.cli --help
-python3 -m opendream.cli init --workspace .tmp/workspace
-# …same subcommands as opendream …
 ```
 
-## Verification
+</details>
 
-OpenDream is only "verified" when the scripted gate passes. The gate emits `.tmp/verification/verification_report.json` with per-stage PASS or FAIL evidence.
-
-- `make lint` — Ruff (`scripts/lint.py`)
-- `make typecheck` — mypy on `opendream` and `scripts` (`scripts/typecheck.py`)
-- `make test` — unit tests
-- `make verify` — `scripts/verify.py` (lint, typecheck, tests, `eval dream-fidelity`, `scripts/check_adapters.py`, packaging smoke)
-- `make release-check` — authoritative release gate: artifacts, clean venv install, `dream run`, `eval dream-fidelity`, verification replay
-
-`make release-check` emits:
-
-- `.tmp/release-check/release_manifest.json`
-- `.tmp/release-check/release_summary.md`
-
-## Releasing (maintainers)
-
-Publishing matches the **agentic-devkit** pattern: **tag push** runs [`.github/workflows/publish-pypi.yml`](./.github/workflows/publish-pypi.yml) (`uv build` + `uv publish`) using **PyPI Trusted Publishing (OIDC)**—no API token stored in GitHub secrets.
-
-### Agentic-devkit vs OpenDream (same *name*, different *binding*)
-
-- **GitHub Environment `pypi`:** There is one environment **per repository**. The `pypi` environment on **agent-dev-templates** does **not** apply to **pylit-ai/opendream**. This repo’s workflow uses `environment: pypi`, so **pylit-ai/opendream** must have its own environment named `pypi` (Settings → Environments). It can use the same *name* as other repos; it is still a separate object.
-- **PyPI trusted publisher:** Each **PyPI project** has its own publisher rules. The **opendream** project on PyPI must list **repository `pylit-ai/opendream`** and workflow **`publish-pypi.yml`**. A row that only allows **agent-dev-templates** / **agentic-devkit** will **not** publish **opendream**.
-
-### Checklist
-
-1. **PyPI (project `opendream`):** In PyPI, open the **opendream** project → **Settings** → **Publishing** → add **trusted publisher**:
-   - Owner: `pylit-ai`
-   - Repository: `opendream` (not `agent-dev-templates`)
-   - Workflow: `publish-pypi.yml`
-   - Environment name: `pypi` (must match the workflow; this workflow sets `environment: pypi`)
-2. **GitHub (`pylit-ai/opendream`):** Environment **`pypi`** exists (Settings → Environments). Add branch protection / required reviewers there if you want release gates.
-3. **Cut a release:** `pyproject.toml` version must be new on PyPI. Then either:
-   - `git tag -a v0.1.0 -m "Release v0.1.0"` and `git push origin v0.1.0` (version in tag and in `pyproject.toml` should agree), or
-   - `make release-patch` / `release-minor` / `release-major` (bumps version, commits `pyproject.toml` + `uv.lock`, tags, pushes).
-
-Local dry run: `uv build` (artifacts under `dist/`). **TestPyPI** is not wired by default; add a second job or workflow if you need it.
-
-## Docs
-
-- [NORTHSTAR.md](./NORTHSTAR.md)
-- [PRD.md](./PRD.md)
-- [CONSTITUTION.md](./CONSTITUTION.md)
-- [AGENTS.md](./AGENTS.md)
-
-## Generated data
-
-Memory artifacts are written under a workspace-local `memory/` directory by default. Use `--memory-dir <relative-path>` when a repo needs a non-default location, and the same path is honored by direct writes, dreaming, retrieval context, and status commands.
-
-## Runtime integration
-
-For real agent use, treat OpenDream as a **CLI sidecar**:
-
-- emit memory-worthy events with **`emit-event`**
-- run **`maintain`** on a schedule or after sessions so extract + consolidate can run (structured skip reasons when there is nothing to do)
-- run **`dream run`** against transcript or log episodes when you want reflective consolidation
-- use **`dream status`** or **`dream tick`** when you want scheduler-safe DreamRunner state and backlog polling
-- use **`prepare-context`** to inject selected memory into the next planning prompt
-- call **`status`** when you want lock and pending-work visibility before prompting
-
-## Layered stores
-
-Initialize a repo-local project store and an optional user-global store:
-
-```bash
-opendream init --workspace "$PWD"
-opendream init --workspace ~/.opendream-global --store-kind global
-```
-
-Route user preferences into the global store:
-
-```bash
-opendream emit-event \
-  --workspace "$PWD" \
-  --route global \
-  --global-workspace ~/.opendream-global \
-  --scope global \
-  --kind preference_signal \
-  --content "Prefer concise summaries across repos." \
-  --message-ref manual-global-1 \
-  --tag key:summary-style
-```
-
-Compose project and global context with project precedence:
-
-```bash
-opendream prepare-context \
-  --workspace "$PWD" \
-  --query "package manager and summary style" \
-  --include-global \
-  --global-workspace ~/.opendream-global
-```
-
-## Scheduler surface
-
-**`maintain`** is the documented wrapper for repeated extract + consolidate. **`status`** exposes pending work, last run, lock state, and dream state.
-
-```bash
-opendream status --workspace "$PWD"
-opendream maintain --workspace "$PWD"
-```
-
-Dream runs are explicit and bounded:
-
-```bash
-opendream dream run \
-  --workspace "$PWD" \
-  --episodes tests/fixtures/transcript_only_dream.jsonl \
-  --compat-mode autodream
-
-opendream dream status --workspace "$PWD" --compat-mode autodream
-opendream dream tick --workspace "$PWD" --compat-mode autodream
-```
-
-Memory quality and dream fidelity can be benchmarked locally:
-
-```bash
-opendream eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodream
-opendream eval memory-quality --workspace .tmp/eval
-```
-
-Cron example:
-
-```bash
-*/10 * * * * cd /path/to/repo && opendream maintain --workspace "$PWD" --include-global --global-workspace ~/.opendream-global
-```
-
-## Observability web app
-
-OpenDream ships a local-first observability stack built from the same filesystem artifacts as the runtime. The read model is derived, provenance-preserving, and never becomes the source of truth.
-
-**You start it locally** (see [Operator path → Observability UI](#observability-ui-run-it-yourself)). There is no hosted instance bundled with the repo.
-
-```bash
-opendream observe index --workspace "$PWD"
-opendream observe serve --workspace "$PWD" --port 8000
-# Then open http://127.0.0.1:8000/overview (same machine as the server).
-```
-
-The server exposes:
-
-- a read model at `memory/state/observability_index.json`
-- read APIs for overview, memories, runs, retrievals, sessions, context, graph, reviews, evals, and exports
-- audited write APIs for annotations, review decisions, and exports
-- SSE updates at `/api/stream/status`
-- a no-build desktop-first UI at routes like `/overview`, `/memories`, `/runs`, `/retrievals`, `/sessions`, `/reviews`, `/graph`, `/evals`, and `/exports`
-
-`prepare-context` persists context-assembly artifacts so the context viewer can reconstruct what the agent actually saw.
-
-## Optional non-normative examples
-
-Framework-oriented **example** snippets and scripts may live under `.meta/spec-adapters/` per [`AGENTS.md`](./AGENTS.md). They translate the **same CLI** into hook or prompt patterns; they are **not** a separate supported API. `scripts/check_adapters.py` ensures those examples stay present and reference real `opendream` subcommands.
