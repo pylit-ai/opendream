@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "required": [
+    "generated_at",
+    "targets"
+  ],
+  "properties": {
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "target_kind",
+          "configured",
+          "activated",
+          "drift_state",
+          "health_state"
+        ],
+        "properties": {
+          "target_kind": {
+            "type": "string"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "activated": {
+            "type": "boolean"
+          },
+          "drift_state": {
+            "type": "string"
+          },
+          "health_state": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

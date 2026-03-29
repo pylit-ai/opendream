@@ -464,3 +464,78 @@ specs:
       - bare CLI invocation includes an actionable next-step hint
       - dream run and dream enqueue report explicit no-episodes results
       - make verify and make release-check remain green after the exit-semantics change
+  - id: 432-first-party-service-lifecycle
+    title: first-party service lifecycle and unattended operation surfaces
+    status: implemented
+    owner: platform
+    created: 2026-03-28
+    touched_surfaces:
+      - background-runtime
+      - cli
+      - adapters
+      - verification
+      - tests
+      - docs
+    depends_on:
+      - 430-sota-dream-runtime-bundle
+      - 431-cli-ux-polish
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - .meta/spec-adapters/
+    verification:
+      - install-service renders stable launchd or systemd manifests plus machine-readable reports
+      - service status and doctor expose worker heartbeat, backlog, restart evidence, and remediation
+      - service autowire configures supported adapters idempotently and release smoke covers the lifecycle path
+  - id: 433-zero-touch-agent-activation
+    title: zero-touch activation, repair, and drift-aware managed surfaces
+    status: implemented
+    owner: platform
+    created: 2026-03-28
+    touched_surfaces:
+      - activation
+      - cli
+      - adapters
+      - verification
+      - tests
+      - docs
+    depends_on:
+      - 432-first-party-service-lifecycle
+      - 404-framework-adapter-pack
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - .meta/spec-adapters/
+      - AGENTS.md
+    verification:
+      - activate installs managed surfaces without manual copying from .meta
+      - doctor reports drift and activate --repair restores valid target state
+      - Codex wrapper preserves underlying command exit codes
+      - make verify and make release-check remain green with activation coverage
+  - id: 434-zero-touch-activation-and-command-surface-compression
+    title: compressed normal-path UX on top of zero-touch activation
+    status: active
+    owner: platform
+    created: 2026-03-28
+    touched_surfaces:
+      - activation
+      - cli
+      - docs
+      - verification
+      - tests
+    depends_on:
+      - 433-zero-touch-agent-activation
+      - 432-first-party-service-lifecycle
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - AGENTS.md
+      - .meta/spec-adapters/
+    verification:
+      - top-level help and README promote the compressed primary commands
+      - status aggregates activation and runtime state with one next action
+      - deactivate removes managed surfaces without damaging unrelated content
+      - make verify and make release-check remain green with compressed-path coverage

@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "required": [
+    "workspace",
+    "generated_at",
+    "targets",
+    "status"
+  ],
+  "properties": {
+    "workspace": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "partial",
+        "inactive",
+        "broken"
+      ]
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

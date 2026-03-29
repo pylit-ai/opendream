@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "required": [
+    "workspace",
+    "overall_state",
+    "targets",
+    "runtime",
+    "next_action"
+  ],
+  "properties": {
+    "workspace": {
+      "type": "string"
+    },
+    "overall_state": {
+      "type": "string",
+      "enum": [
+        "healthy",
+        "degraded",
+        "broken",
+        "inactive"
+      ]
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "runtime": {
+      "type": "object"
+    },
+    "next_action": {
+      "type": "string"
+    }
+  }
+}
