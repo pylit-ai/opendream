@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "required": [
+    "target_kind",
+    "path",
+    "kind",
+    "hash",
+    "managed"
+  ],
+  "properties": {
+    "target_kind": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "hash": {
+      "type": "string"
+    },
+    "managed": {
+      "type": "boolean"
+    }
+  }
+}

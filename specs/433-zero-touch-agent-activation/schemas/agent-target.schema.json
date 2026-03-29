@@ -1,0 +1,62 @@
+{
+  "type": "object",
+  "required": [
+    "target_kind",
+    "detected",
+    "configured",
+    "activation_mode",
+    "managed_paths",
+    "drift_state",
+    "health_state"
+  ],
+  "properties": {
+    "target_kind": {
+      "type": "string",
+      "enum": [
+        "claude-code",
+        "codex",
+        "openclaw"
+      ]
+    },
+    "detected": {
+      "type": "boolean"
+    },
+    "configured": {
+      "type": "boolean"
+    },
+    "activation_mode": {
+      "type": "string",
+      "enum": [
+        "native_hooks",
+        "native_project_settings",
+        "managed_wrapper",
+        "managed_prompt_snippet",
+        "unsupported"
+      ]
+    },
+    "managed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "drift_state": {
+      "type": "string",
+      "enum": [
+        "clean",
+        "drifted",
+        "missing",
+        "unknown"
+      ]
+    },
+    "health_state": {
+      "type": "string",
+      "enum": [
+        "healthy",
+        "degraded",
+        "broken",
+        "unknown"
+      ]
+    }
+  }
+}

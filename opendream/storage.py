@@ -155,6 +155,8 @@ class MemoryStore:
         self.audit_plan_dir = self.memory_root / "audit" / "plans"
         self.audit_verifier_dir = self.memory_root / "audit" / "verifier"
         self.audit_worker_dir = self.memory_root / "audit" / "worker"
+        self.audit_service_dir = self.memory_root / "audit" / "service"
+        self.audit_autowire_dir = self.memory_root / "audit" / "autowire"
         self.audit_mutation_dir = self.memory_root / "audit" / "mutations"
         self.annotations_dir = self.memory_root / "audit" / "annotations"
         self.reviews_dir = self.memory_root / "audit" / "reviews"
@@ -171,6 +173,9 @@ class MemoryStore:
         self.dream_state_path = self.state_dir / "dream_state.json"
         self.dream_queue_path = self.state_dir / "dream_queue.json"
         self.dream_worker_state_path = self.state_dir / "dream_worker_state.json"
+        self.worker_health_path = self.state_dir / "worker_health.json"
+        self.service_manifest_path = self.state_dir / "service_manifest.json"
+        self.service_runtime_path = self.state_dir / "service_runtime.json"
         self.store_metadata_path = self.state_dir / "store.json"
 
     def default_store_metadata(self, *, store_kind: str | None = None) -> dict[str, Any]:
@@ -266,6 +271,8 @@ class MemoryStore:
             self.audit_plan_dir,
             self.audit_verifier_dir,
             self.audit_worker_dir,
+            self.audit_service_dir,
+            self.audit_autowire_dir,
             self.audit_mutation_dir,
             self.annotations_dir,
             self.reviews_dir,
@@ -282,6 +289,12 @@ class MemoryStore:
             write_json(self.index_json_path, {"generated_at": to_iso(utc_now()), "entries": []})
         if not self.observability_index_path.exists():
             write_json(self.observability_index_path, {"generated_at": to_iso(utc_now()), "entities": {}})
+        if not self.worker_health_path.exists():
+            write_json(self.worker_health_path, {})
+        if not self.service_manifest_path.exists():
+            write_json(self.service_manifest_path, {})
+        if not self.service_runtime_path.exists():
+            write_json(self.service_runtime_path, {})
         if not self.memory_md_path.exists():
             atomic_write_text(self.memory_md_path, "# Startup Memory Index\n\n")
 
@@ -380,14 +393,15 @@ class MemoryStore:
                     "last_run_duration_ms": None,
                     "last_episode_timestamp": None,
                     "queue_depth": 0,
-                    "queued_jobs": [],
-                    "lock": self.dream_lock_state(),
-                    "worker_lock": self.dream_worker_lock_state(),
-                    "worker": {"state": "idle", "processed_jobs": 0},
-                    "policy": metadata["dream"],
-                    "transcript_dir": str(self.transcripts_dir),
-                    "available_episode_files": 0,
-                },
+                "queued_jobs": [],
+                "lock": self.dream_lock_state(),
+                "worker_lock": self.dream_worker_lock_state(),
+                "worker": {"state": "idle", "processed_jobs": 0},
+                "worker_health": self.load_worker_health(),
+                "policy": metadata["dream"],
+                "transcript_dir": str(self.transcripts_dir),
+                "available_episode_files": 0,
+            },
                 "next_eligible_reason": "not-initialized",
                 "next_eligible_at": None,
             }
@@ -448,6 +462,7 @@ class MemoryStore:
                 "lock": self.dream_lock_state(),
                 "worker_lock": self.dream_worker_lock_state(),
                 "worker": dream_worker_state or {"state": "idle", "processed_jobs": 0},
+                "worker_health": self.load_worker_health(),
                 "policy": self.load_store_metadata()["dream"],
                 "transcript_dir": str(self.transcripts_dir),
                 "available_episode_files": len(list(self.transcripts_dir.glob("*.jsonl"))),
@@ -552,6 +567,33 @@ class MemoryStore:
     def save_dream_worker_state(self, payload: dict[str, Any]) -> None:
         self.ensure_layout()
         write_json(self.dream_worker_state_path, payload)
+
+    def load_worker_health(self) -> dict[str, Any]:
+        self.ensure_layout()
+        payload = read_json(self.worker_health_path, {})
+        return payload if isinstance(payload, dict) else {}
+
+    def save_worker_health(self, payload: dict[str, Any]) -> None:
+        self.ensure_layout()
+        write_json(self.worker_health_path, payload)
+
+    def load_service_manifest(self) -> dict[str, Any]:
+        self.ensure_layout()
+        payload = read_json(self.service_manifest_path, {})
+        return payload if isinstance(payload, dict) else {}
+
+    def save_service_manifest(self, payload: dict[str, Any]) -> None:
+        self.ensure_layout()
+        write_json(self.service_manifest_path, payload)
+
+    def load_service_runtime(self) -> dict[str, Any]:
+        self.ensure_layout()
+        payload = read_json(self.service_runtime_path, {})
+        return payload if isinstance(payload, dict) else {}
+
+    def save_service_runtime(self, payload: dict[str, Any]) -> None:
+        self.ensure_layout()
+        write_json(self.service_runtime_path, payload)
 
     def load_observability_index(self) -> dict[str, Any]:
         self.ensure_layout()
@@ -675,6 +717,18 @@ class MemoryStore:
             before_snapshot=before_snapshot,
             audit_dir=self.audit_worker_dir,
         )
+
+    def write_service_report(self, payload: dict[str, Any]) -> Path:
+        report_id = str(payload.get("report_id", stable_id("service", payload.get("generated_at", to_iso(utc_now())))))
+        path = self.audit_service_dir / f"{report_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_autowire_report(self, payload: dict[str, Any]) -> Path:
+        report_id = stable_id("autowire", payload.get("workspace", ""), payload.get("generated_at", to_iso(utc_now())))
+        path = self.audit_autowire_dir / f"{report_id}.json"
+        write_json(path, payload)
+        return path
 
     def append_annotation(self, annotation: Annotation) -> Path:
         path = self.annotations_dir / f"{annotation.created_at[:10]}.jsonl"

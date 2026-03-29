@@ -31,11 +31,11 @@ This change keeps the existing runtime machinery for power users and CI, but com
 - `opendream deactivate --workspace <path>` removes managed activation surfaces and leaves the workspace in an inactive but inspectable state
 
 ## Acceptance criteria
-- [ ] AC-1: `opendream --help` and README promote `init --activate-configured`, `activate`, `status`, `activate --repair`, and `deactivate` as the normal path
-- [ ] AC-2: `status` aggregates activation, runtime, queue, and service state and recommends one next action when unhealthy
-- [ ] AC-3: `deactivate` removes managed activation surfaces for supported targets without overwriting unrelated user content
-- [ ] AC-4: older service and autowire surfaces remain functional but point operators toward the compressed primary commands
-- [ ] AC-5: release and fixture verification prove the standard path works for configured Claude Code, Codex, and OpenClaw targets without `.meta/` script copying
+- [x] AC-1: `opendream --help` and README promote `init --activate-configured`, `activate`, `status`, `activate --repair`, and `deactivate` as the normal path
+- [x] AC-2: `status` aggregates activation, runtime, queue, and service state and recommends one next action when unhealthy
+- [x] AC-3: `deactivate` removes managed activation surfaces for supported targets without overwriting unrelated user content
+- [x] AC-4: older service and autowire surfaces remain functional but point operators toward the compressed primary commands
+- [x] AC-5: release and fixture verification prove the standard path works for configured Claude Code, Codex, and OpenClaw targets without `.meta/` script copying
 
 ## Edge cases
 - workspace has no configured supported targets

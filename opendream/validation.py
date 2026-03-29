@@ -13,6 +13,17 @@ REQUIRED_SCHEMA_FILES = (
     "memory-topic.schema.json",
     "memory-index.schema.json",
     "consolidation-op.schema.json",
+    "service-install-report.schema.json",
+    "worker-health.schema.json",
+    "supervisor-manifest.schema.json",
+    "autowire-report.schema.json",
+    "agent-target.schema.json",
+    "activation-report.schema.json",
+    "activation-state.schema.json",
+    "compressed-status.schema.json",
+    "managed-surface.schema.json",
+    "repair-report.schema.json",
+    "target-registry.schema.json",
 )
 
 

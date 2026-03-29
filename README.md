@@ -5,7 +5,7 @@
 [![Python versions](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-see%20LICENSE-lightgrey.svg)](./LICENSE)
 
-**Local-first memory for coding agents** — capture evidence, consolidate durable memory with provenance, and retrieve prompt-ready context from the CLI. OpenDream now ships a queue-backed local dream worker plus planner or verifier audit artifacts; optional external planner or verifier adapters are operator-provided and stay local to your machine.
+**Local-first memory for coding agents** — activate OpenDream inside the repo you already use, let supported agent surfaces capture context locally, and keep the advanced runtime machinery available when you need it.
 
 | If you want to… | Start here |
 |-----------------|------------|
@@ -20,11 +20,10 @@
 
 ```bash
 uv tool install opendream   # or: pipx install opendream
-opendream init --workspace .tmp/ws
-opendream emit-event --workspace .tmp/ws --kind project_decision \
-  --content "Use uv for Python" --message-ref demo-1 --tag key:tooling
-opendream maintain --workspace .tmp/ws
-opendream prepare-context --workspace .tmp/ws --query "tooling choices"
+opendream init --workspace "$PWD" --activate-configured
+opendream status --workspace "$PWD"
+opendream activate --workspace "$PWD" --repair
+opendream deactivate --workspace "$PWD"
 ```
 
 Bleeding-edge from Git: `uv tool install "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
@@ -64,7 +63,16 @@ If `python3` is missing, install from [python.org](https://www.python.org/downlo
 
 ## Integration at a glance
 
-OpenDream is a **CLI-first engine**. The runtime you already have (hooks, IDE rules, cron, session-end scripts) decides **when** to call it.
+OpenDream is an **activation-first CLI**. For normal use, the product contract is:
+
+```bash
+opendream init --workspace "$PWD" --activate-configured
+opendream status --workspace "$PWD"
+opendream activate --workspace "$PWD" --repair
+opendream deactivate --workspace "$PWD"
+```
+
+The lower-level runtime remains available, but it is not the main mental model.
 
 | Command | Role |
 |---------|------|
@@ -89,7 +97,7 @@ Human-facing behavior is described in this README and in [`AGENTS.md`](./AGENTS.
 
 ## Observability UI
 
-Nothing starts a server unless you ask. The UI reads **one** workspace’s `memory/` tree.
+Nothing starts a server unless you ask. The UI reads **one** workspace’s on-disk memory store (default relative path `memory/` under the workspace).
 
 ```bash
 opendream observe index --workspace "$PWD"
@@ -117,14 +125,13 @@ Built from the same on-disk artifacts as the runtime (read model is derived; fil
 
 ## Runtime integration (checklist)
 
-Use OpenDream as a **CLI sidecar**:
+Use OpenDream as an **activation-first runtime**:
 
-- Emit memory-worthy events with **`emit-event`**
-- Run **`maintain`** on a schedule or after sessions (structured skip reasons when idle)
-- Run **`dream run`** on transcript/log episodes when you want reflective consolidation; use **`dream status`** / **`dream tick`** for scheduler-safe state
-- Use **`dream enqueue`** plus **`dream worker --once`** or **`dream daemon`** when you want a durable background queue rather than ad hoc manual runs
-- Run **`prepare-context`** before planning prompts
-- Call **`status`** for locks and pending-work visibility
+- Run **`init --activate-configured`** for the standard path when the repo already has Claude Code, Codex, or OpenClaw config.
+- Run **`status`** for the single high-signal answer covering activation, drift, queue state, and runtime health.
+- Run **`activate --repair`** when `status` or `doctor` reports drift.
+- Run **`deactivate`** if you want to remove OpenDream-managed repo-local surfaces while keeping your repo config intact.
+- Use **`doctor --surface agents`**, **`service ...`**, **`dream ...`**, **`maintain`**, and **`prepare-context`** as advanced or explicit operator paths.
 
 <details>
 <summary><strong>Layered stores</strong> (project + optional global)</summary>
@@ -151,11 +158,14 @@ opendream prepare-context \
 </details>
 
 <details>
-<summary><strong>Scheduler-friendly commands</strong></summary>
+<summary><strong>Advanced commands</strong></summary>
 
 ```bash
 opendream status --workspace "$PWD"
 opendream maintain --workspace "$PWD"
+opendream activate --workspace "$PWD" --repair
+opendream deactivate --workspace "$PWD"
+opendream doctor --workspace "$PWD" --surface agents
 ```
 
 Dream (explicit, bounded):
@@ -171,9 +181,21 @@ opendream dream tick --workspace "$PWD" --compat-mode autodream
 opendream dream enqueue --workspace "$PWD" --episodes tests/fixtures/transcript_only_dream.jsonl
 opendream dream worker --workspace "$PWD" --once
 opendream dream daemon --workspace "$PWD" --interval-seconds 30 --max-polls 20
+opendream install-service --workspace "$PWD" --interval-seconds 30
+opendream service status --workspace "$PWD"
+opendream service doctor --workspace "$PWD"
 ```
 
-Use `dream worker --once` for a single queue drain inside hooks, scripts, or CI. Use `dream daemon` when a supervisor should keep polling over time. `dream daemon` is a foreground loop (like `observe serve`); run it under **launchd**, a **systemd user unit**, or e.g. `nohup opendream dream daemon --workspace "$PWD" >>~/.opendream-dream.log 2>&1 &` so it stays in the background.
+Use `dream worker --once` for a single queue drain inside hooks, scripts, or CI. Use `dream daemon` when a supervisor should keep polling over time. `install-service` renders launchd or systemd manifests, persists worker heartbeat state under the memory root, and exposes `service start|stop|restart|status|doctor` as a first-party lifecycle path. The default backend stays managed for portable verification; use `--backend native` when you want best-effort launchd or systemd activation.
+
+For supported configured agents, the standard operator path is:
+
+```bash
+opendream init --workspace "$PWD" --activate-configured
+opendream status --workspace "$PWD"
+opendream activate --workspace "$PWD" --repair
+opendream deactivate --workspace "$PWD"
+```
 
 Eval:
 
@@ -196,7 +218,9 @@ Cron example:
 
 ## Generated data
 
-By default, artifacts live under a workspace-local `memory/` directory. Use `--memory-dir <relative-path>` when a repo needs a different location; that path is honored across commands that read or write memory. Planner plans, verifier reports, dream queue state, and worker audits live under the same memory root.
+By default, durable memory artifacts live under a workspace-local `memory/` directory. Use `--memory-dir <relative-path>` when a repo needs a different location; that path is honored across commands that read or write memory. Planner plans, verifier reports, dream queue state, and worker audits live under the same memory root.
+
+Activation and compressed-status metadata (for the standard `init --activate-configured` / `status` path) persist under **`.opendream/`** at the workspace root — notably `targets.json` and `activation-state.json`. Add `.opendream/` to `.gitignore` if you do not want those files committed.
 
 ---
 

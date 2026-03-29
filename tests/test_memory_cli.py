@@ -54,6 +54,23 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         manifest_path.write_text(json.dumps(payload), encoding="utf-8")
         return manifest_path
 
+    def write_opendream_shim(self) -> Path:
+        bin_dir = Path(self.temp_dir.name) / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        shim_path = bin_dir / "opendream"
+        shim_path.write_text(
+            "\n".join(
+                [
+                    "#!/bin/sh",
+                    f'exec "{sys.executable}" -m opendream.cli "$@"',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        shim_path.chmod(0o755)
+        return shim_path
+
     def emit_runtime_event(
         self,
         workspace: Path,
@@ -105,8 +122,8 @@ class MemoryCliIntegrationTests(unittest.TestCase):
     def test_no_subcommand_error_includes_next_step_hint(self) -> None:
         completed = run_cli_raw(check=False)
         self.assertEqual(completed.returncode, 2)
-        self.assertIn("opendream init --workspace .tmp/ws", completed.stderr)
-        self.assertIn("opendream demo --workspace .tmp/ws", completed.stderr)
+        self.assertIn('opendream init --workspace "$PWD" --activate-configured', completed.stderr)
+        self.assertIn('opendream status --workspace "$PWD"', completed.stderr)
 
     def test_bootstrap_index_stages_without_topic_writes(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "bootstrap_events.jsonl"
@@ -447,6 +464,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         uninitialized = run_cli("status", "--workspace", str(self.workspace), "--now", FIXED_NOW)
         self.assertFalse(uninitialized["initialized"])
         self.assertEqual(uninitialized["state"], "uninitialized")
+        self.assertEqual(uninitialized["overall_state"], "inactive")
         self.assertEqual(uninitialized["dream"]["state"], "never_ran")
 
         run_cli("init", "--workspace", str(self.workspace))
@@ -460,6 +478,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertTrue(snapshot["initialized"])
         self.assertTrue(snapshot["lock"]["present"])
         self.assertTrue(snapshot["lock"]["stale"])
+        self.assertIn("runtime", snapshot)
 
     def test_dream_run_ingests_transcript_only_fixture_and_normalizes_dates(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"
@@ -862,6 +881,235 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertTrue(all(result["checks"].values()))
         self.assertTrue(any("pnpm" in title.lower() for title in result["selected_titles"]))
+
+    def test_service_lifecycle_status_and_doctor(self) -> None:
+        transcript = REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"
+        memory_dir = ".dream-memory"
+        run_cli(
+            "dream",
+            "enqueue",
+            "--workspace",
+            str(self.workspace),
+            "--episodes",
+            str(transcript),
+            "--memory-dir",
+            memory_dir,
+        )
+        install_root = Path(self.temp_dir.name) / "services"
+        run_cli(
+            "install-service",
+            "--workspace",
+            str(self.workspace),
+            "--memory-dir",
+            memory_dir,
+            "--install-root",
+            str(install_root),
+            "--interval-seconds",
+            "0.2",
+            "--no-start",
+        )
+        try:
+            started = run_cli("service", "start", "--workspace", str(self.workspace), "--memory-dir", memory_dir)
+            self.assertTrue(started["running"])
+            time.sleep(0.5)
+
+            status = run_cli("service", "status", "--workspace", str(self.workspace), "--memory-dir", memory_dir)
+            self.assertTrue(status["installed"])
+            self.assertTrue(status["running"])
+            self.assertIn(status["health"], {"healthy", "idle", "draining"})
+            self.assertGreaterEqual(status["start_count"], 1)
+            self.assertIn("worker_health", status)
+
+            doctor = run_cli("service", "doctor", "--workspace", str(self.workspace), "--memory-dir", memory_dir)
+            self.assertTrue(doctor["installed"])
+            self.assertTrue(doctor["running"])
+            self.assertIn("recommended_remediation", doctor)
+
+            restarted = run_cli("service", "restart", "--workspace", str(self.workspace), "--memory-dir", memory_dir)
+            self.assertEqual(restarted["status"], "restarted")
+
+            stopped = run_cli("service", "stop", "--workspace", str(self.workspace), "--memory-dir", memory_dir)
+            self.assertFalse(stopped["running"])
+
+            stopped_status = run_cli(
+                "service",
+                "status",
+                "--workspace",
+                str(self.workspace),
+                "--memory-dir",
+                memory_dir,
+            )
+            self.assertEqual(stopped_status["health"], "stopped")
+            self.assertFalse(stopped_status["running"])
+        finally:
+            run_cli_raw(
+                "service",
+                "stop",
+                "--workspace",
+                str(self.workspace),
+                "--memory-dir",
+                memory_dir,
+                check=False,
+            )
+            run_cli_raw(
+                "uninstall-service",
+                "--workspace",
+                str(self.workspace),
+                "--memory-dir",
+                memory_dir,
+                "--purge",
+                check=False,
+            )
+
+    def test_service_autowire_is_idempotent_and_reversible(self) -> None:
+        claude_settings = self.workspace / ".claude" / "settings.json"
+        claude_settings.parent.mkdir(parents=True, exist_ok=True)
+        claude_settings.write_text(
+            json.dumps({"hooks": {"preTask": ["echo keep-me"], "postTask": ["echo keep-me-too"]}}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        agents_path = self.workspace / "AGENTS.md"
+        agents_path.write_text("# AGENTS.md\n\nExisting repo guidance.\n", encoding="utf-8")
+
+        first = run_cli("service", "autowire", "--workspace", str(self.workspace), "--target", "all", "--force")
+        self.assertEqual(first["status"], "configured")
+        self.assertTrue((self.workspace / ".opendream" / "hooks" / "claude-pre-task.sh").exists())
+        self.assertTrue((self.workspace / ".opendream" / "hooks" / "codex-post-task.sh").exists())
+
+        second = run_cli("service", "autowire", "--workspace", str(self.workspace), "--target", "all", "--force")
+        self.assertEqual(second["status"], "configured")
+
+        settings_payload = json.loads(claude_settings.read_text(encoding="utf-8"))
+        self.assertEqual(
+            settings_payload["hooks"]["preTask"].count('sh .opendream/hooks/claude-pre-task.sh "$CLAUDE_TASK"'),
+            1,
+        )
+        self.assertEqual(
+            settings_payload["hooks"]["postTask"].count('sh .opendream/hooks/claude-post-task.sh "$CLAUDE_SUMMARY"'),
+            1,
+        )
+
+        agents_text = agents_path.read_text(encoding="utf-8")
+        self.assertEqual(agents_text.count("<!-- BEGIN OPENDREAM MANAGED BLOCK: codex -->"), 1)
+        self.assertEqual(agents_text.count("<!-- END OPENDREAM MANAGED BLOCK: codex -->"), 1)
+
+        removed = run_cli(
+            "service",
+            "autowire",
+            "--workspace",
+            str(self.workspace),
+            "--target",
+            "codex",
+            "--uninstall",
+        )
+        self.assertEqual(removed["status"], "removed")
+        agents_text = agents_path.read_text(encoding="utf-8")
+        self.assertNotIn("<!-- BEGIN OPENDREAM MANAGED BLOCK: codex -->", agents_text)
+        self.assertNotIn("<!-- OPENDREAM:CODEX START -->", agents_text)
+
+    def test_activate_is_idempotent_and_repairable(self) -> None:
+        claude_settings = self.workspace / ".claude" / "settings.json"
+        claude_settings.parent.mkdir(parents=True, exist_ok=True)
+        claude_settings.write_text(
+            json.dumps({"hooks": {"preTask": ["echo keep-me"]}}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        codex_config = self.workspace / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+        openclaw_config = self.workspace / ".openclaw" / "config.json"
+        openclaw_config.parent.mkdir(parents=True, exist_ok=True)
+        openclaw_config.write_text(
+            json.dumps({"hooks": {"postTask": ["echo keep-me-too"]}}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        first = run_cli("activate", "--workspace", str(self.workspace), "--targets", "configured")
+        self.assertEqual(first["status"], "applied")
+        self.assertTrue((self.workspace / ".opendream" / "agents.json").exists())
+        self.assertTrue((self.workspace / ".opendream" / "hooks" / "claude-pre-task.sh").exists())
+        self.assertTrue((self.workspace / ".opendream" / "bin" / "codex-task-wrapper.sh").exists())
+        self.assertIn("claude-code", {item["target_kind"] for item in first["targets"]})
+        self.assertIn("codex", {item["target_kind"] for item in first["targets"]})
+        self.assertIn("openclaw", {item["target_kind"] for item in first["targets"]})
+
+        second = run_cli("activate", "--workspace", str(self.workspace), "--targets", "configured")
+        self.assertEqual(second["status"], "noop")
+
+        damaged = self.workspace / ".opendream" / "hooks" / "codex-post-task.sh"
+        damaged.unlink()
+        doctor = run_cli("doctor", "--workspace", str(self.workspace), "--surface", "agents")
+        self.assertEqual(doctor["status"], "needs-repair")
+        self.assertIn("codex", doctor["drifted_targets"])
+
+        repair = run_cli("activate", "--workspace", str(self.workspace), "--repair")
+        self.assertEqual(repair["status"], "repaired")
+        self.assertTrue(damaged.exists())
+
+    def test_init_activate_configured_returns_activation_report(self) -> None:
+        codex_config = self.workspace / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+
+        result = run_cli("init", "--workspace", str(self.workspace), "--activate-configured")
+        self.assertEqual(result["status"], "initialized")
+        self.assertEqual(result["activation"]["status"], "applied")
+        self.assertTrue((self.workspace / "AGENTS.md").exists())
+        self.assertTrue((self.workspace / ".opendream" / "agents.json").exists())
+        self.assertTrue((self.workspace / ".opendream" / "targets.json").exists())
+        self.assertTrue((self.workspace / ".opendream" / "activation-state.json").exists())
+
+    def test_status_and_deactivate_round_trip_for_configured_target(self) -> None:
+        codex_config = self.workspace / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+
+        run_cli("init", "--workspace", str(self.workspace), "--activate-configured")
+        active = run_cli("status", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        self.assertEqual(active["overall_state"], "healthy")
+        self.assertEqual(active["activation_state"]["status"], "active")
+        self.assertEqual(active["targets"][0]["target_kind"], "codex")
+        self.assertEqual(active["targets"][0]["state"], "active")
+
+        removed = run_cli("deactivate", "--workspace", str(self.workspace))
+        self.assertEqual(removed["status"], "deactivated")
+        self.assertEqual(removed["deactivated_targets"], ["codex"])
+        self.assertFalse((self.workspace / ".opendream" / "bin" / "codex-task-wrapper.sh").exists())
+
+        after = run_cli("status", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        self.assertEqual(after["overall_state"], "inactive")
+        self.assertEqual(after["activation_state"]["status"], "inactive")
+        self.assertEqual(after["targets"][0]["state"], "configured")
+        self.assertIn("opendream activate --workspace", after["next_action"])
+
+        doctor = run_cli("doctor", "--workspace", str(self.workspace), "--surface", "agents")
+        self.assertEqual(doctor["status"], "healthy")
+        self.assertEqual(doctor["drifted_targets"], [])
+
+    def test_codex_wrapper_preserves_exit_status(self) -> None:
+        shim_path = self.write_opendream_shim()
+        run_cli("init", "--workspace", str(self.workspace))
+        run_cli("activate", "--workspace", str(self.workspace), "--targets", "codex")
+        wrapper = self.workspace / ".opendream" / "bin" / "codex-task-wrapper.sh"
+        env = {
+            **os.environ,
+            "PATH": f"{shim_path.parent}{os.pathsep}{os.environ.get('PATH', '')}",
+            "PYTHONPATH": str(REPO_ROOT),
+            "OPENDREAM_WORKSPACE": str(self.workspace),
+            "OPENDREAM_QUERY": "verify wrapper path",
+            "OPENDREAM_SUMMARY": "wrapper completed",
+        }
+        completed = subprocess.run(
+            ["sh", str(wrapper), "--", "/bin/sh", "-c", "exit 7"],
+            cwd=self.workspace,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 7)
+        self.assertTrue((self.workspace / ".opendream" / "context" / "codex-pre-task.json").exists())
+        self.assertTrue(any((self.workspace / "memory" / "state" / "events").glob("*.jsonl")))
 
 
 if __name__ == "__main__":

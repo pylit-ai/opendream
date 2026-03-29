@@ -5,10 +5,11 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
-from opendream.util import CANONICAL_SCHEMA_ROOT, OPEN_SPEC_ROOT, SCHEMA_ROOT
+from opendream.util import SCHEMA_ROOT, canonical_schema_path, proposal_schema_path
 from opendream.validation import required_schema_files
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -17,11 +18,10 @@ FIXED_NOW = "2026-03-26T12:00:00Z"
 
 class ReleaseArtifactTests(unittest.TestCase):
     def test_schema_assets_are_present_and_consistent(self) -> None:
-        openspec_schema_root = OPEN_SPEC_ROOT / "schema"
         for schema_name in required_schema_files():
             package_schema = SCHEMA_ROOT / schema_name
-            canonical_schema = CANONICAL_SCHEMA_ROOT / schema_name
-            proposal_schema = openspec_schema_root / schema_name
+            canonical_schema = canonical_schema_path(schema_name)
+            proposal_schema = proposal_schema_path(schema_name)
             self.assertTrue(package_schema.exists(), schema_name)
             self.assertTrue(canonical_schema.exists(), schema_name)
             self.assertTrue(proposal_schema.exists(), schema_name)
@@ -68,6 +68,8 @@ class ReleaseArtifactTests(unittest.TestCase):
                 text=True,
             )
             self.assertIn("opendream", help_run.stdout)
+            self.assertIn("deactivate", help_run.stdout)
+            self.assertIn('opendream status --workspace "$PWD"', help_run.stdout)
 
             demo_run = subprocess.run(
                 [str(entrypoint), "demo", "--workspace", str(workspace), "--now", FIXED_NOW],
@@ -144,6 +146,250 @@ class ReleaseArtifactTests(unittest.TestCase):
                 text=True,
             )
             self.assertIn('"status": "completed"', dream_worker.stdout)
+
+            service_install = subprocess.run(
+                [
+                    str(entrypoint),
+                    "install-service",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--install-root",
+                    str(temp_path / "services"),
+                    "--interval-seconds",
+                    "0.2",
+                    "--no-start",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "installed"', service_install.stdout)
+
+            service_start = subprocess.run(
+                [
+                    str(entrypoint),
+                    "service",
+                    "start",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"running": true', service_start.stdout)
+            time.sleep(0.5)
+
+            service_status = subprocess.run(
+                [
+                    str(entrypoint),
+                    "service",
+                    "status",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"installed": true', service_status.stdout)
+            self.assertIn('"running": true', service_status.stdout)
+
+            service_restart = subprocess.run(
+                [
+                    str(entrypoint),
+                    "service",
+                    "restart",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "restarted"', service_restart.stdout)
+
+            service_stop = subprocess.run(
+                [
+                    str(entrypoint),
+                    "service",
+                    "stop",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"running": false', service_stop.stdout)
+
+            service_uninstall = subprocess.run(
+                [
+                    str(entrypoint),
+                    "uninstall-service",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--purge",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "uninstalled"', service_uninstall.stdout)
+
+            (dream_workspace / ".claude").mkdir(parents=True, exist_ok=True)
+            (dream_workspace / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+            (dream_workspace / ".codex").mkdir(parents=True, exist_ok=True)
+            (dream_workspace / ".codex" / "config.toml").write_text(
+                'sandbox_mode = "workspace-write"\n',
+                encoding="utf-8",
+            )
+            (dream_workspace / ".openclaw").mkdir(parents=True, exist_ok=True)
+            (dream_workspace / ".openclaw" / "config.json").write_text("{}", encoding="utf-8")
+
+            activation = subprocess.run(
+                [
+                    str(entrypoint),
+                    "activate",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--targets",
+                    "configured",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "applied"', activation.stdout)
+
+            doctor = subprocess.run(
+                [
+                    str(entrypoint),
+                    "doctor",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--surface",
+                    "agents",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "healthy"', doctor.stdout)
+
+            compressed_status = subprocess.run(
+                [
+                    str(entrypoint),
+                    "status",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"overall_state": "healthy"', compressed_status.stdout)
+
+            deactivate = subprocess.run(
+                [
+                    str(entrypoint),
+                    "deactivate",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "deactivated"', deactivate.stdout)
+
+            inactive_status = subprocess.run(
+                [
+                    str(entrypoint),
+                    "status",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"overall_state": "inactive"', inactive_status.stdout)
+
+            reactivation = subprocess.run(
+                [
+                    str(entrypoint),
+                    "activate",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--targets",
+                    "configured",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "updated"', reactivation.stdout)
+
+            codex_wrapper = subprocess.run(
+                [
+                    "sh",
+                    str(dream_workspace / ".opendream" / "bin" / "codex-task-wrapper.sh"),
+                    "--summary",
+                    "release smoke wrapper",
+                    "--",
+                    "/bin/sh",
+                    "-c",
+                    "exit 3",
+                ],
+                cwd=dream_workspace,
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{venv_dir / scripts_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+                    "OPENDREAM_WORKSPACE": str(dream_workspace),
+                    "OPENDREAM_QUERY": "release smoke query",
+                },
+            )
+            self.assertEqual(codex_wrapper.returncode, 3)
 
             fidelity_eval = subprocess.run(
                 [

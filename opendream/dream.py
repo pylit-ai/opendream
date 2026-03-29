@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from .integration import maintain
 from .storage import LockError, MemoryStore
 from .util import parse_timestamp, semantic_tokens, stable_id, to_iso, utc_now
 from .validation import validate_document
+
+_UNSET = object()
 
 
 def dream_run(
@@ -258,21 +261,55 @@ def dream_worker(
     before_snapshot = store.snapshot_store_text()
     processed_jobs: list[dict[str, Any]] = []
     backlog_results: list[dict[str, Any]] = []
+    started_at = now or to_iso(utc_now())
+    _write_worker_health(
+        store,
+        timestamp=started_at,
+        state="starting",
+        queue_backlog=len([job for job in store.load_dream_queue() if job.get("status") == "queued"]),
+    )
+    poll_count = 0
     try:
         with store.dream_worker_lock():
-            for poll_index in range(max_polls):
+            while max_polls <= 0 or poll_count < max_polls:
+                poll_count += 1
                 timestamp = now or to_iso(utc_now())
                 queue = store.load_dream_queue()
                 queued_jobs = [job for job in queue if job.get("status") == "queued"]
                 jobs_this_poll = 0
+                _write_worker_health(
+                    store,
+                    timestamp=timestamp,
+                    state="draining" if queued_jobs else "idle",
+                    queue_backlog=len(queued_jobs),
+                    active_phase="poll",
+                )
 
                 if queued_jobs:
                     limit = max_jobs_per_poll or len(queued_jobs)
                     for job in queued_jobs[:limit]:
+                        _write_worker_health(
+                            store,
+                            timestamp=timestamp,
+                            state="draining",
+                            queue_backlog=len([item for item in queue if item.get("status") == "queued"]),
+                            active_job_id=str(job.get("job_id")),
+                            active_phase="job",
+                        )
                         processed = _process_job(store, job, queue, now=timestamp)
                         if processed is not None:
                             processed_jobs.append(processed)
                             jobs_this_poll += 1
+                            if processed["result"].get("status") == "completed":
+                                _write_worker_health(
+                                    store,
+                                    timestamp=timestamp,
+                                    state="draining",
+                                    queue_backlog=len(
+                                        [item for item in store.load_dream_queue() if item.get("status") == "queued"]
+                                    ),
+                                    last_success_at=timestamp,
+                                )
                 elif process_backlog:
                     backlog = dream_tick(
                         store,
@@ -280,6 +317,14 @@ def dream_worker(
                         now=timestamp,
                     )
                     backlog_results.append(backlog)
+                    if backlog.get("status") == "completed":
+                        _write_worker_health(
+                            store,
+                            timestamp=timestamp,
+                            state="draining",
+                            queue_backlog=0,
+                            last_success_at=timestamp,
+                        )
 
                 pending_jobs = len([job for job in store.load_dream_queue() if job.get("status") == "queued"])
                 last_result = processed_jobs[-1]["result"]["status"] if processed_jobs else (
@@ -295,14 +340,23 @@ def dream_worker(
                         "queue_depth": pending_jobs,
                     }
                 )
+                _write_worker_health(
+                    store,
+                    timestamp=timestamp,
+                    state="idle" if pending_jobs == 0 else "draining",
+                    queue_backlog=pending_jobs,
+                    active_job_id=None,
+                    active_phase=None,
+                )
 
                 if idle_exit and jobs_this_poll == 0 and (
                     not backlog_results or backlog_results[-1]["status"] == "skipped"
                 ):
                     break
-                if poll_index + 1 < max_polls and interval_seconds > 0:
+                if (max_polls <= 0 or poll_count < max_polls) and interval_seconds > 0:
                     time.sleep(interval_seconds)
     except LockError:
+        _record_worker_failure(store, reason="worker-lock-held", timestamp=now or to_iso(utc_now()))
         return {
             "run_id": worker_run_id,
             "status": "skipped",
@@ -310,11 +364,20 @@ def dream_worker(
             "processed_jobs": [],
             "backlog_results": [],
         }
+    finally:
+        _write_worker_health(
+            store,
+            timestamp=now or to_iso(utc_now()),
+            state="stopped",
+            queue_backlog=len([job for job in store.load_dream_queue() if job.get("status") == "queued"]),
+            active_job_id=None,
+            active_phase=None,
+        )
 
     summary = {
         "run_id": worker_run_id,
         "status": "completed",
-        "polls": max_polls,
+        "polls": poll_count,
         "processed_jobs": processed_jobs,
         "backlog_results": backlog_results,
         "queue_depth": len([job for job in store.load_dream_queue() if job.get("status") == "queued"]),
@@ -417,6 +480,7 @@ def _process_job(
         job["last_result"] = "lock-held"
         job["last_finished_at"] = now
         store.save_dream_queue(queue)
+        _record_worker_failure(store, reason="dream-lock-held", timestamp=now)
         return None
 
     job["status"] = str(result.get("status", "completed"))
@@ -426,4 +490,57 @@ def _process_job(
     job["error"] = result.get("reason")
     validate_document("dream-job.schema.json", job)
     store.save_dream_queue(queue)
+    if result.get("status") != "completed":
+        _record_worker_failure(
+            store,
+            reason=str(result.get("reason") or result.get("status") or "unknown"),
+            timestamp=now,
+        )
     return {"job_id": job["job_id"], "result": result}
+
+
+def _write_worker_health(
+    store: MemoryStore,
+    *,
+    timestamp: str,
+    state: str,
+    queue_backlog: int,
+    active_job_id: str | None | object = _UNSET,
+    active_phase: str | None | object = _UNSET,
+    last_success_at: str | None = None,
+) -> None:
+    existing = store.load_worker_health()
+    payload = {
+        "pid": os.getpid(),
+        "started_at": existing.get("started_at") or timestamp,
+        "last_loop_at": timestamp,
+        "last_success_at": last_success_at if last_success_at is not None else existing.get("last_success_at"),
+        "queue_backlog": max(0, int(queue_backlog)),
+        "active_job_id": existing.get("active_job_id") if active_job_id is _UNSET else active_job_id,
+        "active_phase": existing.get("active_phase") if active_phase is _UNSET else active_phase,
+        "restart_count": int(existing.get("restart_count", 0)) + (1 if existing.get("pid") != os.getpid() else 0),
+        "recent_failures": existing.get("recent_failures", []),
+        "state": state,
+        "service_name": store.load_service_manifest().get("service_name"),
+        "supervisor_kind": store.load_service_manifest().get("supervisor_kind"),
+    }
+    validate_document("worker-health.schema.json", payload)
+    store.save_worker_health(payload)
+
+
+def _record_worker_failure(store: MemoryStore, *, reason: str, timestamp: str) -> None:
+    health = store.load_worker_health()
+    failures = list(health.get("recent_failures", []))
+    failures.append({"at": timestamp, "reason": reason})
+    health["recent_failures"] = failures[-5:]
+    health["state"] = "degraded"
+    health["last_loop_at"] = timestamp
+    health["pid"] = os.getpid()
+    health.setdefault("started_at", timestamp)
+    health.setdefault("last_success_at", None)
+    health.setdefault("queue_backlog", len([job for job in store.load_dream_queue() if job.get("status") == "queued"]))
+    health.setdefault("active_job_id", None)
+    health.setdefault("active_phase", None)
+    health["restart_count"] = int(health.get("restart_count", 0))
+    validate_document("worker-health.schema.json", health)
+    store.save_worker_health(health)

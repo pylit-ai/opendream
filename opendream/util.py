@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-OPEN_SPEC_ROOT = REPO_ROOT / "openspec" / "changes" / "401-autodream-style-memory-subsystem"
-CANONICAL_SCHEMA_ROOT = REPO_ROOT / "specs" / "401-autodream-style-memory-subsystem" / "schema"
 SCHEMA_ROOT = Path(__file__).resolve().with_name("schema")
 FIXTURE_ROOT = Path(__file__).resolve().with_name("fixtures")
 
@@ -178,3 +176,17 @@ def sha256_path(path: Path) -> str:
 
 def ensure_relative_to(path: Path, base: Path) -> None:
     path.resolve().relative_to(base.resolve())
+
+
+def canonical_schema_path(schema_name: str) -> Path:
+    for pattern in ("specs/*/schema", "specs/*/schemas"):
+        for path in sorted(REPO_ROOT.glob(f"{pattern}/{schema_name}")):
+            return path
+    raise FileNotFoundError(schema_name)
+
+
+def proposal_schema_path(schema_name: str) -> Path:
+    for pattern in ("openspec/changes/*/schema", "openspec/changes/*/schemas"):
+        for path in sorted(REPO_ROOT.glob(f"{pattern}/{schema_name}")):
+            return path
+    raise FileNotFoundError(schema_name)

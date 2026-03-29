@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "required": [
+    "action",
+    "backend_mode",
+    "changed",
+    "enabled",
+    "generated_at",
+    "install_path",
+    "installed",
+    "memory_root",
+    "rendered_path",
+    "report_id",
+    "service_mode",
+    "service_name",
+    "started",
+    "supervisor_kind",
+    "warnings",
+    "workspace"
+  ],
+  "properties": {
+    "report_id": {"type": "string"},
+    "action": {"type": "string", "enum": ["install", "update", "uninstall"]},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "workspace": {"type": "string"},
+    "memory_root": {"type": "string"},
+    "service_name": {"type": "string"},
+    "supervisor_kind": {"type": "string", "enum": ["launchd", "systemd"]},
+    "service_mode": {"type": "string", "enum": ["user", "system"]},
+    "backend_mode": {"type": "string", "enum": ["managed", "native"]},
+    "rendered_path": {"type": "string"},
+    "install_path": {"type": "string"},
+    "installed": {"type": "boolean"},
+    "enabled": {"type": "boolean"},
+    "started": {"type": "boolean"},
+    "changed": {"type": "boolean"},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

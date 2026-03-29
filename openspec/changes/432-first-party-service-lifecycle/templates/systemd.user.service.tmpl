@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenDream background worker
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=$working_directory
+ExecStart=$exec_start
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:$log_path
+StandardError=append:$log_path
+
+[Install]
+WantedBy=default.target

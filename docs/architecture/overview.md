@@ -4,7 +4,7 @@
 Enduring technical structure of the system. Task-level implementation detail belongs in specs and plans.
 
 ## High-level components
-- `opendream.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, dreaming, retrieval, evaluation, and release-oriented verification hooks
+- `opendream.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, dreaming, service lifecycle, retrieval, evaluation, and release-oriented verification hooks
 - `opendream.storage` — filesystem-backed memory store, lock handling, custom memory-root routing, markdown generation, and audit artifact emission
 - `opendream.extractor` — deterministic conversion from immutable events into typed memory candidates
 - `opendream.bootstrap` — first-pass historical indexing that stages candidates and category inventory without durable apply

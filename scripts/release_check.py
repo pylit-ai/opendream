@@ -69,7 +69,14 @@ def preferred_release_blockers() -> list[str]:
         "419-dream-fidelity-evals",
         "420-truthful-verification-and-release",
     ]
-    latest = [*next_gen, "430-sota-dream-runtime-bundle"]
+    latest = [
+        *next_gen,
+        "430-sota-dream-runtime-bundle",
+        "431-cli-ux-polish",
+        "432-first-party-service-lifecycle",
+        "433-zero-touch-agent-activation",
+        "434-zero-touch-activation-and-command-surface-compression",
+    ]
     if all((REPO_ROOT / "specs" / spec_id / "tasks.md").exists() for spec_id in latest):
         return latest
     if all((REPO_ROOT / "specs" / spec_id / "tasks.md").exists() for spec_id in next_gen):
@@ -200,6 +207,124 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
                     "--once",
                     "--max-jobs-per-poll",
                     "1",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "install-service",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "install-service",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--install-root",
+                    str(temp_path / "services"),
+                    "--interval-seconds",
+                    "0.2",
+                    "--no-start",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "service-start",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "service",
+                    "start",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "service-status",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "service",
+                    "status",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "service-restart",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "service",
+                    "restart",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "service-stop",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "service",
+                    "stop",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "service-autowire",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "service",
+                    "autowire",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--target",
+                    "codex",
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "service-uninstall",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "uninstall-service",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--purge",
                 ],
                 cwd=temp_path,
                 timeout_seconds=timeout_seconds,

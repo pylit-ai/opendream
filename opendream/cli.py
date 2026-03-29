@@ -7,6 +7,13 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from . import __version__
+from .activation import (
+    activate_agents,
+    compressed_status,
+    deactivate_agents,
+    doctor_agents,
+    format_compressed_status,
+)
 from .bootstrap import bootstrap_index
 from .consolidator import consolidate
 from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
@@ -17,7 +24,6 @@ from .integration import (
     maintain,
     maintain_stores,
     prepare_context,
-    status,
     status_stores,
     tick,
     tick_stores,
@@ -25,15 +31,29 @@ from .integration import (
 from .models import MemoryEvent
 from .observability import index_observability
 from .retriever import retrieve
+from .service import (
+    autowire_adapters,
+    format_service_doctor,
+    format_service_status,
+    install_service,
+    restart_service,
+    service_doctor,
+    service_status,
+    start_service,
+    stop_service,
+    uninstall_service,
+    update_service,
+)
 from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, store_sort_key
 from .util import FIXTURE_ROOT, json_dumps, stable_id, to_iso, utc_now
 from .validation import validate_document
 from .webapp import build_server
 
 TOP_LEVEL_EXAMPLES = """Examples:
-  opendream init --workspace .tmp/ws
-  opendream demo --workspace .tmp/ws
-  opendream dream worker --workspace .tmp/ws --once
+  opendream init --workspace "$PWD" --activate-configured
+  opendream status --workspace "$PWD"
+  opendream activate --workspace "$PWD" --repair
+  opendream deactivate --workspace "$PWD"
 """
 
 
@@ -50,8 +70,8 @@ class OpenDreamArgumentParser(argparse.ArgumentParser):
 def _error_hint(prog: str, message: str) -> str | None:
     if prog == "opendream" and "required: command" in message:
         return (
-            "try `opendream init --workspace .tmp/ws` or "
-            "`opendream demo --workspace .tmp/ws`; use `opendream -h` "
+            "try `opendream init --workspace \"$PWD\" --activate-configured` or "
+            "`opendream status --workspace \"$PWD\"`; use `opendream -h` "
             "for the full command tree"
         )
     if prog == "opendream dream" and "required: dream_command" in message:
@@ -96,6 +116,13 @@ def resolve_episode_paths(store: MemoryStore, paths: list[str] | None) -> list[P
 def add_layout_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--memory-dir", help="Relative directory under the workspace for memory artifacts")
     parser.add_argument("--compat-mode", choices=["canonical", "autodream"], default=None)
+
+
+def add_service_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--backend", choices=["managed", "native"], default="managed")
+    parser.add_argument("--service-mode", choices=["user", "system"], default="user")
+    parser.add_argument("--install-root")
+    parser.add_argument("--interval-seconds", type=float, default=30.0)
 
 
 def add_store_group_arguments(parser: argparse.ArgumentParser) -> None:
@@ -192,7 +219,7 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
         compat_mode=args.compat_mode,
     )
     metadata = store.initialize(store_kind=args.store_kind, compat_mode=args.compat_mode)
-    return {
+    result = {
         "workspace": str(store.workspace),
         "memory_root": str(store.memory_root),
         "store_id": metadata["store_id"],
@@ -200,6 +227,28 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
         "compat_mode": metadata["layout"]["compat_mode"],
         "status": "initialized",
     }
+    if args.activate_configured:
+        result["activation"] = activate_agents(store, targets="configured", repair=False)
+    return result
+
+
+def command_activate(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return activate_agents(store, targets=args.targets, repair=args.repair)
+
+
+def command_deactivate(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return deactivate_agents(store, targets=args.targets)
+
+
+def command_doctor(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if args.surface != "agents":
+        raise ValueError(f"unsupported doctor surface: {args.surface}")
+    return doctor_agents(store)
 
 
 def command_append_event(args: argparse.Namespace) -> dict[str, Any]:
@@ -348,18 +397,22 @@ def command_prepare_context(args: argparse.Namespace) -> dict[str, Any]:
 def command_status(args: argparse.Namespace) -> dict[str, Any]:
     stores = resolve_store_group(args)
     if len(stores) > 1 or args.stores_manifest:
-        return status_stores(
+        payload = status_stores(
             stores,
             now=args.now,
             min_new_events=args.min_new_events,
             min_interval_seconds=args.min_interval_seconds,
         )
-    return status(
+        return payload
+    payload = compressed_status(
         stores[0],
         now=args.now,
         min_new_events=args.min_new_events,
         min_interval_seconds=args.min_interval_seconds,
     )
+    if args.format == "human":
+        payload["__raw_output__"] = format_compressed_status(payload)
+    return payload
 
 
 def command_tick(args: argparse.Namespace) -> dict[str, Any]:
@@ -604,21 +657,140 @@ def command_observe_serve(args: argparse.Namespace) -> dict[str, Any]:
     return {"status": "stopped", "host": host, "port": port}
 
 
+def command_install_service(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return install_service(
+        store,
+        interval_seconds=args.interval_seconds,
+        backend_mode=args.backend,
+        service_mode=args.service_mode,
+        install_root=Path(args.install_root) if args.install_root else None,
+        start=not args.no_start,
+    )
+
+
+def command_uninstall_service(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return uninstall_service(store, purge=args.purge)
+
+
+def command_update_service(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return update_service(
+        store,
+        interval_seconds=args.interval_seconds,
+        backend_mode=args.backend,
+        service_mode=args.service_mode,
+        install_root=Path(args.install_root) if args.install_root else None,
+        restart=not args.no_restart,
+    )
+
+
+def command_service_start(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return start_service(store)
+
+
+def command_service_stop(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return stop_service(store)
+
+
+def command_service_restart(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return restart_service(store)
+
+
+def command_service_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    payload = service_status(store, now=args.now)
+    payload["migration_hint"] = f"prefer `opendream status --workspace {store.workspace}` for the primary health view"
+    if args.format == "human":
+        payload["__raw_output__"] = format_service_status(payload)
+    return payload
+
+
+def command_service_doctor(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    payload = service_doctor(store, now=args.now)
+    payload["migration_hint"] = (
+        "prefer "
+        f"`opendream activate --workspace {store.workspace} --repair` "
+        "before using service-specific diagnostics"
+    )
+    if args.format == "human":
+        payload["__raw_output__"] = format_service_doctor(payload)
+    return payload
+
+
+def command_service_autowire(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    payload = autowire_adapters(store, target=args.target, force=args.force, uninstall=args.uninstall)
+    payload["migration_hint"] = (
+        f"prefer `opendream activate --workspace {store.workspace}`"
+        if not args.uninstall
+        else f"prefer `opendream deactivate --workspace {store.workspace}`"
+    )
+    return payload
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = OpenDreamArgumentParser(
         prog="opendream",
-        description="Local-first memory runtime for coding agents.",
+        description="Activation-first local memory runtime for coding agents.",
         epilog=TOP_LEVEL_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"opendream {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True, title="commands")
 
-    init_parser = subparsers.add_parser("init", help="Create the memory layout in a workspace")
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Primary: create the memory layout and optionally activate configured agents",
+    )
     init_parser.add_argument("--workspace", required=True)
     init_parser.add_argument("--store-kind", choices=sorted(VALID_STORE_KINDS), default="project")
+    init_parser.add_argument("--activate-configured", action="store_true")
     add_layout_arguments(init_parser)
     init_parser.set_defaults(func=command_init)
+
+    activate_parser = subparsers.add_parser(
+        "activate",
+        help="Primary: install or repair managed agent activation surfaces",
+    )
+    activate_parser.add_argument("--workspace", required=True)
+    activate_parser.add_argument(
+        "--targets",
+        choices=["configured", "all-detected", "claude-code", "codex", "openclaw"],
+        default="configured",
+    )
+    activate_parser.add_argument("--repair", action="store_true")
+    add_layout_arguments(activate_parser)
+    activate_parser.set_defaults(func=command_activate)
+
+    deactivate_parser = subparsers.add_parser("deactivate", help="Primary: remove managed activation surfaces")
+    deactivate_parser.add_argument("--workspace", required=True)
+    deactivate_parser.add_argument(
+        "--targets",
+        choices=["configured", "all-detected", "claude-code", "codex", "openclaw"],
+        default="configured",
+    )
+    add_layout_arguments(deactivate_parser)
+    deactivate_parser.set_defaults(func=command_deactivate)
+
+    doctor_parser = subparsers.add_parser("doctor", help="Advanced: diagnose managed surfaces and repair drift")
+    doctor_parser.add_argument("--workspace", required=True)
+    doctor_parser.add_argument("--surface", choices=["agents"], default="agents")
+    add_layout_arguments(doctor_parser)
+    doctor_parser.set_defaults(func=command_doctor)
 
     append_parser = subparsers.add_parser("append-event")
     append_parser.add_argument("--workspace", required=True)
@@ -666,7 +838,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(consolidate_parser)
     consolidate_parser.set_defaults(func=command_consolidate)
 
-    maintain_parser = subparsers.add_parser("maintain", help="Run extract plus consolidate when policy allows")
+    maintain_parser = subparsers.add_parser(
+        "maintain",
+        help="Advanced: run extract plus consolidate when policy allows",
+    )
     maintain_parser.add_argument("--workspace", required=True)
     maintain_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     maintain_parser.add_argument("--min-new-events", type=int)
@@ -693,16 +868,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_store_group_arguments(prepare_context_parser)
     prepare_context_parser.set_defaults(func=command_prepare_context)
 
-    status_parser = subparsers.add_parser("status", help="Inspect scheduler, lock, and dream state")
+    status_parser = subparsers.add_parser("status", help="Primary: summarize activation, drift, and runtime health")
     status_parser.add_argument("--workspace", required=True)
     status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     status_parser.add_argument("--min-new-events", type=int)
     status_parser.add_argument("--min-interval-seconds", type=int)
+    status_parser.add_argument("--format", choices=["json", "human"], default="json")
     add_layout_arguments(status_parser)
     add_store_group_arguments(status_parser)
     status_parser.set_defaults(func=command_status)
 
-    tick_parser = subparsers.add_parser("tick", help="Run one scheduler-safe maintenance poll")
+    tick_parser = subparsers.add_parser("tick", help="Advanced: run one scheduler-safe maintenance poll")
     tick_parser.add_argument("--workspace", required=True)
     tick_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     tick_parser.add_argument("--min-new-events", type=int)
@@ -717,7 +893,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(demo_parser)
     demo_parser.set_defaults(func=command_demo)
 
-    dream_parser = subparsers.add_parser("dream", help="Transcript-native dream commands")
+    dream_parser = subparsers.add_parser("dream", help="Advanced: transcript-native dream runtime commands")
     dream_subparsers = dream_parser.add_subparsers(dest="dream_command", required=True)
     dream_run_parser = dream_subparsers.add_parser(
         "run",
@@ -816,7 +992,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(eval_dream_parser)
     eval_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
 
-    observe_parser = subparsers.add_parser("observe")
+    observe_parser = subparsers.add_parser("observe", help="Advanced: observability index and local web UI")
     observe_subparsers = observe_parser.add_subparsers(dest="observe_command", required=True)
 
     observe_index_parser = observe_subparsers.add_parser("index")
@@ -833,6 +1009,82 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(observe_serve_parser)
     observe_serve_parser.set_defaults(func=command_observe_serve)
 
+    install_service_parser = subparsers.add_parser(
+        "install-service",
+        help="Advanced: render and install a background worker service",
+    )
+    install_service_parser.add_argument("--workspace", required=True)
+    install_service_parser.add_argument("--no-start", action="store_true")
+    add_layout_arguments(install_service_parser)
+    add_service_arguments(install_service_parser)
+    install_service_parser.set_defaults(func=command_install_service)
+
+    uninstall_service_parser = subparsers.add_parser(
+        "uninstall-service",
+        help="Advanced: remove a previously installed OpenDream service",
+    )
+    uninstall_service_parser.add_argument("--workspace", required=True)
+    uninstall_service_parser.add_argument("--purge", action="store_true")
+    add_layout_arguments(uninstall_service_parser)
+    uninstall_service_parser.set_defaults(func=command_uninstall_service)
+
+    update_service_parser = subparsers.add_parser(
+        "update-service",
+        help="Advanced: re-render a service manifest and optionally restart it",
+    )
+    update_service_parser.add_argument("--workspace", required=True)
+    update_service_parser.add_argument("--no-restart", action="store_true")
+    add_layout_arguments(update_service_parser)
+    add_service_arguments(update_service_parser)
+    update_service_parser.set_defaults(func=command_update_service)
+
+    service_parser = subparsers.add_parser("service", help="Advanced: inspect and control background service lifecycle")
+    service_subparsers = service_parser.add_subparsers(dest="service_command", required=True)
+
+    service_start_parser = service_subparsers.add_parser("start", help="Start the installed background service")
+    service_start_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_start_parser)
+    service_start_parser.set_defaults(func=command_service_start)
+
+    service_stop_parser = service_subparsers.add_parser("stop", help="Stop the installed background service")
+    service_stop_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_stop_parser)
+    service_stop_parser.set_defaults(func=command_service_stop)
+
+    service_restart_parser = service_subparsers.add_parser("restart", help="Restart the installed background service")
+    service_restart_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_restart_parser)
+    service_restart_parser.set_defaults(func=command_service_restart)
+
+    service_status_parser = service_subparsers.add_parser("status", help="Inspect service install and health state")
+    service_status_parser.add_argument("--workspace", required=True)
+    service_status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    service_status_parser.add_argument("--format", choices=["json", "human"], default="json")
+    add_layout_arguments(service_status_parser)
+    service_status_parser.set_defaults(func=command_service_status)
+
+    service_doctor_parser = service_subparsers.add_parser("doctor", help="Explain background service problems")
+    service_doctor_parser.add_argument("--workspace", required=True)
+    service_doctor_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    service_doctor_parser.add_argument("--format", choices=["json", "human"], default="json")
+    add_layout_arguments(service_doctor_parser)
+    service_doctor_parser.set_defaults(func=command_service_doctor)
+
+    service_autowire_parser = service_subparsers.add_parser(
+        "autowire",
+        help="Install or remove supported adapter hook glue for OpenDream",
+    )
+    service_autowire_parser.add_argument("--workspace", required=True)
+    service_autowire_parser.add_argument(
+        "--target",
+        choices=["auto", "all", "claude-code", "codex", "openclaw"],
+        default="auto",
+    )
+    service_autowire_parser.add_argument("--force", action="store_true")
+    service_autowire_parser.add_argument("--uninstall", action="store_true")
+    add_layout_arguments(service_autowire_parser)
+    service_autowire_parser.set_defaults(func=command_service_autowire)
+
     return parser
 
 
@@ -840,7 +1092,13 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     result = args.func(args)
-    print(json_dumps(result))
+    raw_output = None
+    if isinstance(result, dict):
+        raw_output = result.pop("__raw_output__", None)
+    if raw_output is not None:
+        print(raw_output)
+    else:
+        print(json_dumps(result))
     if isinstance(result, dict):
         failure_statuses = set(getattr(args, "result_failure_statuses", ()))
         if failure_statuses and str(result.get("status", "")) in failure_statuses:
