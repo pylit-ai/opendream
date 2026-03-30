@@ -79,7 +79,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                 text=True,
             )
             self.assertIn('"events_appended": 20', demo_run.stdout)
-            self.assertTrue((workspace / "memory" / "MEMORY.md").exists())
+            self.assertTrue((workspace / ".opendream" / "memory" / "MEMORY.md").exists())
 
             dream_run = subprocess.run(
                 [

@@ -6,7 +6,7 @@ from typing import Any
 from .models import ConsolidationOperation, MemoryRecord, StartupIndexEntry
 from .planner import build_plan
 from .storage import LockError, MemoryStore
-from .util import semantic_tokens, stable_id, summarize, to_iso, utc_now
+from .util import CLI_JSON_VERSION, semantic_tokens, stable_id, summarize, to_iso, utc_now
 from .verifier import verify_plan
 
 SUPERSEDE_TYPES = {"project_decision", "environment_requirement", "user_preference"}
@@ -119,7 +119,7 @@ def _make_operation(
     )
 
 
-def _build_startup_index(records: list[dict[str, Any]]) -> list[StartupIndexEntry]:
+def _build_startup_index(records: list[dict[str, Any]], *, memory_dir: str) -> list[StartupIndexEntry]:
     entries: list[StartupIndexEntry] = []
     for record in records:
         if record["status"] != "active":
@@ -139,7 +139,7 @@ def _build_startup_index(records: list[dict[str, Any]]) -> list[StartupIndexEntr
                 title=record["title"],
                 type=record["type"],
                 summary=summarize(record["summary"]),
-                path=f"memory/topics/{record['memory_id']}.md",
+                path=f"{memory_dir}/topics/{record['memory_id']}.md",
                 priority=priority,
             )
         )
@@ -162,7 +162,7 @@ def consolidate(
         with store.lock():
             if sleep_before_write:
                 time.sleep(sleep_before_write)
-            return _consolidate_locked(store, run_id=run_id, now=timestamp)
+            result = _consolidate_locked(store, run_id=run_id, now=timestamp)
     except LockError:
         return {
             "run_id": run_id,
@@ -174,7 +174,10 @@ def consolidate(
             "contested": 0,
             "quarantined": 0,
             "deleted": 0,
+            "cli_output_version": CLI_JSON_VERSION,
         }
+    result["cli_output_version"] = CLI_JSON_VERSION
+    return result
 
 
 def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[str, Any]:
@@ -244,7 +247,7 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
 
     record_models = [MemoryRecord(**record) for record in existing_records]
     store.save_durable_records(record_models)
-    entries = _build_startup_index(existing_records)
+    entries = _build_startup_index(existing_records, memory_dir=store.memory_dir_name)
     store.save_startup_index(entries, generated_at=now)
     summary["startup_index_entries"] = len(entries[: int(store.config["index_policy"]["max_entries"])])
     audit = store.write_consolidation_audit(run_id, operations, summary, before_snapshot)

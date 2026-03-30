@@ -1,0 +1,18 @@
+{
+  "id": "github-copilot",
+  "version": "1",
+  "title": "GitHub Copilot (repository instructions)",
+  "activation_mode": "managed_prompt_snippet",
+  "detection": {
+    "detected": { "any_path_exists": [".github/copilot-instructions.md"] },
+    "configured": { "any_path_exists": [".github/copilot-instructions.md"] }
+  },
+  "install_profile": "shell_hooks_markdown_block",
+  "install": {
+    "hook_tag": "github-copilot",
+    "markdown_relative_path": ".github/copilot-instructions.md",
+    "block_id": "github-copilot",
+    "markdown_kind": "copilot-instructions",
+    "initial_content_prefix": "# GitHub Copilot — repository instructions\n\n"
+  }
+}

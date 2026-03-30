@@ -9,7 +9,7 @@ from .extractor import extract_candidates
 from .models import ContextAssembly, MemoryEvent
 from .retriever import retrieve
 from .storage import STORE_KIND_PRECEDENCE, MemoryStore, store_sort_key
-from .util import parse_timestamp, stable_id, summarize, to_iso, utc_now
+from .util import CLI_JSON_VERSION, parse_timestamp, stable_id, summarize, to_iso, utc_now
 from .validation import validate_document
 
 GLOBAL_ROUTE_BLOCKED_SENSITIVITY = {"secret", "sensitive", "do_not_store"}
@@ -85,7 +85,13 @@ def emit_event(
         "store_kind": store.store_kind,
         "event_id": computed_event_id,
         "event_path": str(path.relative_to(store.workspace)),
+        "memory_root": str(
+            store.memory_root.relative_to(store.workspace)
+            if store.memory_root.is_relative_to(store.workspace)
+            else store.memory_root
+        ),
         "audit": audit,
+        "cli_output_version": CLI_JSON_VERSION,
     }
 
 
@@ -114,6 +120,7 @@ def maintain(
                 "new_events": 0,
                 "pending_candidates": len(store.load_pending_candidates()),
                 "policy": policy,
+                "cli_output_version": CLI_JSON_VERSION,
             }
 
     processed_ids = store.load_processed_event_ids()
@@ -128,6 +135,7 @@ def maintain(
             "new_events": len(new_events),
             "pending_candidates": 0,
             "policy": policy,
+            "cli_output_version": CLI_JSON_VERSION,
         }
 
     extract_run_id = stable_id("extract", timestamp, len(new_events), store.store_id)
@@ -159,6 +167,7 @@ def maintain(
                 "last_consolidate_run_id": consolidation.get("run_id"),
             }
         )
+    result["cli_output_version"] = CLI_JSON_VERSION
     return result
 
 
@@ -183,6 +192,7 @@ def maintain_stores(
         "status": "completed" if any(item["status"] == "completed" for item in results) else "skipped",
         "store_count": len(results),
         "stores": results,
+        "cli_output_version": CLI_JSON_VERSION,
     }
 
 
@@ -224,7 +234,12 @@ def status_stores(
         overall_state = "pending"
     elif all(item["state"] == "uninitialized" for item in snapshots):
         overall_state = "uninitialized"
-    return {"state": overall_state, "store_count": len(snapshots), "stores": snapshots}
+    return {
+        "state": overall_state,
+        "store_count": len(snapshots),
+        "stores": snapshots,
+        "cli_output_version": CLI_JSON_VERSION,
+    }
 
 
 def tick(
@@ -246,6 +261,7 @@ def tick(
             "reason": "not-initialized",
             **_store_descriptor(store),
             "policy": snapshot["policy"],
+            "cli_output_version": CLI_JSON_VERSION,
         }
     return maintain(
         store,
@@ -276,6 +292,7 @@ def tick_stores(
         "status": "completed" if any(item["status"] == "completed" for item in results) else "skipped",
         "store_count": len(results),
         "stores": results,
+        "cli_output_version": CLI_JSON_VERSION,
     }
 
 
@@ -435,6 +452,30 @@ def prepare_context(
     if primary_store.is_initialized():
         primary_store.write_context_assembly(assembly)
 
+    initialized = [store for store in store_list if store.is_initialized()]
+    total_durable = sum(len(store.load_durable_records()) for store in initialized)
+    if not initialized:
+        empty_reason = "no_initialized_store"
+        hints = [
+            "Run `opendream init --workspace <path>` (and usually `--activate-configured`) for this workspace."
+        ]
+    elif not selected_ids:
+        if total_durable == 0:
+            empty_reason = "no_durable_memories"
+            hints = [
+                "Record evidence with hooks or `opendream emit-event`, "
+                "then run `opendream maintain --workspace <path>`.",
+            ]
+        else:
+            empty_reason = "no_query_matches"
+            hints = [
+                "Durable memories exist but none matched this query; try different keywords or "
+                "`opendream retrieve --workspace <path> --query ... --limit 10` to inspect scoring.",
+            ]
+    else:
+        empty_reason = None
+        hints = []
+
     return {
         "workspace": str(store_list[0].workspace) if len(store_list) == 1 else None,
         "stores": [_store_descriptor(store) for store in store_list],
@@ -454,4 +495,7 @@ def prepare_context(
         ],
         "prompt_context": prompt_context,
         "summary": summarize(query, 80),
+        "empty_reason": empty_reason,
+        "hints": hints,
+        "cli_output_version": CLI_JSON_VERSION,
     }

@@ -12,11 +12,7 @@
   "properties": {
     "target_kind": {
       "type": "string",
-      "enum": [
-        "claude-code",
-        "codex",
-        "openclaw"
-      ]
+      "description": "Adapter id from bundled or workspace .opendream/adapters/*.json manifests."
     },
     "detected": {
       "type": "boolean"

@@ -1,0 +1,17 @@
+{
+  "id": "cursor",
+  "version": "1",
+  "title": "Cursor",
+  "activation_mode": "managed_prompt_snippet",
+  "detection": {
+    "detected": { "any_path_exists": [".cursor", ".cursorrules"] },
+    "configured": { "any_path_exists": [".cursor", ".cursorrules"] }
+  },
+  "install_profile": "shell_hooks_mdc_block",
+  "install": {
+    "hook_tag": "cursor",
+    "mdc_relative_path": ".cursor/rules/opendream.mdc",
+    "block_id": "cursor",
+    "markdown_kind": "cursor-rules"
+  }
+}

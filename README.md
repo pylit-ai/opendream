@@ -26,7 +26,9 @@ opendream activate --workspace "$PWD" --repair
 opendream deactivate --workspace "$PWD"
 ```
 
-Bleeding-edge from Git: `uv tool install "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
+**PyPI can lag the README.** If `opendream init -h` does not list `--activate-configured`, or `opendream --help` has no `activate` / `deactivate` commands, upgrade from **Git** (below) or use a **local editable install** from this repository. `uv tool install opendream` only updates when a newer wheel is published.
+
+Bleeding-edge from Git (overwrites the tool env): `uv tool install --force "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
 
 <details>
 <summary><strong>Install options</strong> (venv, editable checkout, PEP 668)</summary>
@@ -80,6 +82,18 @@ The lower-level runtime remains available, but it is not the main mental model.
 | `maintain` | Run extract + consolidate when work qualifies; returns structured **`status`** / **`reason`** when skipping (not a silent no-op) |
 | `prepare-context` | Retrieval surface for the next task (prompt-ready output) |
 
+Agent-oriented details (workspace vs cwd, `memory_layout`, `empty_reason` / `hints`, JSON version): [`docs/coding-agents.md`](./docs/coding-agents.md).
+
+**Recommended activation workflow**
+
+1. `opendream init --workspace "$PWD"` — create the memory layout.
+2. `opendream activation-plan --workspace "$PWD" --targets configured` — dry-run: see which surfaces would change (no files written). Use `--targets all-supported` to preview every built-in agent target.
+3. `opendream activate --workspace "$PWD" --targets configured` — apply only targets OpenDream detects (Claude/Codex/OpenClaw/Cursor/Gemini/Copilot markers in the tree). For a tool that was not detected yet, run e.g. `opendream activate --workspace "$PWD" --targets cursor` once to create `.cursor/rules/opendream.mdc` and hook scripts.
+4. `opendream activate --workspace "$PWD" --repair` — restore drifted managed files and hook entries.
+5. `opendream doctor --workspace "$PWD" --surface agents` — verify health before you commit.
+
+Instruction-only targets (Cursor rules, `GEMINI.md`, `.github/copilot-instructions.md`) ship the same pre/post shell hooks as Codex; the agent must still run those commands when the host has no native OpenDream hooks.
+
 Corrections worth knowing:
 
 - Treat **`maintain`** as the documented maintenance entrypoint even if the CLI exposes more commands.
@@ -97,7 +111,7 @@ Human-facing behavior is described in this README and in [`AGENTS.md`](./AGENTS.
 
 ## Observability UI
 
-Nothing starts a server unless you ask. The UI reads **one** workspace’s on-disk memory store (default relative path `memory/` under the workspace).
+Nothing starts a server unless you ask. The UI reads **one** workspace’s on-disk memory store (default relative path `.opendream/memory/` under the workspace).
 
 ```bash
 opendream observe index --workspace "$PWD"
@@ -111,7 +125,7 @@ Then open `http://127.0.0.1:8000/overview` on the same machine. `observe serve` 
 
 Built from the same on-disk artifacts as the runtime (read model is derived; filesystem remains source of truth):
 
-- Index at `memory/state/observability_index.json`
+- Index at `.opendream/memory/state/observability_index.json` (under your configured memory root)
 - Read APIs: overview, memories, runs, retrievals, sessions, context, graph, reviews, evals, exports
 - Audited writes: annotations, review decisions, exports
 - SSE at `/api/stream/status`
@@ -218,7 +232,7 @@ Cron example:
 
 ## Generated data
 
-By default, durable memory artifacts live under a workspace-local `memory/` directory. Use `--memory-dir <relative-path>` when a repo needs a different location; that path is honored across commands that read or write memory. Planner plans, verifier reports, dream queue state, and worker audits live under the same memory root.
+By default, durable memory artifacts live under **`.opendream/memory/`** (so a repo-root `memory/` folder stays free for other tools). If `memory/state/store.json` already exists from an older layout, that tree is used automatically until you migrate. Use `--memory-dir <relative-path>` to pin a custom location; planner plans, verifier reports, dream queue state, and worker audits live under the same memory root.
 
 Activation and compressed-status metadata (for the standard `init --activate-configured` / `status` path) persist under **`.opendream/`** at the workspace root — notably `targets.json` and `activation-state.json`. Add `.opendream/` to `.gitignore` if you do not want those files committed.
 
@@ -259,7 +273,7 @@ opendream --help
 opendream init --workspace .tmp/ws
 ```
 
-Expect `memory/` with `memory/state/durable_records.json`, `memory/state/index.json`, and `memory/MEMORY.md`.
+Expect `.opendream/memory/` with `state/durable_records.json`, `state/index.json`, and `MEMORY.md` (paths relative to the active memory root).
 
 ```bash
 opendream emit-event \
@@ -270,13 +284,13 @@ opendream emit-event \
   --tag key:package-manager
 ```
 
-Expect JSON `"status": "appended"` and new JSONL under `memory/state/events/`.
+Expect JSON `"status": "appended"` and new JSONL under `<memory-root>/state/events/`.
 
 ```bash
 opendream maintain --workspace .tmp/ws
 ```
 
-Expect JSON with `extract.processed_events > 0` when pending, `consolidate.status` completed or an explicit skip, and `memory/state/maintenance_state.json` updated when work runs.
+Expect JSON with `extract.processed_events > 0` when pending, `consolidate.status` completed or an explicit skip, and `<memory-root>/state/maintenance_state.json` updated when work runs.
 
 ```bash
 opendream prepare-context \

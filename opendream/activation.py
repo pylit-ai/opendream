@@ -1,34 +1,29 @@
 from __future__ import annotations
 
-import hashlib
-import json
-import shlex
-import stat
-import subprocess
 from pathlib import Path
 from typing import Any, cast
 
+from . import activation_primitives as P
+from .adapter_loader import (
+    adapter_ids_for_workspace,
+    builtin_adapter_ids,
+    load_merged_adapters,
+)
+from .adapter_profiles import (
+    detect_from_manifest,
+    expected_surfaces,
+    install_adapter,
+    remove_adapter,
+)
 from .storage import MemoryStore
-from .util import atomic_write_text, read_json, stable_id, to_iso, utc_now, write_json
+from .util import CLI_JSON_VERSION, read_json, stable_id, to_iso, utc_now, write_json
 from .validation import validate_document
 
-SUPPORTED_TARGETS = ("claude-code", "codex", "openclaw")
+SUPPORTED_TARGETS = builtin_adapter_ids()
 REGISTRY_PATH = Path(".opendream/agents.json")
 TARGET_REGISTRY_PATH = Path(".opendream/targets.json")
 ACTIVATION_STATE_PATH = Path(".opendream/activation-state.json")
 REPORTS_DIR = Path(".opendream/reports")
-HOOKS_DIR = Path(".opendream/hooks")
-BIN_DIR = Path(".opendream/bin")
-CONTEXT_DIR = Path(".opendream/context")
-
-CLAUDE_SETTINGS_PATH = Path(".claude/settings.json")
-OPENCLAW_CONFIG_PATH = Path(".openclaw/config.json")
-OPENCLAW_EVENT_MAP_PATH = Path(".openclaw/opendream-event-map.md")
-CODEX_AGENTS_PATH = Path("AGENTS.md")
-CODEX_CONFIG_PATH = Path(".codex/config.toml")
-
-LEGACY_CODEX_BLOCK_START = "<!-- OPENDREAM:CODEX START -->"
-LEGACY_CODEX_BLOCK_END = "<!-- OPENDREAM:CODEX END -->"
 
 
 def activate_agents(store: MemoryStore, *, targets: str, repair: bool = False) -> dict[str, Any]:
@@ -37,7 +32,7 @@ def activate_agents(store: MemoryStore, *, targets: str, repair: bool = False) -
     registry_before = load_agent_registry(workspace)
     registry_before_map = _records_by_target(registry_before)
     detections = detect_agents(workspace)
-    selected = _select_targets(detections, targets)
+    selected = _select_targets(workspace, detections, targets)
     warnings: list[str] = []
     changed_files: list[str] = []
     repairs: list[str] = []
@@ -129,13 +124,69 @@ def activate_agents(store: MemoryStore, *, targets: str, repair: bool = False) -
     return repair_report
 
 
+def plan_agent_activation(store: MemoryStore, *, targets: str) -> dict[str, Any]:
+    """Dry-run: report which managed surfaces would be created, updated, or left unchanged."""
+    store.ensure_layout()
+    workspace = store.workspace
+    detections = detect_agents(workspace)
+    selected = _select_targets(workspace, detections, targets)
+    generated_at = to_iso(utc_now())
+    target_plans: list[dict[str, Any]] = []
+    remediation_cmds: list[str] = []
+    for target in selected:
+        expected = _expected_target_state(store, target)
+        surface_plans: list[dict[str, Any]] = []
+        for surface in expected["surfaces"]:
+            assessment = P.assess_surface(workspace, surface)
+            state = assessment["state"]
+            if state == "clean":
+                action = "noop"
+            elif state == "missing":
+                action = "create"
+            else:
+                action = "update"
+            surface_plans.append(
+                {
+                    "path": surface["path"],
+                    "kind": surface["kind"],
+                    "action": action,
+                    "detail": assessment["smoke"]["detail"],
+                }
+            )
+        if any(item["action"] != "noop" for item in surface_plans):
+            remediation_cmds.append(
+                f"opendream activate --workspace {workspace} --targets {target}"
+            )
+        target_plans.append({"target_kind": target, "surfaces": surface_plans})
+    if not selected:
+        remediation = (
+            "No targets matched this selector. Try `opendream doctor --workspace <path> --surface agents`, "
+            "or install surfaces explicitly, e.g. "
+            f"`opendream activate --workspace {workspace} --targets cursor`."
+        )
+    elif remediation_cmds:
+        remediation = "Run: " + " ; ".join(dict.fromkeys(remediation_cmds))
+    else:
+        remediation = "No changes required for selected targets."
+    payload = {
+        "generated_at": generated_at,
+        "workspace": str(workspace),
+        "selector": targets,
+        "selected_targets": selected,
+        "targets": target_plans,
+        "remediation": remediation,
+    }
+    validate_document("activation-plan.schema.json", payload)
+    return payload
+
+
 def deactivate_agents(store: MemoryStore, *, targets: str) -> dict[str, Any]:
     store.ensure_layout()
     workspace = store.workspace
     registry_before = load_agent_registry(workspace)
     registry_before_map = _records_by_target(registry_before)
     detections = detect_agents(workspace)
-    selected = _select_targets_for_deactivation(detections, registry_before_map, targets)
+    selected = _select_targets_for_deactivation(workspace, detections, registry_before_map, targets)
     warnings: list[str] = []
     changed_files: list[str] = []
     results: list[dict[str, Any]] = []
@@ -256,6 +307,8 @@ def compressed_status(
         "next_action": _next_action(store.workspace, overall_state, targets, runtime),
         "activation_state": activation_state,
         "service": service_state,
+        "memory_layout": store.memory_layout_advisory(),
+        "cli_output_version": CLI_JSON_VERSION,
     }
     validate_document("compressed-status.schema.json", payload)
     return payload
@@ -267,6 +320,11 @@ def format_compressed_status(payload: dict[str, Any]) -> str:
         f"overall_state={payload['overall_state']}",
         f"next_action={payload['next_action']}",
     ]
+    memory_layout = payload.get("memory_layout") or {}
+    if memory_layout.get("active_memory_root"):
+        lines.append(f"memory_root={memory_layout['active_memory_root']}")
+    for warning in memory_layout.get("warnings") or []:
+        lines.append(f"memory_warning={warning}")
     target_summary = payload.get("targets", [])
     if target_summary:
         lines.append(
@@ -292,6 +350,41 @@ def format_compressed_status(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def doctor_memory(store: MemoryStore) -> dict[str, Any]:
+    ml = store.memory_layout_advisory()
+    hints: list[str] = []
+    if ml.get("shadow_memory_paths"):
+        hints.append(
+            "Shadow memory paths detected; only active_memory_root is authoritative for this invocation."
+        )
+    if not store.is_initialized():
+        return {
+            "generated_at": to_iso(utc_now()),
+            "workspace": str(store.workspace),
+            "surface": "memory",
+            "status": "uninitialized",
+            "memory_layout": ml,
+            "durable_record_count": 0,
+            "pending_events": 0,
+            "pending_candidates": 0,
+            "hints": [*hints, "Run `opendream init --workspace <path>`."],
+            "cli_output_version": CLI_JSON_VERSION,
+        }
+    store.ensure_layout()
+    return {
+        "generated_at": to_iso(utc_now()),
+        "workspace": str(store.workspace),
+        "surface": "memory",
+        "status": "healthy",
+        "memory_layout": ml,
+        "durable_record_count": len(store.load_durable_records()),
+        "pending_events": store.pending_event_count(),
+        "pending_candidates": len(store.load_pending_candidates()),
+        "hints": hints,
+        "cli_output_version": CLI_JSON_VERSION,
+    }
+
+
 def doctor_agents(store: MemoryStore) -> dict[str, Any]:
     store.ensure_layout()
     workspace = store.workspace
@@ -313,6 +406,7 @@ def doctor_agents(store: MemoryStore) -> dict[str, Any]:
         status = "needs-repair"
     elif broken_targets:
         status = "broken"
+    memory_layout = store.memory_layout_advisory()
     return {
         "generated_at": to_iso(utc_now()),
         "workspace": str(workspace),
@@ -326,6 +420,8 @@ def doctor_agents(store: MemoryStore) -> dict[str, Any]:
         "missing_service_targets": service_state["missing_targets"],
         "results": [_build_agent_record(record["target_kind"], record) for record in records],
         "service": service_state,
+        "memory_layout": memory_layout,
+        "cli_output_version": CLI_JSON_VERSION,
     }
 
 
@@ -367,7 +463,7 @@ def autowire_adapters_compat(
         return payload
 
     if target == "all":
-        targets = list(SUPPORTED_TARGETS)
+        targets = sorted(load_merged_adapters(store.workspace).keys())
         all_changed_files: list[str] = []
         all_warnings: list[str] = []
         all_results: list[dict[str, Any]] = []
@@ -423,15 +519,17 @@ def autowire_adapters_compat(
 
 
 def detect_agents(workspace: Path) -> list[dict[str, Any]]:
+    merged = load_merged_adapters(workspace)
     results: list[dict[str, Any]] = []
-    for target in SUPPORTED_TARGETS:
-        detected, configured = _detect_target(workspace, target)
+    for adapter_id in sorted(merged.keys()):
+        manifest = merged[adapter_id]
+        detected, configured = detect_from_manifest(workspace, manifest)
         results.append(
             {
-                "target_kind": target,
+                "target_kind": adapter_id,
                 "detected": detected,
                 "configured": configured,
-                "activation_mode": _activation_mode(target),
+                "activation_mode": str(manifest["activation_mode"]),
             }
         )
     return results
@@ -439,7 +537,25 @@ def detect_agents(workspace: Path) -> list[dict[str, Any]]:
 
 def inspect_target(store: MemoryStore, target: str) -> dict[str, Any]:
     workspace = store.workspace
-    detected, configured = _detect_target(workspace, target)
+    merged = load_merged_adapters(workspace)
+    manifest = merged.get(target)
+    if not manifest:
+        return {
+            "target_kind": target,
+            "detected": False,
+            "configured": False,
+            "activation_mode": "unsupported",
+            "managed_paths": [],
+            "drift_state": "unknown",
+            "health_state": "unknown",
+            "activated": False,
+            "managed_surfaces": [],
+            "warnings": [],
+            "smoke": [],
+        }
+
+    detected, configured = detect_from_manifest(workspace, manifest)
+    activation_mode = str(manifest["activation_mode"])
     expected = _expected_target_state(store, target)
     surfaces: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -448,7 +564,7 @@ def inspect_target(store: MemoryStore, target: str) -> dict[str, Any]:
     activated = True
 
     for surface in expected["surfaces"]:
-        assessment = _assess_surface(workspace, surface)
+        assessment = P.assess_surface(workspace, surface)
         surfaces.append(assessment)
         if assessment["smoke"]["status"] != "passed":
             warnings.append(assessment["smoke"]["detail"])
@@ -465,7 +581,7 @@ def inspect_target(store: MemoryStore, target: str) -> dict[str, Any]:
             "target_kind": target,
             "detected": False,
             "configured": False,
-            "activation_mode": _activation_mode(target),
+            "activation_mode": activation_mode,
             "managed_paths": [],
             "drift_state": "unknown",
             "health_state": "unknown",
@@ -486,7 +602,7 @@ def inspect_target(store: MemoryStore, target: str) -> dict[str, Any]:
         "target_kind": target,
         "detected": detected or bool(managed_paths),
         "configured": configured or bool(managed_paths),
-        "activation_mode": _activation_mode(target),
+        "activation_mode": activation_mode,
         "managed_paths": managed_paths,
         "drift_state": drift_state,
         "health_state": health_state,
@@ -527,27 +643,32 @@ def _write_report(workspace: Path, prefix: str, payload: dict[str, Any]) -> Path
     return path
 
 
-def _select_targets(detections: list[dict[str, Any]], selector: str) -> list[str]:
+def _select_targets(workspace: Path, detections: list[dict[str, Any]], selector: str) -> list[str]:
+    merged = load_merged_adapters(workspace)
+    merged_ids = set(merged.keys())
     if selector == "configured":
         return [item["target_kind"] for item in detections if item["configured"]]
     if selector == "all-detected":
         return [item["target_kind"] for item in detections if item["detected"]]
-    if selector not in SUPPORTED_TARGETS:
-        raise ValueError(f"unsupported activation target selector: {selector}")
-    return [selector]
+    if selector == "all-supported":
+        return sorted(merged_ids)
+    if selector in merged_ids:
+        return [selector]
+    raise ValueError(f"unsupported activation target selector: {selector}")
 
 
 def _select_targets_for_autowire(workspace: Path, selector: str) -> list[str]:
     detections = detect_agents(workspace)
     if selector == "auto":
-        selected = _select_targets(detections, "configured")
+        selected = _select_targets(workspace, detections, "configured")
         return selected or ["codex"]
     if selector == "all":
-        return list(SUPPORTED_TARGETS)
+        return sorted(load_merged_adapters(workspace).keys())
     return [selector]
 
 
 def _select_targets_for_deactivation(
+    workspace: Path,
     detections: list[dict[str, Any]],
     registry: dict[str, dict[str, Any]],
     selector: str,
@@ -571,178 +692,36 @@ def _select_targets_for_deactivation(
             if item["detected"] or item["target_kind"] in registry_targets
         ]
         return selected
-    if selector not in SUPPORTED_TARGETS:
-        raise ValueError(f"unsupported activation target selector: {selector}")
-    return [selector]
+    if selector == "all-supported":
+        return sorted(load_merged_adapters(workspace).keys())
+    merged = load_merged_adapters(workspace)
+    if selector in merged:
+        return [selector]
+    raise ValueError(f"unsupported activation target selector: {selector}")
 
 
-def _activation_mode(target: str) -> str:
-    if target == "codex":
-        return "managed_wrapper"
-    return "native_hooks"
-
-
-def _detect_target(workspace: Path, target: str) -> tuple[bool, bool]:
-    if target == "claude-code":
-        detected = (workspace / ".claude").exists() or (workspace / "CLAUDE.md").exists()
-        configured = (workspace / ".claude").exists() or (workspace / CLAUDE_SETTINGS_PATH).exists()
-        return detected, configured
-    if target == "codex":
-        detected = (workspace / ".codex").exists() or (workspace / CODEX_AGENTS_PATH).exists()
-        configured = detected
-        return detected, configured
-    if target == "openclaw":
-        detected = (workspace / ".openclaw").exists()
-        configured = detected or (workspace / OPENCLAW_CONFIG_PATH).exists()
-        return detected, configured
-    raise ValueError(f"unsupported target: {target}")
+def _expected_target_state(store: MemoryStore, target: str) -> dict[str, Any]:
+    merged = load_merged_adapters(store.workspace)
+    manifest = merged.get(target)
+    if not manifest:
+        return {"surfaces": []}
+    return {"surfaces": expected_surfaces(store, manifest)}
 
 
 def _install_target(store: MemoryStore, target: str) -> dict[str, Any]:
-    if target == "claude-code":
-        return _install_claude(store)
-    if target == "codex":
-        return _install_codex(store)
-    if target == "openclaw":
-        return _install_openclaw(store)
-    raise ValueError(f"unsupported target: {target}")
+    merged = load_merged_adapters(store.workspace)
+    manifest = merged.get(target)
+    if not manifest:
+        raise ValueError(f"unknown adapter id: {target}")
+    return install_adapter(store, manifest)
 
 
 def _remove_target(store: MemoryStore, target: str) -> dict[str, Any]:
-    if target == "claude-code":
-        return _remove_claude(store.workspace)
-    if target == "codex":
-        return _remove_codex(store.workspace)
-    if target == "openclaw":
-        return _remove_openclaw(store.workspace)
-    raise ValueError(f"unsupported target: {target}")
-
-
-def _install_claude(store: MemoryStore) -> dict[str, Any]:
-    workspace = store.workspace
-    pre_path = workspace / HOOKS_DIR / "claude-pre-task.sh"
-    post_path = workspace / HOOKS_DIR / "claude-post-task.sh"
-    changed_files = _write_managed_script(pre_path, _pre_task_script(store, "claude"))
-    changed_files.extend(_write_managed_script(post_path, _post_task_script(store, "claude")))
-
-    settings_path = workspace / CLAUDE_SETTINGS_PATH
-    payload = _load_json_object(settings_path)
-    hooks = payload.setdefault("hooks", {})
-    pre_task = hooks.setdefault("preTask", [])
-    post_task = hooks.setdefault("postTask", [])
-    pre_cmd = 'sh .opendream/hooks/claude-pre-task.sh "$CLAUDE_TASK"'
-    post_cmd = 'sh .opendream/hooks/claude-post-task.sh "$CLAUDE_SUMMARY"'
-    if pre_cmd not in pre_task:
-        pre_task.append(pre_cmd)
-    if post_cmd not in post_task:
-        post_task.append(post_cmd)
-    changed_files.extend(_write_if_changed(settings_path, json.dumps(payload, indent=2, sort_keys=True) + "\n"))
-    return {"changed_files": changed_files, "warnings": []}
-
-
-def _install_codex(store: MemoryStore) -> dict[str, Any]:
-    workspace = store.workspace
-    pre_path = workspace / HOOKS_DIR / "codex-pre-task.sh"
-    post_path = workspace / HOOKS_DIR / "codex-post-task.sh"
-    wrapper_path = workspace / BIN_DIR / "codex-task-wrapper.sh"
-    changed_files = _write_managed_script(pre_path, _pre_task_script(store, "codex"))
-    changed_files.extend(_write_managed_script(post_path, _post_task_script(store, "codex")))
-    changed_files.extend(_write_managed_script(wrapper_path, _codex_wrapper_script(store)))
-    agents_path = workspace / CODEX_AGENTS_PATH
-    existing = agents_path.read_text(encoding="utf-8") if agents_path.exists() else "# AGENTS.md\n\n"
-    block = _codex_block(store)
-    updated = _replace_or_append_block(existing, _block_start("codex"), _block_end("codex"), block)
-    changed_files.extend(_write_if_changed(agents_path, updated))
-    return {"changed_files": changed_files, "warnings": []}
-
-
-def _install_openclaw(store: MemoryStore) -> dict[str, Any]:
-    workspace = store.workspace
-    hook_path = workspace / HOOKS_DIR / "openclaw-hooks.sh"
-    map_path = workspace / OPENCLAW_EVENT_MAP_PATH
-    changed_files = _write_managed_script(hook_path, _openclaw_hook_script(store))
-    changed_files.extend(_write_if_changed(map_path, _openclaw_event_map()))
-
-    config_path = workspace / OPENCLAW_CONFIG_PATH
-    payload = _load_json_object(config_path)
-    hooks = payload.setdefault("hooks", {})
-    pre_plan = hooks.setdefault("prePlan", [])
-    post_task = hooks.setdefault("postTask", [])
-    pre_cmd = 'sh .opendream/hooks/openclaw-hooks.sh pre-plan "$OPENCLAW_TASK"'
-    post_cmd = 'sh .opendream/hooks/openclaw-hooks.sh post-task "$OPENCLAW_SUMMARY"'
-    if pre_cmd not in pre_plan:
-        pre_plan.append(pre_cmd)
-    if post_cmd not in post_task:
-        post_task.append(post_cmd)
-    changed_files.extend(_write_if_changed(config_path, json.dumps(payload, indent=2, sort_keys=True) + "\n"))
-    return {"changed_files": changed_files, "warnings": []}
-
-
-def _remove_claude(workspace: Path) -> dict[str, Any]:
-    settings_path = workspace / CLAUDE_SETTINGS_PATH
-    payload = _load_json_object(settings_path)
-    hooks = payload.setdefault("hooks", {})
-    pre_cmd = 'sh .opendream/hooks/claude-pre-task.sh "$CLAUDE_TASK"'
-    post_cmd = 'sh .opendream/hooks/claude-post-task.sh "$CLAUDE_SUMMARY"'
-    hooks["preTask"] = [item for item in hooks.get("preTask", []) if item != pre_cmd]
-    hooks["postTask"] = [
-        item for item in hooks.get("postTask", []) if item != post_cmd
-    ]
-    changed_files = (
-        _write_if_changed(settings_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        if settings_path.exists()
-        else []
-    )
-    for path in [workspace / HOOKS_DIR / "claude-pre-task.sh", workspace / HOOKS_DIR / "claude-post-task.sh"]:
-        if path.exists():
-            path.unlink()
-            changed_files.append(str(path))
-    return {"changed_files": changed_files, "warnings": []}
-
-
-def _remove_codex(workspace: Path) -> dict[str, Any]:
-    changed_files: list[str] = []
-    agents_path = workspace / CODEX_AGENTS_PATH
-    if agents_path.exists():
-        text = agents_path.read_text(encoding="utf-8")
-        updated = _remove_block(text, _block_start("codex"), _block_end("codex"))
-        updated = _remove_block(updated, LEGACY_CODEX_BLOCK_START, LEGACY_CODEX_BLOCK_END)
-        changed_files.extend(_write_if_changed(agents_path, updated))
-    for path in [
-        workspace / HOOKS_DIR / "codex-pre-task.sh",
-        workspace / HOOKS_DIR / "codex-post-task.sh",
-        workspace / BIN_DIR / "codex-task-wrapper.sh",
-    ]:
-        if path.exists():
-            path.unlink()
-            changed_files.append(str(path))
-    return {"changed_files": changed_files, "warnings": []}
-
-
-def _remove_openclaw(workspace: Path) -> dict[str, Any]:
-    config_path = workspace / OPENCLAW_CONFIG_PATH
-    payload = _load_json_object(config_path)
-    hooks = payload.setdefault("hooks", {})
-    hooks["prePlan"] = [
-        item
-        for item in hooks.get("prePlan", [])
-        if item != 'sh .opendream/hooks/openclaw-hooks.sh pre-plan "$OPENCLAW_TASK"'
-    ]
-    hooks["postTask"] = [
-        item
-        for item in hooks.get("postTask", [])
-        if item != 'sh .opendream/hooks/openclaw-hooks.sh post-task "$OPENCLAW_SUMMARY"'
-    ]
-    changed_files = (
-        _write_if_changed(config_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        if config_path.exists()
-        else []
-    )
-    for path in [workspace / HOOKS_DIR / "openclaw-hooks.sh", workspace / OPENCLAW_EVENT_MAP_PATH]:
-        if path.exists():
-            path.unlink()
-            changed_files.append(str(path))
-    return {"changed_files": changed_files, "warnings": []}
+    merged = load_merged_adapters(store.workspace)
+    manifest = merged.get(target)
+    if not manifest:
+        return {"changed_files": [], "warnings": []}
+    return remove_adapter(store.workspace, manifest)
 
 
 def _service_requirement(store: MemoryStore, records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -769,7 +748,7 @@ def _build_agent_record(target: str, payload: dict[str, Any], *, activated_at: s
         "target_kind": target,
         "detected": bool(payload.get("detected")),
         "configured": bool(payload.get("configured")),
-        "activation_mode": str(payload.get("activation_mode", _activation_mode(target))),
+        "activation_mode": str(payload.get("activation_mode", "unsupported")),
         "managed_paths": list(payload.get("managed_paths", [])),
         "drift_state": str(payload.get("drift_state", "unknown")),
         "health_state": str(payload.get("health_state", "unknown")),
@@ -806,7 +785,7 @@ def _collect_registry_records(
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     deactivated = deactivated_targets or set()
-    for target in SUPPORTED_TARGETS:
+    for target in adapter_ids_for_workspace(store.workspace, frozenset(previous_registry.keys())):
         inspected = inspect_target(store, target)
         previous = previous_registry.get(target, {})
         should_include = (
@@ -967,424 +946,12 @@ def _next_action(
         return f"run `opendream activate --workspace {workspace}`"
     if not targets:
         return (
-            "configure Claude Code, Codex, or OpenClaw, then run "
-            "`opendream init --workspace <path> --activate-configured`"
+            "configure an agent surface (Claude Code, Codex, OpenClaw, Cursor, Gemini CLI, Copilot, …), "
+            "then run `opendream init --workspace <path> --activate-configured` "
+            "or `opendream activate --workspace <path> --targets <name>`"
         )
     if runtime.get("memory_state") == "pending":
         return f"run `opendream maintain --workspace {workspace}` or let your configured hooks drain naturally"
     if runtime.get("service", {}).get("installed") and not runtime.get("service", {}).get("running"):
         return f"run `opendream service start --workspace {workspace}` if you want background polling"
     return "no action required"
-
-
-def _expected_target_state(store: MemoryStore, target: str) -> dict[str, Any]:
-    if target == "claude-code":
-        pre_cmd = 'sh .opendream/hooks/claude-pre-task.sh "$CLAUDE_TASK"'
-        post_cmd = 'sh .opendream/hooks/claude-post-task.sh "$CLAUDE_SUMMARY"'
-        return {
-            "surfaces": [
-                _file_surface(
-                    target,
-                    HOOKS_DIR / "claude-pre-task.sh",
-                    "hook-script",
-                    _pre_task_script(store, "claude"),
-                ),
-                _file_surface(
-                    target,
-                    HOOKS_DIR / "claude-post-task.sh",
-                    "hook-script",
-                    _post_task_script(store, "claude"),
-                ),
-                _json_surface(
-                    target,
-                    CLAUDE_SETTINGS_PATH,
-                    "native-hooks",
-                    {"hooks": {"preTask": [pre_cmd], "postTask": [post_cmd]}},
-                ),
-            ]
-        }
-    if target == "codex":
-        return {
-            "surfaces": [
-                _file_surface(
-                    target,
-                    HOOKS_DIR / "codex-pre-task.sh",
-                    "hook-script",
-                    _pre_task_script(store, "codex"),
-                ),
-                _file_surface(
-                    target,
-                    HOOKS_DIR / "codex-post-task.sh",
-                    "hook-script",
-                    _post_task_script(store, "codex"),
-                ),
-                _file_surface(
-                    target,
-                    BIN_DIR / "codex-task-wrapper.sh",
-                    "managed-wrapper",
-                    _codex_wrapper_script(store),
-                ),
-                _block_surface(target, CODEX_AGENTS_PATH, "repo-instructions", _codex_block(store)),
-            ]
-        }
-    if target == "openclaw":
-        pre_cmd = 'sh .opendream/hooks/openclaw-hooks.sh pre-plan "$OPENCLAW_TASK"'
-        post_cmd = 'sh .opendream/hooks/openclaw-hooks.sh post-task "$OPENCLAW_SUMMARY"'
-        return {
-            "surfaces": [
-                _file_surface(
-                    target,
-                    HOOKS_DIR / "openclaw-hooks.sh",
-                    "hook-script",
-                    _openclaw_hook_script(store),
-                ),
-                _file_surface(target, OPENCLAW_EVENT_MAP_PATH, "event-map", _openclaw_event_map()),
-                _json_surface(
-                    target,
-                    OPENCLAW_CONFIG_PATH,
-                    "native-hooks",
-                    {"hooks": {"prePlan": [pre_cmd], "postTask": [post_cmd]}},
-                ),
-            ]
-        }
-    raise ValueError(f"unsupported target: {target}")
-
-
-def _assess_surface(workspace: Path, surface: dict[str, Any]) -> dict[str, Any]:
-    path = workspace / surface["path"]
-    state = "clean"
-    detail = "surface is live"
-    if surface["mode"] == "file":
-        if not path.exists():
-            state = "missing"
-            detail = f"missing managed file {surface['path']}"
-        else:
-            content = path.read_text(encoding="utf-8")
-            if content != surface["expected"]:
-                state = "drifted"
-                detail = f"managed file drift detected at {surface['path']}"
-    elif surface["mode"] == "json":
-        if not path.exists():
-            state = "missing"
-            detail = f"missing config file {surface['path']}"
-        else:
-            payload = _load_json_object(path)
-            if not _json_contains_expected(payload, surface["expected"]):
-                state = "drifted"
-                detail = f"managed hook entries drifted at {surface['path']}"
-    elif surface["mode"] == "block":
-        if not path.exists():
-            state = "missing"
-            detail = f"missing block carrier {surface['path']}"
-        else:
-            text = path.read_text(encoding="utf-8")
-            block = _extract_block(text, _block_start(surface["target"]), _block_end(surface["target"]))
-            if block != surface["expected"]:
-                state = "drifted"
-                detail = f"managed block drift detected at {surface['path']}"
-    smoke = {"status": "passed", "detail": detail}
-    if state == "clean" and surface["kind"] in {"hook-script", "managed-wrapper"}:
-        check = subprocess.run(
-            ["/bin/sh", "-n", str(path)],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if check.returncode != 0:
-            state = "drifted"
-            smoke = {"status": "failed", "detail": f"shell syntax check failed for {surface['path']}"}
-    elif state != "clean":
-        smoke = {"status": "failed", "detail": detail}
-    return {
-        "target_kind": surface["target_kind"],
-        "path": surface["path"],
-        "kind": surface["kind"],
-        "hash": surface["hash"],
-        "managed": True,
-        "state": state,
-        "smoke": smoke,
-    }
-
-
-def _file_surface(target: str, relative_path: Path, kind: str, expected: str) -> dict[str, Any]:
-    return {
-        "target_kind": target,
-        "path": str(relative_path),
-        "kind": kind,
-        "hash": _sha256_text(expected),
-        "mode": "file",
-        "expected": expected,
-    }
-
-
-def _json_surface(target: str, relative_path: Path, kind: str, expected: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "target_kind": target,
-        "path": str(relative_path),
-        "kind": kind,
-        "hash": _sha256_text(json.dumps(expected, sort_keys=True)),
-        "mode": "json",
-        "expected": expected,
-    }
-
-
-def _block_surface(target: str, relative_path: Path, kind: str, expected: str) -> dict[str, Any]:
-    return {
-        "target_kind": target,
-        "path": str(relative_path),
-        "kind": kind,
-        "hash": _sha256_text(expected),
-        "mode": "block",
-        "expected": expected,
-        "target": target,
-    }
-
-
-def _pre_task_script(store: MemoryStore, target: str) -> str:
-    command = _opendream_command(store, "prepare-context")
-    output_name = f"{target}-pre-task.json"
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "set -eu",
-            "",
-            'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
-            'QUERY="${1:-${OPENDREAM_QUERY:-current task}}"',
-            'GLOBAL="${OPENDREAM_GLOBAL_WORKSPACE:-}"',
-            f'OUTPUT="$WORKSPACE/{CONTEXT_DIR}/{output_name}"',
-            'mkdir -p "$(dirname "$OUTPUT")"',
-            'if [ -n "$GLOBAL" ]; then',
-            f'  {command} --query "$QUERY" --include-global --global-workspace "$GLOBAL" > "$OUTPUT"',
-            "else",
-            f'  {command} --query "$QUERY" > "$OUTPUT"',
-            "fi",
-            'cat "$OUTPUT"',
-            "",
-        ]
-    )
-
-
-def _post_task_script(store: MemoryStore, target: str) -> str:
-    emit_command = _opendream_command(store, "emit-event")
-    maintain_command = _opendream_command(store, "maintain")
-    worker_command = _opendream_command(store, "dream worker")
-    ref = f"{target}-post-task"
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "set -eu",
-            "",
-            'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
-            'SUMMARY="${1:-${OPENDREAM_SUMMARY:-Task completed.}}"',
-            f'MESSAGE_REF="${{OPENDREAM_REF:-{ref}}}"',
-            f'{emit_command} --kind task_outcome --content "$SUMMARY" --message-ref "$MESSAGE_REF"',
-            f"{maintain_command}",
-            f"{worker_command} --once",
-            "",
-        ]
-    )
-
-
-def _openclaw_hook_script(store: MemoryStore) -> str:
-    prepare_command = _opendream_command(store, "prepare-context")
-    emit_command = _opendream_command(store, "emit-event")
-    maintain_command = _opendream_command(store, "maintain")
-    worker_command = _opendream_command(store, "dream worker")
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "set -eu",
-            "",
-            'MODE="${1:-pre-plan}"',
-            'PAYLOAD="${2:-${OPENCLAW_TASK:-current task}}"',
-            'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
-            'GLOBAL="${OPENDREAM_GLOBAL_WORKSPACE:-}"',
-            f'OUTPUT="$WORKSPACE/{CONTEXT_DIR}/openclaw-pre-task.json"',
-            'mkdir -p "$(dirname "$OUTPUT")"',
-            'if [ "$MODE" = "pre-plan" ]; then',
-            '  if [ -n "$GLOBAL" ]; then',
-            f'    {prepare_command} --query "$PAYLOAD" --include-global --global-workspace "$GLOBAL" > "$OUTPUT"',
-            "  else",
-            f'    {prepare_command} --query "$PAYLOAD" > "$OUTPUT"',
-            "  fi",
-            '  cat "$OUTPUT"',
-            "  exit 0",
-            "fi",
-            (
-                f'{emit_command} --kind task_outcome --content "$PAYLOAD" '
-                '--message-ref "${OPENCLAW_REF:-openclaw-post-task}"'
-            ),
-            f"{maintain_command}",
-            f"{worker_command} --once",
-            "",
-        ]
-    )
-
-
-def _codex_wrapper_script(store: MemoryStore) -> str:
-    del store
-    return "\n".join(
-        [
-            "#!/bin/sh",
-            "set -eu",
-            "",
-            'SUMMARY="${OPENDREAM_SUMMARY:-Codex task completed.}"',
-            'QUERY="${OPENDREAM_QUERY:-$SUMMARY}"',
-            'if [ "${1:-}" = "--summary" ]; then',
-            '  SUMMARY="$2"',
-            "  shift 2",
-            "fi",
-            'if [ "${1:-}" = "--query" ]; then',
-            '  QUERY="$2"',
-            "  shift 2",
-            "fi",
-            'if [ "${1:-}" = "--" ]; then',
-            "  shift",
-            "fi",
-            'sh .opendream/hooks/codex-pre-task.sh "$QUERY"',
-            "status=0",
-            'if [ "$#" -gt 0 ]; then',
-            '  "$@" || status=$?',
-            "fi",
-            'post_status=0',
-            'sh .opendream/hooks/codex-post-task.sh "$SUMMARY" || post_status=$?',
-            'if [ "$status" -eq 0 ] && [ "$post_status" -ne 0 ]; then',
-            '  status="$post_status"',
-            "fi",
-            'exit "$status"',
-            "",
-        ]
-    )
-
-
-def _codex_block(store: MemoryStore) -> str:
-    del store
-    return "\n".join(
-        [
-            _block_start("codex"),
-            "",
-            "## OpenDream Activation",
-            "",
-            "Before substantial work, run:",
-            '`sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}"`',
-            "",
-            "Before the final response, run:",
-            '`sh .opendream/hooks/codex-post-task.sh "${OPENDREAM_SUMMARY:-Task completed.}"`',
-            "",
-            "For scripted Codex entrypoints, prefer:",
-            (
-                '`sh .opendream/bin/codex-task-wrapper.sh '
-                '--summary "${OPENDREAM_SUMMARY:-Task completed.}" -- <agent command>`'
-            ),
-            "",
-            _block_end("codex"),
-            "",
-        ]
-    )
-
-
-def _openclaw_event_map() -> str:
-    return "\n".join(
-        [
-            "# OpenDream OpenClaw event map",
-            "",
-            '- `planner.pre_plan` -> `sh .opendream/hooks/openclaw-hooks.sh pre-plan "$OPENCLAW_TASK"`',
-            '- `worker.post_task` -> `sh .opendream/hooks/openclaw-hooks.sh post-task "$OPENCLAW_SUMMARY"`',
-            "",
-        ]
-    )
-
-
-def _opendream_command(store: MemoryStore, command: str) -> str:
-    flags = ["opendream", *command.split(), "--workspace", '"$WORKSPACE"']
-    if store.memory_dir_name != "memory":
-        flags.extend(["--memory-dir", shlex.quote(store.memory_dir_name)])
-    if store.compat_mode != "canonical":
-        flags.extend(["--compat-mode", shlex.quote(store.compat_mode)])
-    return " ".join(flags)
-
-
-def _load_json_object(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"expected JSON object at {path}")
-    return payload
-
-
-def _json_contains_expected(payload: dict[str, Any], expected: dict[str, Any]) -> bool:
-    for key, value in expected.items():
-        current = payload.get(key)
-        if isinstance(value, dict):
-            if not isinstance(current, dict) or not _json_contains_expected(current, value):
-                return False
-        elif isinstance(value, list):
-            if not isinstance(current, list):
-                return False
-            for item in value:
-                if item not in current:
-                    return False
-        else:
-            if current != value:
-                return False
-    return True
-
-
-def _write_managed_script(path: Path, content: str) -> list[str]:
-    changed = _write_if_changed(path, content)
-    if changed:
-        mode = path.stat().st_mode
-        path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    return changed
-
-
-def _write_if_changed(path: Path, content: str) -> list[str]:
-    existing = path.read_text(encoding="utf-8") if path.exists() else None
-    if existing == content:
-        return []
-    atomic_write_text(path, content)
-    return [str(path)]
-
-
-def _replace_or_append_block(text: str, start_marker: str, end_marker: str, replacement: str) -> str:
-    updated = _remove_block(text, LEGACY_CODEX_BLOCK_START, LEGACY_CODEX_BLOCK_END)
-    if start_marker in updated and end_marker in updated:
-        start = updated.index(start_marker)
-        end = updated.index(end_marker, start) + len(end_marker)
-        if updated[end : end + 1] == "\n":
-            end += 1
-        tail = updated[end:]
-        return updated[:start] + replacement + tail
-    return updated.rstrip() + "\n\n" + replacement
-
-
-def _remove_block(text: str, start_marker: str, end_marker: str) -> str:
-    if start_marker not in text or end_marker not in text:
-        return text
-    start = text.index(start_marker)
-    end = text.index(end_marker, start) + len(end_marker)
-    return ((text[:start] + text[end:]).replace("\n\n\n", "\n\n")).lstrip("\n")
-
-
-def _extract_block(text: str, start_marker: str, end_marker: str) -> str | None:
-    if start_marker not in text or end_marker not in text:
-        return None
-    start = text.index(start_marker)
-    end = text.index(end_marker, start) + len(end_marker)
-    tail = text[end:]
-    if tail.startswith("\n"):
-        end += 1
-    return text[start:end]
-
-
-def _block_start(target: str) -> str:
-    return f"<!-- BEGIN OPENDREAM MANAGED BLOCK: {target} -->"
-
-
-def _block_end(target: str) -> str:
-    return f"<!-- END OPENDREAM MANAGED BLOCK: {target} -->"
-
-
-def _sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()

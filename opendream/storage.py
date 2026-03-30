@@ -58,6 +58,50 @@ STORE_KIND_PRECEDENCE = {
 }
 VALID_STORE_KINDS = frozenset(STORE_KIND_PRECEDENCE)
 
+# Default layout lives under `.opendream/` so repo-root `memory/` is free for brownfield trees.
+DEFAULT_MEMORY_DIR = ".opendream/memory"
+LEGACY_MEMORY_DIR = "memory"
+
+
+def _memory_dir_from_store_json(store_path: Path) -> str | None:
+    payload = read_json(store_path, {})
+    if not isinstance(payload, dict):
+        return None
+    layout = payload.get("layout")
+    if not isinstance(layout, dict):
+        return None
+    md = layout.get("memory_dir")
+    if isinstance(md, str) and md.strip():
+        return md.strip()
+    return None
+
+
+def resolve_memory_dir_name(workspace: Path, memory_dir: str | None) -> str:
+    """Resolve the memory directory name for a workspace.
+
+    Explicit ``memory_dir`` wins. Otherwise, if a legacy or modern ``store.json`` exists,
+    its ``layout.memory_dir`` is used (with path-specific fallbacks). Fresh workspaces
+    default to :data:`DEFAULT_MEMORY_DIR`.
+    """
+    if memory_dir is not None:
+        name = memory_dir.strip()
+        if not name:
+            raise ValueError("memory_dir must be non-empty when provided")
+        candidate = Path(name)
+        if candidate.is_absolute():
+            raise ValueError("memory_dir must be relative to the workspace")
+        return name
+
+    ws = Path(workspace).expanduser().resolve()
+    legacy_store = ws / LEGACY_MEMORY_DIR / "state" / "store.json"
+    modern_store = ws / Path(DEFAULT_MEMORY_DIR) / "state" / "store.json"
+
+    if legacy_store.exists():
+        return _memory_dir_from_store_json(legacy_store) or LEGACY_MEMORY_DIR
+    if modern_store.exists():
+        return _memory_dir_from_store_json(modern_store) or DEFAULT_MEMORY_DIR
+    return DEFAULT_MEMORY_DIR
+
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged: dict[str, Any] = dict(base)
@@ -136,9 +180,7 @@ class MemoryStore:
         compat_mode: str | None = None,
     ) -> None:
         self.workspace = Path(workspace).expanduser()
-        self.memory_dir_name = memory_dir or "memory"
-        if Path(self.memory_dir_name).is_absolute():
-            raise ValueError("memory_dir must be relative to the workspace")
+        self.memory_dir_name = resolve_memory_dir_name(self.workspace, memory_dir)
         self.memory_root = self.workspace / self.memory_dir_name
         self.config = _deep_merge(DEFAULT_CONFIG, config or {})
         self.store_kind_hint = store_kind_hint
@@ -255,6 +297,38 @@ class MemoryStore:
         self._initialize_default_files()
         if not self.store_metadata_path.exists():
             write_json(self.store_metadata_path, self.default_store_metadata())
+
+    def memory_layout_advisory(self) -> dict[str, Any]:
+        """Single source of truth for where this store reads/writes; flags common shadow paths."""
+        ws = self.workspace.resolve()
+        canonical = self.memory_root.resolve()
+        try:
+            active_rel = str(canonical.relative_to(ws))
+        except ValueError:
+            active_rel = str(canonical)
+        shadows: list[str] = []
+        for candidate in (
+            (self.workspace / Path(DEFAULT_MEMORY_DIR)).resolve(),
+            (self.workspace / LEGACY_MEMORY_DIR).resolve(),
+        ):
+            if candidate.exists() and candidate.is_dir() and candidate != canonical:
+                try:
+                    shadows.append(str(candidate.relative_to(ws)))
+                except ValueError:
+                    shadows.append(str(candidate))
+        warnings: list[str] = []
+        if shadows:
+            warnings.append(
+                "Alternate memory directory(ies) exist under this workspace; "
+                f"authoritative durable data for this CLI invocation lives only under {active_rel!r}. "
+                "Remove or migrate shadow paths so humans and tooling do not read the wrong tree."
+            )
+        return {
+            "active_memory_root": active_rel,
+            "memory_dir_name": self.memory_dir_name,
+            "shadow_memory_paths": shadows,
+            "warnings": warnings,
+        }
 
     def _ensure_directories(self) -> None:
         for path in [

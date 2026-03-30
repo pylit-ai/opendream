@@ -1,0 +1,12 @@
+{
+  "id": "codex",
+  "version": "1",
+  "title": "OpenAI Codex CLI",
+  "activation_mode": "managed_wrapper",
+  "detection": {
+    "detected": { "any_path_exists": [".codex", "AGENTS.md"] },
+    "configured": { "any_path_exists": [".codex", "AGENTS.md"] }
+  },
+  "install_profile": "codex_bundle",
+  "install": {}
+}

@@ -14,6 +14,7 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
+from .activation import SUPPORTED_TARGETS
 from .storage import MemoryStore
 from .util import atomic_write_text, ensure_relative_to, parse_timestamp, sha256_path, stable_id, to_iso, utc_now
 from .validation import validate_document
@@ -711,7 +712,7 @@ def _autowire_openclaw(workspace: Path, *, force: bool, uninstall: bool) -> dict
 
 def _resolve_autowire_targets(workspace: Path, target: str) -> list[str]:
     if target == "all":
-        return ["claude-code", "codex", "openclaw"]
+        return list(SUPPORTED_TARGETS)
     if target != "auto":
         return [target]
     targets: list[str] = []

@@ -1,0 +1,12 @@
+{
+  "id": "openclaw",
+  "version": "1",
+  "title": "OpenClaw",
+  "activation_mode": "native_hooks",
+  "detection": {
+    "detected": { "any_path_exists": [".openclaw"] },
+    "configured": { "any_path_exists": [".openclaw", ".openclaw/config.json"] }
+  },
+  "install_profile": "openclaw_hooks",
+  "install": {}
+}

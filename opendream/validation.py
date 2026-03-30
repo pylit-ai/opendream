@@ -19,11 +19,13 @@ REQUIRED_SCHEMA_FILES = (
     "autowire-report.schema.json",
     "agent-target.schema.json",
     "activation-report.schema.json",
+    "activation-plan.schema.json",
     "activation-state.schema.json",
     "compressed-status.schema.json",
     "managed-surface.schema.json",
     "repair-report.schema.json",
     "target-registry.schema.json",
+    "adapter-manifest.schema.json",
 )
 
 

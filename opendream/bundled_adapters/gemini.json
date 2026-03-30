@@ -1,0 +1,18 @@
+{
+  "id": "gemini",
+  "version": "1",
+  "title": "Gemini CLI",
+  "activation_mode": "managed_prompt_snippet",
+  "detection": {
+    "detected": { "any_path_exists": ["GEMINI.md", ".gemini"] },
+    "configured": { "any_path_exists": ["GEMINI.md", ".gemini"] }
+  },
+  "install_profile": "shell_hooks_markdown_block",
+  "install": {
+    "hook_tag": "gemini",
+    "markdown_relative_path": "GEMINI.md",
+    "block_id": "gemini",
+    "markdown_kind": "gemini-md",
+    "initial_content_prefix": "# GEMINI.md\n\n"
+  }
+}

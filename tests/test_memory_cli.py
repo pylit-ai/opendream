@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from opendream.consolidator import consolidate
-from opendream.storage import MemoryStore
+from opendream.storage import DEFAULT_MEMORY_DIR, LEGACY_MEMORY_DIR, MemoryStore
 from opendream.validation import validate_document
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -111,7 +111,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
 
     def test_demo_creates_reproducible_artifacts(self) -> None:
         result = run_cli("demo", "--workspace", str(self.workspace), "--now", FIXED_NOW)
-        memory_root = self.workspace / "memory"
+        memory_root = self.workspace / DEFAULT_MEMORY_DIR
         self.assertTrue((memory_root / "MEMORY.md").exists())
         self.assertTrue((memory_root / "state" / "durable_records.json").exists())
         self.assertTrue(any((memory_root / "topics").glob("*.md")))
@@ -137,8 +137,8 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             FIXED_NOW,
         )
         self.assertGreaterEqual(result["categories"], 4)
-        self.assertEqual(len(list((self.workspace / "memory" / "topics").glob("*.md"))), 0)
-        reports = list((self.workspace / "memory" / "audit" / "bootstrap").glob("*.json"))
+        self.assertEqual(len(list((self.workspace / DEFAULT_MEMORY_DIR / "topics").glob("*.md"))), 0)
+        reports = list((self.workspace / DEFAULT_MEMORY_DIR / "audit" / "bootstrap").glob("*.json"))
         self.assertEqual(len(reports), 1)
         report = json.loads(reports[0].read_text(encoding="utf-8"))
         self.assertGreaterEqual(len(report["raw_only_ids"]), 1)
@@ -148,9 +148,11 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         project_result = run_cli("init", "--workspace", str(self.workspace))
         global_result = run_cli("init", "--workspace", str(self.global_workspace), "--store-kind", "global")
 
-        project_store = json.loads((self.workspace / "memory" / "state" / "store.json").read_text(encoding="utf-8"))
+        project_store = json.loads(
+            (self.workspace / DEFAULT_MEMORY_DIR / "state" / "store.json").read_text(encoding="utf-8")
+        )
         global_store = json.loads(
-            (self.global_workspace / "memory" / "state" / "store.json").read_text(encoding="utf-8")
+            (self.global_workspace / DEFAULT_MEMORY_DIR / "state" / "store.json").read_text(encoding="utf-8")
         )
 
         self.assertEqual(project_result["store_kind"], "project")
@@ -163,11 +165,15 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         run_cli("append-event", "--workspace", str(self.workspace), "--events", str(fixture))
         run_cli("extract", "--workspace", str(self.workspace), "--now", FIXED_NOW)
         first = run_cli("consolidate", "--workspace", str(self.workspace), "--now", FIXED_NOW)
-        durable_before = (self.workspace / "memory" / "state" / "durable_records.json").read_text(encoding="utf-8")
-        index_before = (self.workspace / "memory" / "MEMORY.md").read_text(encoding="utf-8")
+        durable_before = (
+            self.workspace / DEFAULT_MEMORY_DIR / "state" / "durable_records.json"
+        ).read_text(encoding="utf-8")
+        index_before = (self.workspace / DEFAULT_MEMORY_DIR / "MEMORY.md").read_text(encoding="utf-8")
         second = run_cli("consolidate", "--workspace", str(self.workspace), "--now", FIXED_NOW)
-        durable_after = (self.workspace / "memory" / "state" / "durable_records.json").read_text(encoding="utf-8")
-        index_after = (self.workspace / "memory" / "MEMORY.md").read_text(encoding="utf-8")
+        durable_after = (
+            self.workspace / DEFAULT_MEMORY_DIR / "state" / "durable_records.json"
+        ).read_text(encoding="utf-8")
+        index_after = (self.workspace / DEFAULT_MEMORY_DIR / "MEMORY.md").read_text(encoding="utf-8")
 
         self.assertEqual(first["status"], "completed")
         self.assertEqual(second["created"], 0)
@@ -177,9 +183,9 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         records = json.loads(durable_after)
         for record in records:
             validate_document("memory-topic.schema.json", record)
-        index = json.loads((self.workspace / "memory" / "state" / "index.json").read_text(encoding="utf-8"))
+        index = json.loads((self.workspace / DEFAULT_MEMORY_DIR / "state" / "index.json").read_text(encoding="utf-8"))
         validate_document("memory-index.schema.json", index)
-        audit_file = next((self.workspace / "memory" / "audit" / "consolidation").glob("*.jsonl"))
+        audit_file = next((self.workspace / DEFAULT_MEMORY_DIR / "audit" / "consolidation").glob("*.jsonl"))
         for line in audit_file.read_text(encoding="utf-8").splitlines():
             validate_document("consolidation-op.schema.json", json.loads(line))
 
@@ -200,14 +206,14 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         records = {
             record["memory_id"]: record
             for record in json.loads(
-                (self.workspace / "memory" / "state" / "durable_records.json").read_text(encoding="utf-8")
+                (self.workspace / DEFAULT_MEMORY_DIR / "state" / "durable_records.json").read_text(encoding="utf-8")
             )
         }
         selected_titles = {records[memory_id]["title"] for memory_id in retrieval["selected_memory_ids"]}
         self.assertIn("Preference: package-manager", selected_titles)
         self.assertIn("Environment: redis", selected_titles)
         self.assertIn("Workflow: schema-migration", selected_titles)
-        self.assertTrue(any((self.workspace / "memory" / "audit" / "retrieval").glob("*.json")))
+        self.assertTrue(any((self.workspace / DEFAULT_MEMORY_DIR / "audit" / "retrieval").glob("*.json")))
 
     def test_single_writer_lock_exits_cleanly(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
@@ -230,7 +236,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         completed = [result for result in results if result["status"] == "completed"]
         self.assertEqual(len(skipped), 1)
         self.assertEqual(len(completed), 1)
-        self.assertFalse((self.workspace / "memory" / "locks" / "consolidator.lock").exists())
+        self.assertFalse((self.workspace / DEFAULT_MEMORY_DIR / "locks" / "consolidator.lock").exists())
 
     def test_memory_commands_write_only_inside_memory_store(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
@@ -238,7 +244,15 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         run_cli("extract", "--workspace", str(self.workspace), "--now", FIXED_NOW)
         run_cli("consolidate", "--workspace", str(self.workspace), "--now", FIXED_NOW)
 
-        non_memory_files = [path for path in self.workspace.rglob("*") if path.is_file() and "memory" not in path.parts]
+        mem_root = (self.workspace / DEFAULT_MEMORY_DIR).resolve()
+        non_memory_files: list[Path] = []
+        for path in self.workspace.rglob("*"):
+            if not path.is_file():
+                continue
+            resolved = path.resolve()
+            if resolved == mem_root or mem_root in resolved.parents:
+                continue
+            non_memory_files.append(path)
         self.assertEqual(non_memory_files, [])
 
     def test_emit_event_appends_schema_valid_event(self) -> None:
@@ -260,7 +274,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             FIXED_NOW,
         )
         self.assertEqual(result["status"], "appended")
-        event_files = list((self.workspace / "memory" / "state" / "events").glob("*.jsonl"))
+        event_files = list((self.workspace / DEFAULT_MEMORY_DIR / "state" / "events").glob("*.jsonl"))
         self.assertEqual(len(event_files), 1)
         event = json.loads(event_files[0].read_text(encoding="utf-8").splitlines()[0])
         validate_document("memory-event.schema.json", event)
@@ -288,7 +302,8 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "appended")
         self.assertTrue((self.workspace / ".dream-memory" / "state" / "events").exists())
-        self.assertFalse((self.workspace / "memory").exists())
+        self.assertFalse((self.workspace / DEFAULT_MEMORY_DIR).exists())
+        self.assertFalse((self.workspace / LEGACY_MEMORY_DIR).exists())
 
     def test_emit_event_can_route_to_global_store(self) -> None:
         run_cli("init", "--workspace", str(self.global_workspace), "--store-kind", "global")
@@ -303,8 +318,8 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             global_workspace=self.global_workspace,
         )
         self.assertEqual(result["store_kind"], "global")
-        self.assertFalse((self.workspace / "memory" / "state" / "events").exists())
-        event_files = list((self.global_workspace / "memory" / "state" / "events").glob("*.jsonl"))
+        self.assertFalse((self.workspace / DEFAULT_MEMORY_DIR / "state" / "events").exists())
+        event_files = list((self.global_workspace / DEFAULT_MEMORY_DIR / "state" / "events").glob("*.jsonl"))
         self.assertEqual(len(event_files), 1)
 
     def test_emit_event_rejects_sensitive_global_routing(self) -> None:
@@ -381,6 +396,60 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn("## Startup Index", context["prompt_context"])
         self.assertIn("Selected Durable Memory", context["prompt_context"])
         self.assertTrue(context["selected_memory_ids"])
+        self.assertIsNone(context.get("empty_reason"))
+        self.assertEqual(context.get("hints"), [])
+
+    def test_prepare_context_reports_empty_reason_when_no_durable_memories(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        context = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "anything",
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(context.get("empty_reason"), "no_durable_memories")
+        self.assertIsInstance(context.get("hints"), list)
+        self.assertTrue(any("maintain" in hint for hint in context["hints"]))
+
+    def test_status_includes_memory_layout(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        payload = run_cli("status", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        self.assertIn("memory_layout", payload)
+        self.assertEqual(payload["memory_layout"]["active_memory_root"], DEFAULT_MEMORY_DIR)
+        self.assertEqual(payload["memory_layout"]["memory_dir_name"], DEFAULT_MEMORY_DIR)
+
+    def test_default_memory_dir_without_existing_store(self) -> None:
+        store = MemoryStore(self.workspace)
+        self.assertEqual(store.memory_dir_name, DEFAULT_MEMORY_DIR)
+
+    def test_legacy_memory_dir_when_only_root_store_json_exists(self) -> None:
+        legacy = self.workspace / LEGACY_MEMORY_DIR
+        (legacy / "state").mkdir(parents=True)
+        (legacy / "state" / "store.json").write_text(
+            json.dumps({"layout": {"memory_dir": LEGACY_MEMORY_DIR, "compat_mode": "canonical"}}),
+            encoding="utf-8",
+        )
+        store = MemoryStore(self.workspace)
+        self.assertEqual(store.memory_dir_name, LEGACY_MEMORY_DIR)
+
+    def test_doctor_memory_surface_reports_layout(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        out = run_cli("doctor", "--workspace", str(self.workspace), "--surface", "memory")
+        self.assertEqual(out["surface"], "memory")
+        self.assertEqual(out["status"], "healthy")
+        self.assertIn("cli_output_version", out)
+        self.assertIn("memory_layout", out)
+        self.assertIn("durable_record_count", out)
+
+    def test_dream_worker_includes_agent_summary_when_no_episodes(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        out = run_cli("dream", "worker", "--workspace", str(self.workspace), "--once", "--now", FIXED_NOW)
+        self.assertIn("agent_summary", out)
+        self.assertIn("cli_output_version", out)
+        self.assertIn("transcript", out["agent_summary"].lower())
 
     def test_prepare_context_merges_project_and_global_with_precedence(self) -> None:
         run_cli("init", "--workspace", str(self.global_workspace), "--store-kind", "global")
@@ -468,7 +537,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(uninitialized["dream"]["state"], "never_ran")
 
         run_cli("init", "--workspace", str(self.workspace))
-        lock_path = self.workspace / "memory" / "locks" / "consolidator.lock"
+        lock_path = self.workspace / DEFAULT_MEMORY_DIR / "locks" / "consolidator.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text(json.dumps({"pid": 1234, "acquired_at": FIXED_NOW}), encoding="utf-8")
         stale = time.time() - 4000
@@ -518,7 +587,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
     def test_dream_run_skips_when_lock_is_held(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"
         run_cli("init", "--workspace", str(self.workspace))
-        lock_path = self.workspace / "memory" / "locks" / "dream.lock"
+        lock_path = self.workspace / DEFAULT_MEMORY_DIR / "locks" / "dream.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text(json.dumps({"pid": 9999, "acquired_at": FIXED_NOW}), encoding="utf-8")
 
@@ -1109,7 +1178,76 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 7)
         self.assertTrue((self.workspace / ".opendream" / "context" / "codex-pre-task.json").exists())
-        self.assertTrue(any((self.workspace / "memory" / "state" / "events").glob("*.jsonl")))
+        self.assertTrue(any((self.workspace / DEFAULT_MEMORY_DIR / "state" / "events").glob("*.jsonl")))
+
+    def test_activation_plan_does_not_write_files(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        codex_config = self.workspace / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+        plan = run_cli("activation-plan", "--workspace", str(self.workspace), "--targets", "codex")
+        self.assertEqual(plan["selector"], "codex")
+        self.assertEqual(plan["selected_targets"], ["codex"])
+        self.assertFalse((self.workspace / ".opendream" / "hooks" / "codex-pre-task.sh").exists())
+
+    def test_activate_cursor_gemini_and_github_copilot_round_trip(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        for target in ("cursor", "gemini", "github-copilot"):
+            applied = run_cli("activate", "--workspace", str(self.workspace), "--targets", target)
+            self.assertIn(applied["status"], {"applied", "updated"})
+        self.assertTrue((self.workspace / ".cursor" / "rules" / "opendream.mdc").exists())
+        mdc = (self.workspace / ".cursor" / "rules" / "opendream.mdc").read_text(encoding="utf-8")
+        self.assertIn("BEGIN OPENDREAM MANAGED BLOCK: cursor", mdc)
+        self.assertIn("alwaysApply: true", mdc)
+        self.assertTrue((self.workspace / "GEMINI.md").exists())
+        self.assertIn(
+            "BEGIN OPENDREAM MANAGED BLOCK: gemini",
+            (self.workspace / "GEMINI.md").read_text(encoding="utf-8"),
+        )
+        copilot_path = self.workspace / ".github" / "copilot-instructions.md"
+        self.assertTrue(copilot_path.exists())
+        self.assertIn(
+            "BEGIN OPENDREAM MANAGED BLOCK: github-copilot",
+            copilot_path.read_text(encoding="utf-8"),
+        )
+        self.assertTrue((self.workspace / ".opendream" / "hooks" / "cursor-pre-task.sh").exists())
+        self.assertTrue((self.workspace / ".opendream" / "hooks" / "gemini-post-task.sh").exists())
+        self.assertTrue((self.workspace / ".opendream" / "hooks" / "github-copilot-pre-task.sh").exists())
+
+        removed = run_cli("deactivate", "--workspace", str(self.workspace), "--targets", "all-supported")
+        self.assertEqual(removed["status"], "deactivated")
+        self.assertFalse((self.workspace / ".opendream" / "hooks" / "cursor-pre-task.sh").exists())
+        if copilot_path.exists():
+            self.assertNotIn(
+                "OPENDREAM MANAGED BLOCK",
+                copilot_path.read_text(encoding="utf-8"),
+            )
+
+    def test_activate_all_supported_installs_all_surfaces(self) -> None:
+        claude_settings = self.workspace / ".claude" / "settings.json"
+        claude_settings.parent.mkdir(parents=True, exist_ok=True)
+        claude_settings.write_text("{}", encoding="utf-8")
+        codex_config = self.workspace / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+        openclaw_config = self.workspace / ".openclaw" / "config.json"
+        openclaw_config.parent.mkdir(parents=True, exist_ok=True)
+        openclaw_config.write_text("{}", encoding="utf-8")
+        run_cli("init", "--workspace", str(self.workspace))
+        report = run_cli("activate", "--workspace", str(self.workspace), "--targets", "all-supported")
+        self.assertEqual(report["status"], "applied")
+        kinds = {item["target_kind"] for item in report["targets"]}
+        self.assertEqual(
+            kinds,
+            {
+                "claude-code",
+                "codex",
+                "openclaw",
+                "cursor",
+                "gemini",
+                "github-copilot",
+            },
+        )
 
 
 if __name__ == "__main__":

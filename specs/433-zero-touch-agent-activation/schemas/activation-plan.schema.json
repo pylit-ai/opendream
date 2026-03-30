@@ -1,0 +1,78 @@
+{
+  "type": "object",
+  "required": [
+    "generated_at",
+    "workspace",
+    "selector",
+    "selected_targets",
+    "targets",
+    "remediation"
+  ],
+  "properties": {
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace": {
+      "type": "string"
+    },
+    "selector": {
+      "type": "string"
+    },
+    "selected_targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "target_kind",
+          "surfaces"
+        ],
+        "properties": {
+          "target_kind": {
+            "type": "string"
+          },
+          "surfaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "kind",
+                "action",
+                "detail"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "noop",
+                    "create",
+                    "update"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "remediation": {
+      "type": "string"
+    }
+  }
+}

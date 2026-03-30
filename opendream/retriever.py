@@ -3,7 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 from .storage import MemoryStore
-from .util import parse_timestamp, semantic_tokens, stable_id, summarize, to_iso, tokenize, utc_now
+from .util import (
+    CLI_JSON_VERSION,
+    parse_timestamp,
+    semantic_tokens,
+    stable_id,
+    summarize,
+    to_iso,
+    tokenize,
+    utc_now,
+)
 
 QUERY_TYPE_BOOSTS = {
     "project_decision": 2.5,
@@ -133,6 +142,7 @@ def retrieve(
         "summary": summarize(query, 80),
     }
     store.write_retrieval_audit(str(audit_payload["run_id"]), audit_payload)
+    response["cli_output_version"] = CLI_JSON_VERSION
     return response
 
 

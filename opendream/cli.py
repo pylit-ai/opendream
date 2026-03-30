@@ -8,11 +8,14 @@ from typing import Any, NoReturn
 
 from . import __version__
 from .activation import (
+    SUPPORTED_TARGETS,
     activate_agents,
     compressed_status,
     deactivate_agents,
     doctor_agents,
+    doctor_memory,
     format_compressed_status,
+    plan_agent_activation,
 )
 from .bootstrap import bootstrap_index
 from .consolidator import consolidate
@@ -48,6 +51,12 @@ from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, 
 from .util import FIXTURE_ROOT, json_dumps, stable_id, to_iso, utc_now
 from .validation import validate_document
 from .webapp import build_server
+
+ACTIVATION_TARGETS_HELP = (
+    "configured | all-detected | all-supported | <adapter-id> "
+    f"(built-in ids: {', '.join(SUPPORTED_TARGETS)}; "
+    "workspace adapters: .opendream/adapters/*.json)"
+)
 
 TOP_LEVEL_EXAMPLES = """Examples:
   opendream init --workspace "$PWD" --activate-configured
@@ -239,6 +248,13 @@ def command_activate(args: argparse.Namespace) -> dict[str, Any]:
     return activate_agents(store, targets=args.targets, repair=args.repair)
 
 
+def command_activation_plan(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return plan_agent_activation(store, targets=args.targets)
+
+
 def command_deactivate(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
     return deactivate_agents(store, targets=args.targets)
@@ -246,9 +262,11 @@ def command_deactivate(args: argparse.Namespace) -> dict[str, Any]:
 
 def command_doctor(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
-    if args.surface != "agents":
-        raise ValueError(f"unsupported doctor surface: {args.surface}")
-    return doctor_agents(store)
+    if args.surface == "agents":
+        return doctor_agents(store)
+    if args.surface == "memory":
+        return doctor_memory(store)
+    raise ValueError(f"unsupported doctor surface: {args.surface}")
 
 
 def command_append_event(args: argparse.Namespace) -> dict[str, Any]:
@@ -767,28 +785,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Primary: install or repair managed agent activation surfaces",
     )
     activate_parser.add_argument("--workspace", required=True)
-    activate_parser.add_argument(
-        "--targets",
-        choices=["configured", "all-detected", "claude-code", "codex", "openclaw"],
-        default="configured",
-    )
+    activate_parser.add_argument("--targets", default="configured", metavar="SELECTOR", help=ACTIVATION_TARGETS_HELP)
     activate_parser.add_argument("--repair", action="store_true")
     add_layout_arguments(activate_parser)
     activate_parser.set_defaults(func=command_activate)
 
+    activation_plan_parser = subparsers.add_parser(
+        "activation-plan",
+        help="Dry-run: list managed surfaces that would change (no files written)",
+    )
+    activation_plan_parser.add_argument("--workspace", required=True)
+    activation_plan_parser.add_argument(
+        "--targets", default="configured", metavar="SELECTOR", help=ACTIVATION_TARGETS_HELP
+    )
+    add_layout_arguments(activation_plan_parser)
+    activation_plan_parser.set_defaults(func=command_activation_plan)
+
     deactivate_parser = subparsers.add_parser("deactivate", help="Primary: remove managed activation surfaces")
     deactivate_parser.add_argument("--workspace", required=True)
     deactivate_parser.add_argument(
-        "--targets",
-        choices=["configured", "all-detected", "claude-code", "codex", "openclaw"],
-        default="configured",
+        "--targets", default="configured", metavar="SELECTOR", help=ACTIVATION_TARGETS_HELP
     )
     add_layout_arguments(deactivate_parser)
     deactivate_parser.set_defaults(func=command_deactivate)
 
     doctor_parser = subparsers.add_parser("doctor", help="Advanced: diagnose managed surfaces and repair drift")
     doctor_parser.add_argument("--workspace", required=True)
-    doctor_parser.add_argument("--surface", choices=["agents"], default="agents")
+    doctor_parser.add_argument("--surface", choices=["agents", "memory"], default="agents")
     add_layout_arguments(doctor_parser)
     doctor_parser.set_defaults(func=command_doctor)
 
@@ -1077,8 +1100,12 @@ def build_parser() -> argparse.ArgumentParser:
     service_autowire_parser.add_argument("--workspace", required=True)
     service_autowire_parser.add_argument(
         "--target",
-        choices=["auto", "all", "claude-code", "codex", "openclaw"],
         default="auto",
+        metavar="SELECTOR",
+        help=(
+            "auto | all | <adapter-id> "
+            f"(built-in: {', '.join(SUPPORTED_TARGETS)}; merged with .opendream/adapters/)"
+        ),
     )
     service_autowire_parser.add_argument("--force", action="store_true")
     service_autowire_parser.add_argument("--uninstall", action="store_true")
@@ -1091,7 +1118,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    result = args.func(args)
+    try:
+        result = args.func(args)
+    except ValueError as exc:
+        sys.stderr.write(f"{parser.prog}: error: {exc}\n")
+        return 2
     raw_output = None
     if isinstance(result, dict):
         raw_output = result.pop("__raw_output__", None)

@@ -8,10 +8,38 @@ from typing import Any
 from .episodes import latest_episode_timestamp, load_episode_rows, looks_memory_worthy, row_to_event
 from .integration import maintain
 from .storage import LockError, MemoryStore
-from .util import parse_timestamp, semantic_tokens, stable_id, to_iso, utc_now
+from .util import CLI_JSON_VERSION, parse_timestamp, semantic_tokens, stable_id, to_iso, utc_now
 from .validation import validate_document
 
 _UNSET = object()
+
+
+def _dream_worker_agent_summary(
+    processed_jobs: list[dict[str, Any]],
+    backlog_results: list[dict[str, Any]],
+) -> str:
+    if processed_jobs:
+        return f"Processed {len(processed_jobs)} queued dream job(s)."
+    if backlog_results:
+        last = backlog_results[-1]
+        if last.get("status") == "completed":
+            return "Transcript backlog processed; dream run completed."
+        reason = str(last.get("reason") or "")
+        if reason == "no-episodes":
+            return (
+                "No transcript episode files; dream skipped. "
+                "Event-driven memory (emit-event + maintain) is unaffected."
+            )
+        if reason == "no-backlog":
+            return "Transcript backlog already up to date."
+        if reason == "insufficient-signal":
+            return "Recent transcript rows did not yield enough memory-worthy signal for a dream run."
+        if reason == "min-interval":
+            return "Dream tick skipped: minimum interval between runs not elapsed."
+        if reason == "lock-held":
+            return "Dream run skipped: consolidator or dream lock held."
+        return f"Dream backlog step skipped ({reason or 'unknown'})."
+    return "Idle: no queued jobs and no backlog work this poll."
 
 
 def dream_run(
@@ -363,6 +391,8 @@ def dream_worker(
             "reason": "worker-lock-held",
             "processed_jobs": [],
             "backlog_results": [],
+            "agent_summary": "Dream worker lock held by another process; try again shortly.",
+            "cli_output_version": CLI_JSON_VERSION,
         }
     finally:
         _write_worker_health(
@@ -381,6 +411,8 @@ def dream_worker(
         "processed_jobs": processed_jobs,
         "backlog_results": backlog_results,
         "queue_depth": len([job for job in store.load_dream_queue() if job.get("status") == "queued"]),
+        "agent_summary": _dream_worker_agent_summary(processed_jobs, backlog_results),
+        "cli_output_version": CLI_JSON_VERSION,
     }
     summary["audit"] = store.write_worker_audit(worker_run_id, summary, before_snapshot)
     return summary

@@ -12,6 +12,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_ROOT = Path(__file__).resolve().with_name("schema")
 FIXTURE_ROOT = Path(__file__).resolve().with_name("fixtures")
 
+# Bump when machine-facing JSON shapes change in a breaking way for agents/scripts.
+CLI_JSON_VERSION = 2
+
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 STOPWORDS = {
     "a",
