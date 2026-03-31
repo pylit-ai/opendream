@@ -1,0 +1,59 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "config_digest": "sha256:020bd871a6809f45e931c22fcf8742218a7757d9d07a6e5d78493ab2352d33b2",
+  "targets": [
+    {
+      "target": {
+        "kind": "target",
+        "id": "codex-cli",
+        "version": "2026.03.26"
+      },
+      "compile_manifest_path": ".metactl/generated/codex-cli/compile.manifest.json",
+      "compile_manifest_digest": "sha256:14d553d20db73a43b7223c8e465f22ea6b29c6623db26322474323f93c60f7bd",
+      "policy_report_path": ".metactl/private/codex-cli-policy-report.json",
+      "policy_report_digest": "sha256:3ef949b3792b24b56cf8520120438fe5c5262727572e8a3ae64fd48f0a801160",
+      "preferred_apply_mode": "symlink",
+      "compiled_at": "1774903170"
+    },
+    {
+      "target": {
+        "kind": "target",
+        "id": "claude-code",
+        "version": "2026.03.26"
+      },
+      "compile_manifest_path": ".metactl/generated/claude-code/compile.manifest.json",
+      "compile_manifest_digest": "sha256:bbded4fe95eba5e69290c265000ba4ee8df36e9b85cec615e9dc2a4e9bf818e2",
+      "policy_report_path": ".metactl/private/claude-code-policy-report.json",
+      "policy_report_digest": "sha256:876ce91214a72a592fd12ee7fb43cfda5724b91aef51f2e10f208828c2c10977",
+      "preferred_apply_mode": "symlink",
+      "compiled_at": "1774903170"
+    },
+    {
+      "target": {
+        "kind": "target",
+        "id": "cursor",
+        "version": "2026.03.31"
+      },
+      "compile_manifest_path": ".metactl/generated/cursor/compile.manifest.json",
+      "compile_manifest_digest": "sha256:c77ba4fad2407b4e32348239028e340bce251a2fb7d266097f561f02f0e87d68",
+      "policy_report_path": ".metactl/private/cursor-policy-report.json",
+      "policy_report_digest": "sha256:d370c8055b97c3a1e4fff2b9925d226c6dfb1270d5f4316f79cb44a85a1dce46",
+      "preferred_apply_mode": "symlink",
+      "compiled_at": "1774903170"
+    },
+    {
+      "target": {
+        "kind": "target",
+        "id": "gemini-cli",
+        "version": "2026.03.26"
+      },
+      "compile_manifest_path": ".metactl/generated/gemini-cli/compile.manifest.json",
+      "compile_manifest_digest": "sha256:47bd48bb9d8f12cfd1fd3a0b8f8f0969b25796fa2679ec5a0f397caa0c19f207",
+      "policy_report_path": ".metactl/private/gemini-cli-policy-report.json",
+      "policy_report_digest": "sha256:3dbf54cc0235684618291689bbe9051f033146977dc4104098beefb1202db6ec",
+      "preferred_apply_mode": "symlink",
+      "compiled_at": "1774903170"
+    }
+  ],
+  "updated_at": "1774903170"
+}

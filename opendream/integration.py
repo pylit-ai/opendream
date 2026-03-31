@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
+from .automation import tick as automation_tick
 from .consolidator import consolidate
 from .extractor import extract_candidates
 from .models import ContextAssembly, MemoryEvent
@@ -261,14 +262,23 @@ def tick(
             "reason": "not-initialized",
             **_store_descriptor(store),
             "policy": snapshot["policy"],
+            "automation": snapshot["automation"],
             "cli_output_version": CLI_JSON_VERSION,
         }
-    return maintain(
+    memory_result = maintain(
         store,
         now=now,
         min_new_events=min_new_events,
         min_interval_seconds=min_interval_seconds,
     )
+    automation_result = automation_tick(store, now=now)
+    result = dict(memory_result)
+    if memory_result["status"] != "completed" and automation_result["status"] == "completed":
+        result["status"] = "completed"
+        result["reason"] = "automation"
+    result["automation"] = automation_result
+    result["cli_output_version"] = CLI_JSON_VERSION
+    return result
 
 
 def tick_stores(
@@ -377,6 +387,37 @@ def prepare_context(
         if len(selected) >= limit:
             break
 
+    automation_candidates: list[dict[str, Any]] = []
+    for store in store_list:
+        if not store.is_initialized():
+            continue
+        for record in store.load_automation_records():
+            if record.get("status") != "active":
+                continue
+            automation_candidates.append(
+                {
+                    "record_id": record["record_id"],
+                    "job_id": record["job_id"],
+                    "record_type": record["record_type"],
+                    "title": record["title"],
+                    "summary": record["summary"],
+                    "priority": record["priority"],
+                    "store_id": store.store_id,
+                    "store_kind": store.store_kind,
+                    "workspace": str(store.workspace),
+                }
+            )
+
+    automation_candidates.sort(
+        key=lambda item: (
+            STORE_KIND_PRECEDENCE.get(item["store_kind"], 99),
+            -float(item["priority"]),
+            item["title"],
+            item["workspace"],
+        )
+    )
+    selected_automation = automation_candidates[:limit]
+
     startup_lines = ["## Startup Index"]
     startup_entries.sort(
         key=lambda item: (
@@ -428,6 +469,16 @@ def prepare_context(
             *startup_lines,
             "",
             *selected_sections,
+            "",
+            "## Active Automation Projections",
+            *(
+                [
+                    f"- [{item['store_kind']}] [{item['record_type']}] "
+                    f"{item['title']} :: {item['summary']} ({item['workspace']})"
+                    for item in selected_automation
+                ]
+                or ["- none"]
+            ),
         ]
     ).strip()
 
@@ -481,7 +532,9 @@ def prepare_context(
         "stores": [_store_descriptor(store) for store in store_list],
         "context_id": context_id,
         "selected_memory_ids": selected_ids,
+        "selected_automation_record_ids": [item["record_id"] for item in selected_automation],
         "selected_memories": selected,
+        "selected_automation_records": selected_automation,
         "omitted": omitted,
         "why": [
             {

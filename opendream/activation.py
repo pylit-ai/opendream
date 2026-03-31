@@ -295,6 +295,7 @@ def compressed_status(
             "health": service_runtime["health"],
             "backlog": service_runtime["backlog"],
         },
+        "automation": snapshot["automation"],
         "next_eligible_reason": snapshot["next_eligible_reason"],
         "next_eligible_at": snapshot["next_eligible_at"],
     }
@@ -344,6 +345,7 @@ def format_compressed_status(payload: dict[str, Any]) -> str:
                 f"pending_candidates={runtime.get('pending_candidates')}",
                 f"dream={runtime.get('dream', {}).get('state')}",
                 f"service={runtime.get('service', {}).get('health')}",
+                f"automation_due={len(runtime.get('automation', {}).get('due_job_ids', []))}",
             ]
         )
     )
@@ -944,6 +946,8 @@ def _next_action(
         return f"run `opendream activate --workspace {workspace} --repair`"
     if configured_targets and not any(item["activated"] for item in targets):
         return f"run `opendream activate --workspace {workspace}`"
+    if runtime.get("automation", {}).get("due_job_ids"):
+        return f"run `opendream tick --workspace {workspace}` to process due automation jobs"
     if not targets:
         return (
             "configure an agent surface (Claude Code, Codex, OpenClaw, Cursor, Gemini CLI, Copilot, …), "

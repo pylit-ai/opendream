@@ -80,6 +80,7 @@ The lower-level runtime remains available, but it is not the main mental model.
 |---------|------|
 | `emit-event` | Append schema-valid evidence to the store |
 | `maintain` | Run extract + consolidate when work qualifies; returns structured **`status`** / **`reason`** when skipping (not a silent no-op) |
+| `automation ...` | Manage recurring projection jobs that stay separate from canonical durable memory |
 | `prepare-context` | Retrieval surface for the next task (prompt-ready output) |
 
 Agent-oriented details (workspace vs cwd, `memory_layout`, `empty_reason` / `hints`, JSON version): [`docs/coding-agents.md`](./docs/coding-agents.md).
@@ -145,6 +146,7 @@ Use OpenDream as an **activation-first runtime**:
 - Run **`status`** for the single high-signal answer covering activation, drift, queue state, and runtime health.
 - Run **`activate --repair`** when `status` or `doctor` reports drift.
 - Run **`deactivate`** if you want to remove OpenDream-managed repo-local surfaces while keeping your repo config intact.
+- Use **`automation register|run|tick|status|review`** when you want managed recurring projections such as feature queues or bug radar without mutating durable memory.
 - Use **`doctor --surface agents`**, **`service ...`**, **`dream ...`**, **`maintain`**, and **`prepare-context`** as advanced or explicit operator paths.
 
 <details>
@@ -177,6 +179,8 @@ opendream prepare-context \
 ```bash
 opendream status --workspace "$PWD"
 opendream maintain --workspace "$PWD"
+opendream automation status --workspace "$PWD"
+opendream automation tick --workspace "$PWD"
 opendream activate --workspace "$PWD" --repair
 opendream deactivate --workspace "$PWD"
 opendream doctor --workspace "$PWD" --surface agents
@@ -310,6 +314,65 @@ make release-check
 </details>
 
 <details>
+<summary><strong>Automation (managed projections)</strong> — register, run, schedule via tick</summary>
+
+Automations are **projection jobs**: they read **durable** memories, write **typed records** under `<memory-root>/automation/`, and can appear in `prepare-context` under **Active Automation Projections** — they do **not** replace canonical durable memory.
+
+**1. Prerequisite:** initialized store plus durable memories (same as the smoke test: `init`, ingest events, `maintain`).
+
+**2. Job spec:** JSON validated against [`opendream/schema/automation-job.schema.json`](./opendream/schema/automation-job.schema.json). You may omit `version`, `enabled`, and timestamps; `automation register` normalizes defaults (`version`: 1, `enabled`: true, `created_at` / `updated_at`).
+
+Example file `automation-release-watch.json` (adjust selectors to match your corpus):
+
+```json
+{
+  "job_id": "release-watch",
+  "title": "Release watch",
+  "description": "Track release-affecting workflow signals.",
+  "skill_ref": "builtin://projection-engine",
+  "trigger": {"type": "interval", "interval_seconds": 3600},
+  "input_selectors": {
+    "memory_types_any": ["project_decision", "environment_requirement", "procedural_workflow", "user_preference"],
+    "text_terms_any": ["redis", "migration"],
+    "statuses_any": ["active"],
+    "limit": 25
+  },
+  "output": {"record_type": "feature", "max_records": 10},
+  "merge_policy": {"dedupe_by": "title"},
+  "decay_policy": {"stale_after_runs": 3},
+  "review_policy": {"require_manual_review": true, "auto_surface_limit": 3},
+  "security_policy": {"allow_sensitive": false}
+}
+```
+
+**3. Commands**
+
+```bash
+opendream automation register --workspace "$PWD" --spec ./automation-release-watch.json
+opendream status --workspace "$PWD"
+opendream automation run --workspace "$PWD" --job release-watch
+opendream automation status --workspace "$PWD" --job release-watch
+opendream automation review --workspace "$PWD" --job release-watch
+opendream prepare-context --workspace "$PWD" --query "your task"
+```
+
+- **`opendream tick --workspace "$PWD"`** runs maintenance **and** any **due** automation jobs (interval elapsed since `last_run_at`). Use this from cron or a service alongside `maintain`.
+- **`opendream automation tick`** runs **only** due automation jobs (no extract/consolidate pass).
+- Use **`--now`** only for deterministic tests or scripted repros; normal operator flows should omit it.
+
+**4. On-disk layout (under active memory root)**
+
+| Path | Role |
+|------|------|
+| `automation/jobs/<job_id>.json` | Registered, schema-valid job |
+| `automation/records/<record_type>/<job_id>.json` | Projection records |
+| `automation/audit/` | Run reports and diffs |
+
+**5. Tests in repo:** `tests.test_memory_cli.MemoryCliIntegrationTests.test_automation_register_run_status_and_context` and `test_automation_staleness_and_top_level_tick`.
+
+</details>
+
+<details>
 <summary><strong>What’s in this repo</strong></summary>
 
 | Path | Contents |
@@ -380,6 +443,10 @@ opendream eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodrea
 opendream eval memory-quality --workspace .tmp/eval
 opendream prepare-context --workspace .tmp/workspace --query "package manager and workflow"
 opendream prepare-context --workspace .tmp/workspace --query "package manager and workflow" --include-global --global-workspace ~/.opendream-global
+opendream automation register --workspace .tmp/workspace --spec ./path/to/job.json
+opendream automation run --workspace .tmp/workspace --job my-job-id
+opendream automation tick --workspace .tmp/workspace
+opendream automation status --workspace .tmp/workspace
 opendream status --workspace .tmp/workspace
 opendream observe index --workspace .tmp/workspace
 opendream observe serve --workspace .tmp/workspace --port 8000

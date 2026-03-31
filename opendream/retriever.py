@@ -115,7 +115,7 @@ def retrieve(
     selected = scored[:limit]
 
     run_id = stable_id("retrieve", timestamp, query, limit, use_embeddings)
-    response = {
+    response: dict[str, Any] = {
         "run_id": run_id,
         "selected_memory_ids": [record["memory_id"] for _, record, _ in selected],
         "lexical_only_selected_memory_ids": [record["memory_id"] for _, record in lexical_only_scored[:limit]],

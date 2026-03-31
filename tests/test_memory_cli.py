@@ -71,6 +71,11 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         shim_path.chmod(0o755)
         return shim_path
 
+    def write_automation_spec(self, payload: dict[str, object], name: str = "automation.json") -> Path:
+        path = Path(self.temp_dir.name) / name
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
     def emit_runtime_event(
         self,
         workspace: Path,
@@ -904,6 +909,224 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(first["status"], "completed")
         self.assertTrue(all(item["status"] == "completed" for item in first["stores"]))
         self.assertEqual(second["status"], "skipped")
+
+    def test_automation_register_run_status_and_context(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
+        run_cli("append-event", "--workspace", str(self.workspace), "--events", str(fixture))
+        run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+
+        spec_path = self.write_automation_spec(
+            {
+                "job_id": "release-watch",
+                "title": "Release watch",
+                "description": "Track release-affecting workflow signals.",
+                "skill_ref": "builtin://projection-engine",
+                "trigger": {"type": "interval", "interval_seconds": 60},
+                "input_selectors": {
+                    "memory_types_any": [
+                        "project_decision",
+                        "environment_requirement",
+                        "procedural_workflow",
+                        "user_preference",
+                    ],
+                    "text_terms_any": ["redis", "migration", "package"],
+                    "statuses_any": ["active"],
+                    "limit": 10,
+                },
+                "output": {"record_type": "feature", "max_records": 10},
+                "merge_policy": {"dedupe_by": "title"},
+                "decay_policy": {"stale_after_runs": 1},
+                "review_policy": {"require_manual_review": True, "auto_surface_limit": 3},
+                "security_policy": {"allow_sensitive": False},
+            }
+        )
+        registered = run_cli(
+            "automation",
+            "register",
+            "--workspace",
+            str(self.workspace),
+            "--spec",
+            str(spec_path),
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(registered["status"], "registered")
+        validate_document("automation-job.schema.json", registered["job"])
+
+        snapshot_before = run_cli("status", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        self.assertIn("release-watch", snapshot_before["runtime"]["automation"]["due_job_ids"])
+        self.assertIn("opendream tick", snapshot_before["next_action"])
+
+        result = run_cli(
+            "automation",
+            "run",
+            "--workspace",
+            str(self.workspace),
+            "--job",
+            "release-watch",
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(result["status"], "completed")
+        validate_document(
+            "automation-run-report.schema.json",
+            {k: v for k, v in result.items() if k not in {"workspace", "memory_root"}},
+        )
+
+        records = json.loads(
+            (
+                self.workspace
+                / DEFAULT_MEMORY_DIR
+                / "automation"
+                / "records"
+                / "feature"
+                / "release-watch.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertGreaterEqual(len(records), 1)
+        for record in records:
+            validate_document("automation-record.schema.json", record)
+
+        status_payload = run_cli(
+            "automation",
+            "status",
+            "--workspace",
+            str(self.workspace),
+            "--job",
+            "release-watch",
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(status_payload["automation"]["job_count"], 1)
+        self.assertEqual(status_payload["job_state"]["last_status"], "completed")
+        self.assertGreaterEqual(len(status_payload["records"]), 1)
+
+        context = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "migration runtime",
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertIn("Active Automation Projections", context["prompt_context"])
+        self.assertGreaterEqual(len(context["selected_automation_record_ids"]), 1)
+
+    def test_automation_staleness_and_top_level_tick(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
+        run_cli("append-event", "--workspace", str(self.workspace), "--events", str(fixture))
+        run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+
+        initial_spec = self.write_automation_spec(
+            {
+                "job_id": "ops-radar",
+                "title": "Ops radar",
+                "description": "Track redis rollout work.",
+                "skill_ref": "builtin://projection-engine",
+                "trigger": {"type": "interval", "interval_seconds": 60},
+                "input_selectors": {
+                    "memory_types_any": [
+                        "project_decision",
+                        "environment_requirement",
+                        "procedural_workflow",
+                        "user_preference",
+                    ],
+                    "text_terms_any": ["redis"],
+                    "statuses_any": ["active"],
+                    "limit": 10,
+                },
+                "output": {"record_type": "bug", "max_records": 10},
+                "merge_policy": {"dedupe_by": "title"},
+                "decay_policy": {"stale_after_runs": 1},
+                "review_policy": {"require_manual_review": True, "auto_surface_limit": 3},
+                "security_policy": {"allow_sensitive": False},
+            },
+            name="ops-radar-initial.json",
+        )
+        run_cli(
+            "automation",
+            "register",
+            "--workspace",
+            str(self.workspace),
+            "--spec",
+            str(initial_spec),
+            "--now",
+            FIXED_NOW,
+        )
+
+        tick_result = run_cli("tick", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        self.assertEqual(tick_result["status"], "completed")
+        self.assertEqual(tick_result["automation"]["status"], "completed")
+
+        updated_spec = self.write_automation_spec(
+            {
+                "job_id": "ops-radar",
+                "title": "Ops radar",
+                "description": "Track redis rollout work.",
+                "skill_ref": "builtin://projection-engine",
+                "trigger": {"type": "interval", "interval_seconds": 60},
+                "input_selectors": {
+                    "memory_types_any": [
+                        "project_decision",
+                        "environment_requirement",
+                        "procedural_workflow",
+                        "user_preference",
+                    ],
+                    "text_terms_any": ["nonexistent-term"],
+                    "statuses_any": ["active"],
+                    "limit": 10,
+                },
+                "output": {"record_type": "bug", "max_records": 10},
+                "merge_policy": {"dedupe_by": "title"},
+                "decay_policy": {"stale_after_runs": 1},
+                "review_policy": {"require_manual_review": True, "auto_surface_limit": 3},
+                "security_policy": {"allow_sensitive": False},
+            },
+            name="ops-radar-updated.json",
+        )
+        run_cli(
+            "automation",
+            "register",
+            "--workspace",
+            str(self.workspace),
+            "--spec",
+            str(updated_spec),
+            "--now",
+            "2026-03-26T12:01:00Z",
+        )
+        run_cli(
+            "automation",
+            "run",
+            "--workspace",
+            str(self.workspace),
+            "--job",
+            "ops-radar",
+            "--now",
+            "2026-03-26T12:01:00Z",
+        )
+
+        review = run_cli(
+            "automation",
+            "review",
+            "--workspace",
+            str(self.workspace),
+            "--job",
+            "ops-radar",
+            "--now",
+            "2026-03-26T12:01:00Z",
+        )
+        self.assertTrue(any(record["status"] == "stale" for record in review["records"]))
+        snapshot = run_cli(
+            "status",
+            "--workspace",
+            str(self.workspace),
+            "--now",
+            "2026-03-26T12:01:00Z",
+        )
+        self.assertEqual(snapshot["runtime"]["automation"]["stale_records"], 1)
 
     def test_eval_memory_quality_command(self) -> None:
         result = run_cli(

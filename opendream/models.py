@@ -190,3 +190,52 @@ class PhaseTrace:
         if not self.files_consulted:
             payload.pop("files_consulted")
         return payload
+
+
+@dataclass(slots=True)
+class AutomationJob:
+    version: int
+    job_id: str
+    title: str
+    description: str
+    skill_ref: str
+    enabled: bool
+    trigger: dict[str, Any]
+    input_selectors: dict[str, Any]
+    output: dict[str, Any]
+    merge_policy: dict[str, Any]
+    decay_policy: dict[str, Any]
+    review_policy: dict[str, Any]
+    security_policy: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class AutomationRecord:
+    version: int
+    record_id: str
+    job_id: str
+    record_type: str
+    title: str
+    summary: str
+    status: str
+    confidence: float
+    priority: float
+    dedupe_key: str
+    source_memory_ids: list[str]
+    source_titles: list[str]
+    missed_runs: int
+    created_at: str
+    updated_at: str
+    last_seen_at: str
+    stale_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        if self.stale_at is None:
+            payload.pop("stale_at")
+        return payload

@@ -26,6 +26,9 @@ REQUIRED_SCHEMA_FILES = (
     "repair-report.schema.json",
     "target-registry.schema.json",
     "adapter-manifest.schema.json",
+    "automation-job.schema.json",
+    "automation-record.schema.json",
+    "automation-run-report.schema.json",
 )
 
 

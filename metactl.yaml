@@ -1,0 +1,26 @@
+api_version: metactl/v2alpha1
+role: builder
+packs:
+- wxb-pack-authoring
+- wxb-pack-charter-harness
+- wxb-pack-cli-devex
+- wxb-pack-core-quality
+- wxb-pack-longform-prompts
+- wxb-pack-research-context
+- wxb-pack-session-memory
+policy: brownfield-safe-builder
+targets:
+  - codex-cli
+  - claude-code
+  - cursor
+  - gemini-cli
+starter_library:
+  # Default/first-party corpus: metactl repo `library/starter` (roles, policies, targets, base packs)
+  - ../metactl/library/starter
+  - /Users/reynard/src/wx-b/metactl-library
+defaults:
+  brownfield_mode: refuse_due_to_conflict
+  discovery_mode: candidate_search
+metadata:
+  brownfield_detected: 'true'
+  init_mode: brownfield-auto-detect

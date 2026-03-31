@@ -17,6 +17,20 @@ from .activation import (
     format_compressed_status,
     plan_agent_activation,
 )
+from .automation import (
+    load_job_spec,
+    register_job,
+    run_job,
+)
+from .automation import (
+    review as review_automation_job,
+)
+from .automation import (
+    status as automation_status,
+)
+from .automation import (
+    tick as automation_tick,
+)
 from .bootstrap import bootstrap_index
 from .consolidator import consolidate
 from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
@@ -448,6 +462,57 @@ def command_tick(args: argparse.Namespace) -> dict[str, Any]:
         min_new_events=args.min_new_events,
         min_interval_seconds=args.min_interval_seconds,
     )
+
+
+def command_automation_register(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    payload = load_job_spec(Path(args.spec))
+    result = register_job(store, payload, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_automation_run(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = run_job(store, args.job, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_automation_tick(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = automation_tick(store, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_automation_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = automation_status(store, job_id=args.job, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_automation_review(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = review_automation_job(store, args.job, limit=args.limit, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
 
 
 def command_demo(args: argparse.Namespace) -> dict[str, Any]:
@@ -909,6 +974,50 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(tick_parser)
     add_store_group_arguments(tick_parser)
     tick_parser.set_defaults(func=command_tick)
+
+    automation_parser = subparsers.add_parser(
+        "automation",
+        help="Advanced: managed automation jobs and projection outputs",
+    )
+    automation_subparsers = automation_parser.add_subparsers(dest="automation_command", required=True)
+
+    automation_register_parser = automation_subparsers.add_parser("register", help="Register a managed automation job")
+    automation_register_parser.add_argument("--workspace", required=True)
+    automation_register_parser.add_argument("--spec", required=True)
+    automation_register_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_register_parser)
+    automation_register_parser.set_defaults(func=command_automation_register)
+
+    automation_run_parser = automation_subparsers.add_parser("run", help="Run one automation job immediately")
+    automation_run_parser.add_argument("--workspace", required=True)
+    automation_run_parser.add_argument("--job", required=True)
+    automation_run_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_run_parser)
+    automation_run_parser.set_defaults(func=command_automation_run)
+
+    automation_tick_parser = automation_subparsers.add_parser("tick", help="Run every due automation job once")
+    automation_tick_parser.add_argument("--workspace", required=True)
+    automation_tick_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_tick_parser)
+    automation_tick_parser.set_defaults(func=command_automation_tick)
+
+    automation_status_parser = automation_subparsers.add_parser("status", help="Inspect automation health and jobs")
+    automation_status_parser.add_argument("--workspace", required=True)
+    automation_status_parser.add_argument("--job")
+    automation_status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_status_parser)
+    automation_status_parser.set_defaults(func=command_automation_status)
+
+    automation_review_parser = automation_subparsers.add_parser(
+        "review",
+        help="Review active and stale projection records for one automation job",
+    )
+    automation_review_parser.add_argument("--workspace", required=True)
+    automation_review_parser.add_argument("--job", required=True)
+    automation_review_parser.add_argument("--limit", type=int, default=10)
+    automation_review_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_review_parser)
+    automation_review_parser.set_defaults(func=command_automation_review)
 
     demo_parser = subparsers.add_parser("demo", help="Seed a deterministic demo workspace")
     demo_parser.add_argument("--workspace", required=True)

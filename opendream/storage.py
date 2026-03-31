@@ -4,7 +4,8 @@ import difflib
 import json
 import os
 import time
-from collections.abc import Iterable
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from contextlib import AbstractContextManager
 from datetime import timedelta
 from pathlib import Path
@@ -12,6 +13,8 @@ from typing import Any
 
 from .models import (
     Annotation,
+    AutomationJob,
+    AutomationRecord,
     ConsolidationOperation,
     ContextAssembly,
     MemoryCandidate,
@@ -203,6 +206,11 @@ class MemoryStore:
         self.annotations_dir = self.memory_root / "audit" / "annotations"
         self.reviews_dir = self.memory_root / "audit" / "reviews"
         self.exports_dir = self.memory_root / "audit" / "exports"
+        self.automation_root = self.memory_root / "automation"
+        self.automation_jobs_dir = self.automation_root / "jobs"
+        self.automation_state_dir = self.automation_root / "state"
+        self.automation_records_dir = self.automation_root / "records"
+        self.automation_audit_dir = self.automation_root / "audit"
         self.locks_dir = self.memory_root / "locks"
         self.state_dir = self.memory_root / "state"
         self.durable_records_path = self.state_dir / "durable_records.json"
@@ -351,6 +359,11 @@ class MemoryStore:
             self.annotations_dir,
             self.reviews_dir,
             self.exports_dir,
+            self.automation_root,
+            self.automation_jobs_dir,
+            self.automation_state_dir,
+            self.automation_records_dir,
+            self.automation_audit_dir,
             self.locks_dir,
             self.state_dir,
         ]:
@@ -467,15 +480,16 @@ class MemoryStore:
                     "last_run_duration_ms": None,
                     "last_episode_timestamp": None,
                     "queue_depth": 0,
-                "queued_jobs": [],
-                "lock": self.dream_lock_state(),
-                "worker_lock": self.dream_worker_lock_state(),
-                "worker": {"state": "idle", "processed_jobs": 0},
-                "worker_health": self.load_worker_health(),
-                "policy": metadata["dream"],
-                "transcript_dir": str(self.transcripts_dir),
-                "available_episode_files": 0,
-            },
+                    "queued_jobs": [],
+                    "lock": self.dream_lock_state(),
+                    "worker_lock": self.dream_worker_lock_state(),
+                    "worker": {"state": "idle", "processed_jobs": 0},
+                    "worker_health": self.load_worker_health(),
+                    "policy": metadata["dream"],
+                    "transcript_dir": str(self.transcripts_dir),
+                    "available_episode_files": 0,
+                },
+                "automation": self.automation_summary(now=timestamp),
                 "next_eligible_reason": "not-initialized",
                 "next_eligible_at": None,
             }
@@ -541,8 +555,64 @@ class MemoryStore:
                 "transcript_dir": str(self.transcripts_dir),
                 "available_episode_files": len(list(self.transcripts_dir.glob("*.jsonl"))),
             },
+            "automation": self.automation_summary(now=timestamp),
             "next_eligible_reason": next_eligible_reason,
             "next_eligible_at": next_eligible_at,
+        }
+
+    def automation_summary(self, *, now: str | None = None) -> dict[str, Any]:
+        timestamp = now or to_iso(utc_now())
+        if not self.is_initialized():
+            return {
+                "job_count": 0,
+                "enabled_jobs": 0,
+                "due_job_ids": [],
+                "active_records": 0,
+                "stale_records": 0,
+                "jobs": [],
+            }
+
+        jobs = self.load_automation_jobs()
+        records = self.load_automation_records()
+        records_by_job: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for record in records:
+            records_by_job[str(record.get("job_id", ""))].append(record)
+
+        due_job_ids: list[str] = []
+        summaries: list[dict[str, Any]] = []
+        for job in jobs:
+            job_id = str(job.get("job_id", ""))
+            state = self.load_automation_state(job_id)
+            interval_seconds = int(job.get("trigger", {}).get("interval_seconds", 0))
+            last_run_at = state.get("last_run_at")
+            due = bool(job.get("enabled", True))
+            if due and last_run_at and interval_seconds > 0:
+                next_run_at = parse_timestamp(str(last_run_at)) + timedelta(seconds=interval_seconds)
+                due = parse_timestamp(timestamp) >= next_run_at
+            if due:
+                due_job_ids.append(job_id)
+            job_records = records_by_job.get(job_id, [])
+            summaries.append(
+                {
+                    "job_id": job_id,
+                    "title": job.get("title"),
+                    "enabled": bool(job.get("enabled", True)),
+                    "record_type": job.get("output", {}).get("record_type", "generic"),
+                    "due": due,
+                    "last_run_at": last_run_at,
+                    "last_status": state.get("last_status"),
+                    "active_records": sum(1 for item in job_records if item.get("status") == "active"),
+                    "stale_records": sum(1 for item in job_records if item.get("status") == "stale"),
+                }
+            )
+
+        return {
+            "job_count": len(jobs),
+            "enabled_jobs": sum(1 for job in jobs if job.get("enabled", True)),
+            "due_job_ids": sorted(due_job_ids),
+            "active_records": sum(1 for item in records if item.get("status") == "active"),
+            "stale_records": sum(1 for item in records if item.get("status") == "stale"),
+            "jobs": sorted(summaries, key=lambda item: item["job_id"]),
         }
 
     def append_event(self, event: MemoryEvent) -> Path:
@@ -668,6 +738,80 @@ class MemoryStore:
     def save_service_runtime(self, payload: dict[str, Any]) -> None:
         self.ensure_layout()
         write_json(self.service_runtime_path, payload)
+
+    def save_automation_job(self, payload: AutomationJob | dict[str, Any]) -> Path:
+        self.ensure_layout()
+        serialized = payload.to_dict() if isinstance(payload, AutomationJob) else payload
+        validate_document("automation-job.schema.json", serialized)
+        job_id = str(serialized["job_id"])
+        path = self.automation_jobs_dir / f"{job_id}.json"
+        write_json(path, serialized)
+        return path
+
+    def load_automation_job(self, job_id: str) -> dict[str, Any]:
+        self.ensure_layout()
+        payload = read_json(self.automation_jobs_dir / f"{job_id}.json", {})
+        return payload if isinstance(payload, dict) else {}
+
+    def load_automation_jobs(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        jobs: list[dict[str, Any]] = []
+        for path in sorted(self.automation_jobs_dir.glob("*.json")):
+            payload = read_json(path, {})
+            if isinstance(payload, dict):
+                jobs.append(payload)
+        return jobs
+
+    def load_automation_state(self, job_id: str) -> dict[str, Any]:
+        self.ensure_layout()
+        payload = read_json(self.automation_state_dir / f"{job_id}.json", {})
+        return payload if isinstance(payload, dict) else {}
+
+    def save_automation_state(self, job_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.automation_state_dir / f"{job_id}.json"
+        write_json(path, payload)
+        return path
+
+    def save_automation_records(
+        self,
+        job_id: str,
+        record_type: str,
+        records: Sequence[AutomationRecord | dict[str, Any]],
+    ) -> Path:
+        self.ensure_layout()
+        serialized: list[dict[str, Any]] = []
+        for record in records:
+            payload = record.to_dict() if isinstance(record, AutomationRecord) else record
+            validate_document("automation-record.schema.json", payload)
+            serialized.append(payload)
+        path = self.automation_records_dir / record_type / f"{job_id}.json"
+        write_json(path, serialized)
+        return path
+
+    def load_automation_records(self, job_id: str | None = None) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        rows: list[dict[str, Any]] = []
+        for path in sorted(self.automation_records_dir.glob("*/*.json")):
+            if job_id is not None and path.stem != job_id:
+                continue
+            payload = read_json(path, [])
+            if isinstance(payload, list):
+                rows.extend(item for item in payload if isinstance(item, dict))
+        return rows
+
+    def write_automation_run_report(self, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        validate_document("automation-run-report.schema.json", payload)
+        report_id = str(
+            payload.get(
+                "run_id",
+                stable_id("automation-run", payload.get("generated_at", to_iso(utc_now()))),
+            )
+        )
+        path = self.automation_audit_dir / f"{report_id}.json"
+        write_json(path, payload)
+        return path
 
     def load_observability_index(self) -> dict[str, Any]:
         self.ensure_layout()

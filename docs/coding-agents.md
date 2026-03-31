@@ -14,10 +14,15 @@ Short reference for tools that drive the CLI (hooks, IDE agents, scripts).
 
 ## Typical hook sequence
 
-1. **Pre-task:** `opendream prepare-context --workspace "$WORKSPACE" --query "<task>"` → JSON with `prompt_context`, `selected_memory_ids`, `empty_reason`, and `hints`.
+1. **Pre-task:** `opendream prepare-context --workspace "$WORKSPACE" --query "<task>"` → JSON with `prompt_context`, `selected_memory_ids`, `empty_reason`, and `hints`. When [automations](../README.md) have produced projections, the same payload also includes `selected_automation_record_ids` / `selected_automation_records`, and `prompt_context` adds an **Active Automation Projections** section (separate from durable memory).
 2. **Post-task:** `opendream emit-event --workspace "$WORKSPACE" --kind task_outcome --content "<summary>" --message-ref "<ref>"` (plus required flags; see `emit-event -h`).
 3. **Maintenance:** `opendream maintain --workspace "$WORKSPACE"` (often chained after emit in hooks).
 4. **Dream worker (optional):** `opendream dream worker --workspace "$WORKSPACE" --once` — transcript-driven; **`agent_summary`** explains skips such as **`no-episodes`**.
+
+If the repo uses automations:
+
+- **`opendream tick --workspace "$WORKSPACE"`** runs both normal maintenance and any due automation jobs.
+- **`opendream automation tick --workspace "$WORKSPACE"`** runs only due automation jobs.
 
 ## Empty context is not always a failure
 
@@ -26,11 +31,13 @@ Short reference for tools that drive the CLI (hooks, IDE agents, scripts).
 - **`empty_reason`:** `null` when memories were selected; otherwise `no_initialized_store`, `no_durable_memories`, or `no_query_matches`.
 - **`hints`:** concrete next steps (e.g. run `maintain`, broaden the query).
 
-Section headers in `prompt_context` may appear with **no body** when there is nothing to inject; use **`empty_reason`** / **`hints`** instead of inferring an error.
+Section headers in `prompt_context` may appear with **no body** when there is nothing to inject; use **`empty_reason`** / **`hints`** instead of inferring an error. Treat automation projections as **non-canonical** backlog/radar signal unless you explicitly promote decisions into durable memory (for example via normal `emit-event` / consolidation flows).
 
 ## JSON stability
 
 Selected command payloads include **`cli_output_version`** (integer). Bump tolerance in your integration when this number changes.
+
+`--now` exists to make tests, fixtures, and scripted repros deterministic. Production hooks, cron jobs, and normal CLI usage should usually omit it and rely on wall-clock time.
 
 ## What not to hand-edit
 

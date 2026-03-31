@@ -539,3 +539,29 @@ specs:
       - status aggregates activation and runtime state with one next action
       - deactivate removes managed surfaces without damaging unrelated content
       - make verify and make release-check remain green with compressed-path coverage
+  - id: 435-opendream-automations
+    title: managed automation jobs and typed projection outputs
+    status: implemented
+    owner: platform
+    created: 2026-03-30
+    touched_surfaces:
+      - automation-runtime
+      - cli
+      - storage
+      - docs
+      - verification
+      - tests
+    depends_on:
+      - 406-scheduler-and-status-surface
+      - 432-first-party-service-lifecycle
+      - 434-zero-touch-activation-and-command-surface-compression
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - README.md
+      - docs/architecture/overview.md
+    verification:
+      - automation jobs validate and persist with explicit policy fields
+      - automation runs write typed projection records without mutating durable memory
+      - top-level status and tick expose automation work alongside existing runtime state
+      - make verify remains green with automation coverage
