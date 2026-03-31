@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -77,10 +79,39 @@ TOP_LEVEL_EXAMPLES = """Examples:
   opendream status --workspace "$PWD"
   opendream activate --workspace "$PWD" --repair
   opendream deactivate --workspace "$PWD"
+  opendream contract export --workspace "$PWD" --format json
+"""
+
+CONTRACT_EXAMPLES = """Examples:
+  opendream contract export --workspace "$PWD" --format json
 """
 
 
+class _RejectDoctorMemoryShorthand(argparse.Action):
+    """`--memory` looks like `--surface memory` but previously abbreviated `--memory-dir`."""
+
+    def __init__(self, option_strings: Sequence[str], dest: str, **kwargs: Any) -> None:
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        parser.error(
+            "`--memory` is not a valid doctor flag; use `--surface memory` for the memory doctor surface "
+            "(use `--memory-dir` only for the relative memory directory under the workspace)."
+        )
+
+
 class OpenDreamArgumentParser(argparse.ArgumentParser):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # Avoid `--memory` silently abbreviating `--memory-dir` (and similar foot-guns).
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
+
     def error(self, message: str) -> NoReturn:
         self.print_usage(sys.stderr)
         detail = f"{self.prog}: error: {message}\n"
@@ -99,6 +130,12 @@ def _error_hint(prog: str, message: str) -> str | None:
         )
     if prog == "opendream dream" and "required: dream_command" in message:
         return "try `opendream dream status --workspace .tmp/ws` or `opendream dream worker --workspace .tmp/ws --once`"
+    if prog == "opendream contract" and "invalid choice" in message and "contract_command" in message:
+        return (
+            "`contract` needs a subcommand; use "
+            '`opendream contract export --workspace "$PWD" --format json` '
+            "(do not pass the workspace path as the first token after `contract`)"
+        )
     return None
 
 
@@ -714,15 +751,24 @@ def command_eval_dream_fidelity(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def command_eval_performance(args: argparse.Namespace) -> dict[str, Any]:
-    store = build_store(
-        args.workspace,
-        memory_dir=args.memory_dir,
-        compat_mode=args.compat_mode,
-    )
-    if not store.is_initialized():
-        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    """Run the performance scorecard against an isolated store so prior workspace memory cannot skew results."""
+    caller_workspace = Path(args.workspace).expanduser()
     fixture_path = Path(args.fixture) if args.fixture else None
-    return run_performance_eval(store, fixture_path=fixture_path, now=args.now)
+    memory_dir = getattr(args, "memory_dir", None)
+    compat_mode = getattr(args, "compat_mode", None)
+    with tempfile.TemporaryDirectory(prefix="opendream-eval-performance-") as tmp:
+        isolated_root = Path(tmp) / "workspace"
+        isolated_root.mkdir(parents=True, exist_ok=True)
+        store = build_store(
+            str(isolated_root),
+            memory_dir=memory_dir,
+            compat_mode=compat_mode,
+        )
+        store.initialize(store_kind="project", compat_mode=compat_mode)
+        result = run_performance_eval(store, fixture_path=fixture_path, now=args.now)
+    result = dict(result)
+    result["workspace"] = str(caller_workspace.resolve())
+    return result
 
 
 def command_index_observability(args: argparse.Namespace) -> dict[str, Any]:
@@ -899,6 +945,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser = subparsers.add_parser("doctor", help="Advanced: diagnose managed surfaces and repair drift")
     doctor_parser.add_argument("--workspace", required=True)
     doctor_parser.add_argument("--surface", choices=["agents", "memory"], default="agents")
+    doctor_parser.add_argument(
+        "--memory",
+        action=_RejectDoctorMemoryShorthand,
+        help=argparse.SUPPRESS,
+    )
     add_layout_arguments(doctor_parser)
     doctor_parser.set_defaults(func=command_doctor)
 
@@ -962,7 +1013,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     retrieve_parser = subparsers.add_parser("retrieve", help="Retrieve relevant durable memory records")
     retrieve_parser.add_argument("--workspace", required=True)
-    retrieve_parser.add_argument("--query", required=True)
+    retrieve_parser.add_argument(
+        "--query",
+        required=True,
+        help=(
+            "Natural-language query. Very short queries may be intentionally gated: JSON includes "
+            '"gated": true and a reason when there are fewer than gating_min_content_tokens '
+            "(default 3) meaningful tokens after stopwords."
+        ),
+    )
     retrieve_parser.add_argument("--limit", type=int, default=5)
     retrieve_parser.add_argument("--include-contested", action="store_true")
     retrieve_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
@@ -1000,11 +1059,18 @@ def build_parser() -> argparse.ArgumentParser:
     contract_parser = subparsers.add_parser(
         "contract",
         help="Agent-facing machine-readable contracts (schemas, command inventory)",
+        epilog=CONTRACT_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     contract_subparsers = contract_parser.add_subparsers(dest="contract_command", required=True)
     contract_export_parser = contract_subparsers.add_parser(
         "export",
         help="Emit versioned JSON describing CLI commands, schemas, and output versions",
+        description=(
+            "Canonical invocation: pass the workspace with --workspace on this subcommand, "
+            "not as the first argument after `contract`."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     contract_export_parser.add_argument("--workspace", required=True)
     contract_export_parser.add_argument("--format", choices=["json"], default="json")
@@ -1146,13 +1212,30 @@ def build_parser() -> argparse.ArgumentParser:
     eval_memory_parser = eval_subparsers.add_parser(
         "memory-quality",
         help="Run retrieval and contradiction quality checks",
+        description=(
+            "Replays the packaged memory-quality fixture into the **current** store (emit-event + maintain), "
+            "then scores retrieval. Not hermetic: existing memories (e.g. after `demo`) can cause failure. "
+            "Use a fresh workspace (or clean memory dir) for a clean pass/fail signal like CI; "
+            "compare `eval performance`, which uses an isolated store."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     eval_memory_parser.add_argument("--workspace", required=True)
     eval_memory_parser.add_argument("--fixture")
     eval_memory_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(eval_memory_parser)
     eval_memory_parser.set_defaults(func=command_eval_memory_quality, result_failure_statuses=("failed",))
-    eval_dream_parser = eval_subparsers.add_parser("dream-fidelity", help="Run transcript-native dream fidelity checks")
+    eval_dream_parser = eval_subparsers.add_parser(
+        "dream-fidelity",
+        help="Run transcript-native dream fidelity checks",
+        description=(
+            "Runs the packaged transcript fixture and checks AutoDream-style compatibility views among other signals. "
+            "Uses the workspace you pass in: an existing store keeps its layout (e.g. `demo` without `--compat-mode "
+            "autodream` leaves canonical mode, so compatibility_views may fail). Prefer a fresh workspace or pass "
+            "`--compat-mode autodream` consistently (and the same `--memory-dir`) for green runs."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     eval_dream_parser.add_argument("--workspace", required=True)
     eval_dream_parser.add_argument("--fixture")
     eval_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
@@ -1268,6 +1351,44 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _dream_fidelity_failure_hint(result: dict[str, Any]) -> str | None:
+    if str(result.get("status", "")) != "failed":
+        return None
+    checks = result.get("checks")
+    if not isinstance(checks, dict):
+        return None
+    failed = sorted(name for name, ok in checks.items() if ok is False)
+    if not failed:
+        return None
+    msg = f"failing checks: {', '.join(failed)}"
+    if "compatibility_views" in failed:
+        msg += (
+            ". For compatibility_views, `project.md` and `user.md` must exist under the active memory root "
+            "(AutoDream layout). Use `--compat-mode autodream` consistently with `demo`/init, the same "
+            "`--memory-dir`, or a fresh workspace."
+        )
+    return msg
+
+
+def _memory_quality_failure_hint(result: dict[str, Any]) -> str | None:
+    if str(result.get("status", "")) != "failed":
+        return None
+    detail_parts: list[str] = []
+    dup = result.get("duplicate_active_titles")
+    if isinstance(dup, list) and dup:
+        detail_parts.append(f"duplicate_active_titles={dup!r}")
+    contested = result.get("contested_titles")
+    if isinstance(contested, list) and contested:
+        detail_parts.append(f"contested_titles={contested!r}")
+    tail = (
+        "This eval mutates the current store with its packaged fixture (not hermetic). "
+        "Use a fresh workspace for a clean pass/fail signal; `eval performance` uses an isolated store."
+    )
+    if detail_parts:
+        return f"{'; '.join(detail_parts)}. {tail}"
+    return tail
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -1275,6 +1396,9 @@ def main() -> int:
         result = args.func(args)
     except ValueError as exc:
         sys.stderr.write(f"{parser.prog}: error: {exc}\n")
+        return 2
+    except OSError as exc:
+        sys.stderr.write(f"{parser.prog}: error: cannot initialize workspace layout ({exc})\n")
         return 2
     raw_output = None
     if isinstance(result, dict):
@@ -1284,6 +1408,14 @@ def main() -> int:
     else:
         print(json_dumps(result))
     if isinstance(result, dict):
+        if args.func is command_eval_dream_fidelity:
+            hint = _dream_fidelity_failure_hint(result)
+            if hint:
+                sys.stderr.write(f"{parser.prog}: {hint}\n")
+        elif args.func is command_eval_memory_quality:
+            hint = _memory_quality_failure_hint(result)
+            if hint:
+                sys.stderr.write(f"{parser.prog}: {hint}\n")
         failure_statuses = set(getattr(args, "result_failure_statuses", ()))
         if failure_statuses and str(result.get("status", "")) in failure_statuses:
             return 1

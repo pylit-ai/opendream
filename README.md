@@ -220,9 +220,22 @@ Eval:
 ```bash
 opendream eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodream
 opendream eval memory-quality --workspace .tmp/eval
+opendream eval performance --workspace .tmp/eval
 ```
 
-Both eval subcommands print JSON to stdout; if the report includes `"status": "failed"`, the process exits **non-zero** (typically `1`) so scripts and CI can fail the step without parsing the payload.
+Eval commands print JSON to stdout; if the report includes `"status": "failed"`, the process exits **non-zero** (typically `1`) so scripts and CI can fail the step without parsing the payload.
+
+**`eval performance`** — **hermetic:** uses an **isolated** empty memory store (same `--memory-dir` / `--compat-mode` as you pass in) so existing durable memory in your workspace cannot skew the scorecard; the JSON `workspace` field is still your `--workspace` path for context.
+
+**`eval dream-fidelity`** — **state- and compat-sensitive:** reuses the store at `--workspace` and checks AutoDream-style **`compatibility_views`** (`project.md` / `user.md` under the active memory root). Running `demo` in **canonical** mode then `eval dream-fidelity` without a matching `--compat-mode autodream` (and the same `--memory-dir`) can fail that check; use a fresh workspace or align flags. On failure, stderr adds a **`failing checks: …`** summary (and extra guidance when `compatibility_views` fails); stdout JSON is unchanged.
+
+**`eval memory-quality`** — **mutating / not hermetic:** replays a packaged fixture into the **current** store (`emit-event` + `maintain`), then scores retrieval. Prior state (e.g. after `demo`) can make titles **contested** or create **duplicate** actives so the eval fails; use a **fresh workspace** when you want a clean CI-style verdict. On failure, stderr summarizes **duplicate/contested** context when present plus this “use a fresh workspace” hint.
+
+**`retrieve` / `prepare-context`:** very **short queries** may be **intentionally gated** — JSON includes `"gated": true` and a **`reason`** (e.g. too few content tokens vs `gating_min_content_tokens`, default **3**) instead of ranking memories. Broader queries avoid gating.
+
+**Contract export:** use the **`export`** subcommand — `opendream contract export --workspace "$PWD" --format json` (do not pass the workspace path as the first token after `contract`).
+
+**`doctor`** does not accept `--memory`; use `--surface memory` for the memory surface and `--memory-dir` only for the relative memory directory.
 
 Cron example:
 

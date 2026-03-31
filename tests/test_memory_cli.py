@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -1156,6 +1157,110 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 1)
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["status"], "failed")
+        self.assertIn("fresh workspace", completed.stderr.lower())
+        self.assertIn("isolated store", completed.stderr.lower())
+
+    def test_eval_performance_hermetic_after_demo(self) -> None:
+        baseline = run_cli(
+            "eval",
+            "performance",
+            "--workspace",
+            str(self.workspace),
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(baseline["status"], "passed")
+        weighted_baseline = baseline["scorecard"]["weighted_total"]
+
+        run_cli("demo", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        after_demo = run_cli(
+            "eval",
+            "performance",
+            "--workspace",
+            str(self.workspace),
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(after_demo["status"], "passed")
+        deterministic_keys = (
+            "write_precision",
+            "retrieval_precision",
+            "concurrency_safety",
+            "contradiction_handling",
+            "procedural_reuse",
+            "gating_accuracy",
+        )
+        for key in deterministic_keys:
+            self.assertEqual(
+                baseline["scorecard"][key],
+                after_demo["scorecard"][key],
+                msg="isolated eval scorecard should not depend on workspace demo state",
+            )
+        # `latency` includes maintain_ms from monotonic clocks; tiny jitter can move weighted_total by ~0.1.
+        self.assertAlmostEqual(
+            after_demo["scorecard"]["weighted_total"],
+            weighted_baseline,
+            delta=0.5,
+        )
+
+    def test_init_file_workspace_errors_without_traceback(self) -> None:
+        blocker = self.workspace / "not_a_directory"
+        blocker.write_text("x", encoding="utf-8")
+        completed = run_cli_raw("init", "--workspace", str(blocker), check=False)
+        self.assertEqual(completed.returncode, 2)
+        self.assertNotIn("Traceback", completed.stderr)
+        self.assertIn("error:", completed.stderr)
+
+    def test_doctor_rejects_memory_shorthand_with_hint(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        completed = run_cli_raw(
+            "doctor",
+            "--workspace",
+            str(self.workspace),
+            "--memory",
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("--surface memory", completed.stderr)
+        self.assertNotIn("argument --memory-dir: expected one argument", completed.stderr)
+
+    def test_cli_version_matches_pyproject(self) -> None:
+        pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        expected_ver = pyproject["project"]["version"]
+        completed = run_cli_raw("--version", check=False)
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn(expected_ver, completed.stdout)
+        self.assertTrue(completed.stdout.strip().startswith("opendream "))
+
+    def test_eval_dream_fidelity_failure_stderr_hint(self) -> None:
+        completed = run_cli_raw(
+            "eval",
+            "dream-fidelity",
+            "--workspace",
+            str(self.workspace),
+            "--now",
+            FIXED_NOW,
+            "--compat-mode",
+            "canonical",
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 1)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("failing checks:", completed.stderr)
+        self.assertIn("compatibility_views", completed.stderr)
+        self.assertIn("autodream", completed.stderr)
+
+    def test_contract_misplaced_workspace_prints_export_hint(self) -> None:
+        completed = run_cli_raw("contract", "/tmp/opendream-contract-path-hint-test", check=False)
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("Hint:", completed.stderr)
+        self.assertIn("contract export", completed.stderr)
+
+    def test_retrieve_help_mentions_query_gating(self) -> None:
+        completed = run_cli_raw("retrieve", "-h", check=False)
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn("gated", completed.stdout)
 
     def test_eval_dream_fidelity_command(self) -> None:
         result = run_cli(
