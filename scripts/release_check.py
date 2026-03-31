@@ -348,6 +348,27 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
                 timeout_seconds=timeout_seconds,
             )
         )
+        perf_workspace = temp_path / "perf-eval"
+        perf_result = run_stage(
+            "eval-performance",
+            [
+                str(venv_dir / scripts_dir / "opendream"),
+                "eval",
+                "performance",
+                "--workspace",
+                str(perf_workspace),
+            ],
+            cwd=temp_path,
+            timeout_seconds=timeout_seconds,
+        )
+        stages.append(perf_result)
+        perf_scorecard = None
+        if perf_result["status"] == "PASS" and perf_result.get("stdout"):
+            try:
+                perf_output = json.loads(perf_result["stdout"])
+                perf_scorecard = perf_output.get("scorecard")
+            except (json.JSONDecodeError, TypeError):
+                pass
         stages.append(
             run_stage(
                 "verify-clean-venv",
@@ -380,6 +401,7 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
         "verdict": overall_verdict,
         "stages": stages,
         "artifact_hashes": artifact_hashes,
+        "performance_scorecard": perf_scorecard,
     }
     return manifest
 

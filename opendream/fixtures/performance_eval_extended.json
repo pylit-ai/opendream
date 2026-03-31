@@ -1,0 +1,105 @@
+{
+  "description": "Extended performance eval fixture — additional task archetypes for diversity beyond base fixture",
+  "events": {
+    "high_signal": [
+      {
+        "kind": "environment_requirement",
+        "content": "Python 3.11 is the minimum supported version. The match-case syntax and ExceptionGroup features are used throughout the codebase.",
+        "message_ref": "ext-high-1",
+        "timestamp": "2026-03-27T10:00:00Z",
+        "tags": ["key:python-version"],
+        "label": "high_signal"
+      },
+      {
+        "kind": "anti_pattern",
+        "content": "Never use os.system() for subprocess calls. Always use subprocess.run() with explicit arguments to avoid shell injection. This was flagged in the March 2026 security audit.",
+        "message_ref": "ext-high-2",
+        "timestamp": "2026-03-27T10:10:00Z",
+        "tags": ["key:security-subprocess", "severity:high"],
+        "label": "high_signal"
+      },
+      {
+        "kind": "project_decision",
+        "content": "All API endpoints must return JSON with a top-level 'data' key for success and 'error' key for failures. This is enforced by the response middleware.",
+        "message_ref": "ext-high-3",
+        "timestamp": "2026-03-27T10:20:00Z",
+        "tags": ["key:api-response-format"],
+        "label": "high_signal"
+      },
+      {
+        "kind": "workflow_step",
+        "content": "Database migration workflow:\n1. Create migration file with alembic revision --autogenerate\n2. Review generated migration for data-loss operations\n3. Run alembic upgrade head on staging\n4. Verify data integrity with migration smoke tests\n5. Apply to production during maintenance window",
+        "message_ref": "ext-high-4",
+        "timestamp": "2026-03-27T10:30:00Z",
+        "tags": ["workflow:db-migration", "success:true"],
+        "label": "high_signal"
+      }
+    ],
+    "noise": [
+      {
+        "kind": "debug_outcome",
+        "content": "yeah that looks right",
+        "message_ref": "ext-noise-1",
+        "timestamp": "2026-03-27T10:40:00Z",
+        "tags": [],
+        "label": "noise"
+      },
+      {
+        "kind": "task_outcome",
+        "content": "fixed",
+        "message_ref": "ext-noise-2",
+        "timestamp": "2026-03-27T10:50:00Z",
+        "tags": [],
+        "label": "noise"
+      }
+    ],
+    "contradictions": [
+      {
+        "kind": "project_decision",
+        "content": "API responses should use a flat structure without wrapper keys. Return the data directly.",
+        "message_ref": "ext-contra-1",
+        "timestamp": "2026-03-27T11:00:00Z",
+        "tags": ["key:api-response-format", "conflict:api-response-format"],
+        "label": "contradiction"
+      },
+      {
+        "kind": "environment_requirement",
+        "content": "Python 3.10 is fine. We don't use any 3.11 features.",
+        "message_ref": "ext-contra-2",
+        "timestamp": "2026-03-27T11:10:00Z",
+        "tags": ["key:python-version", "conflict:python-version"],
+        "label": "contradiction"
+      }
+    ]
+  },
+  "queries": {
+    "should_match": [
+      {
+        "query": "What Python version do we need and why?",
+        "expected_title": "Environment: python-version"
+      },
+      {
+        "query": "What security rules apply to running external commands?",
+        "expected_title": "Anti-pattern: security-subprocess"
+      },
+      {
+        "query": "How should API responses be structured?",
+        "expected_title": "Decision: api-response-format"
+      },
+      {
+        "query": "How do we run database migrations safely?",
+        "expected_title": "Workflow: db-migration"
+      }
+    ],
+    "should_gate": [
+      {
+        "query": "hi",
+        "reason": "too short"
+      },
+      {
+        "query": "the is a an",
+        "reason": "only noise tokens"
+      }
+    ]
+  }
+}

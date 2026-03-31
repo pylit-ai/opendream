@@ -516,7 +516,7 @@ specs:
       - make verify and make release-check remain green with activation coverage
   - id: 434-zero-touch-activation-and-command-surface-compression
     title: compressed normal-path UX on top of zero-touch activation
-    status: active
+    status: implemented
     owner: platform
     created: 2026-03-28
     touched_surfaces:

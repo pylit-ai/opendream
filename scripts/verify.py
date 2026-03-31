@@ -87,6 +87,18 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
                     "autodream",
                 ],
             ),
+            (
+                "performance-eval",
+                [
+                    sys.executable,
+                    "-m",
+                    "opendream.cli",
+                    "eval",
+                    "performance",
+                    "--workspace",
+                    str(Path(temp_dir) / "perf-eval"),
+                ],
+            ),
             ("adapters-check", [sys.executable, "scripts/check_adapters.py"]),
             ("packaging-smoke", [sys.executable, "-m", "unittest", "tests.test_release_artifact", "-v"]),
         ]
