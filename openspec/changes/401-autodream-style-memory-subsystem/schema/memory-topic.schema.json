@@ -60,7 +60,11 @@
     "access_count": { "type": "integer", "minimum": 0 },
     "last_accessed_at": { "type": ["string", "null"], "format": "date-time" },
     "created_at": { "type": "string", "format": "date-time" },
-    "updated_at": { "type": "string", "format": "date-time" }
+    "updated_at": { "type": "string", "format": "date-time" },
+    "workflow_steps": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
   },
   "additionalProperties": false
 }

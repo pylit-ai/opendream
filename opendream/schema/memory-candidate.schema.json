@@ -61,6 +61,10 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "workflow_steps": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
     "created_at": { "type": "string", "format": "date-time" }
   },
   "additionalProperties": false

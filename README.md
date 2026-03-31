@@ -146,7 +146,7 @@ Use OpenDream as an **activation-first runtime**:
 - Run **`status`** for the single high-signal answer covering activation, drift, queue state, and runtime health.
 - Run **`activate --repair`** when `status` or `doctor` reports drift.
 - Run **`deactivate`** if you want to remove OpenDream-managed repo-local surfaces while keeping your repo config intact.
-- Use **`automation register|run|tick|status|review`** when you want managed recurring projections such as feature queues or bug radar without mutating durable memory.
+- Use **`automation register|run|tick|status|review`** when you want managed recurring projections such as feature queues or bug radar without mutating durable memory. For a **reproducible multi-layer pattern** (capture → automation radar → optional semantic refresh), see [`docs/automation/dream-task-playbook.md`](./docs/automation/dream-task-playbook.md), the worked example at [`docs/automation/examples/feature-mining.md`](./docs/automation/examples/feature-mining.md), and the Cursor on-demand skill [`.cursor/skills/opendream-dream-automation/SKILL.md`](./.cursor/skills/opendream-dream-automation/SKILL.md) (copy `SKILL.md` to other agents per **Platform deltas** in that file).
 - Use **`doctor --surface agents`**, **`service ...`**, **`dream ...`**, **`maintain`**, and **`prepare-context`** as advanced or explicit operator paths.
 
 <details>
@@ -318,6 +318,8 @@ make release-check
 
 Automations are **projection jobs**: they read **durable** memories, write **typed records** under `<memory-root>/automation/`, and can appear in `prepare-context` under **Active Automation Projections** — they do **not** replace canonical durable memory.
 
+**Playbook:** To wire skills, cron, and staleness the same way across projects (feature mining, bug radar, research deltas), follow [`docs/automation/dream-task-playbook.md`](./docs/automation/dream-task-playbook.md). Commit job specs under `docs/automation/job-specs/` or your own path and register from there.
+
 **1. Prerequisite:** initialized store plus durable memories (same as the smoke test: `init`, ingest events, `maintain`).
 
 **2. Job spec:** JSON validated against [`opendream/schema/automation-job.schema.json`](./opendream/schema/automation-job.schema.json). You may omit `version`, `enabled`, and timestamps; `automation register` normalizes defaults (`version`: 1, `enabled`: true, `created_at` / `updated_at`).
@@ -368,7 +370,7 @@ opendream prepare-context --workspace "$PWD" --query "your task"
 | `automation/records/<record_type>/<job_id>.json` | Projection records |
 | `automation/audit/` | Run reports and diffs |
 
-**5. Tests in repo:** `tests.test_memory_cli.MemoryCliIntegrationTests.test_automation_register_run_status_and_context` and `test_automation_staleness_and_top_level_tick`.
+**5. Tests in repo:** `tests.test_memory_cli.MemoryCliIntegrationTests.test_automation_register_run_status_and_context` and `test_automation_staleness_and_top_level_tick`. Consumer repos should run the same smoke path locally; extend CI with project-owned schema checks if the canonical backlog lives in git (see **Verification** in [`docs/automation/dream-task-playbook.md`](./docs/automation/dream-task-playbook.md)).
 
 </details>
 

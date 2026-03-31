@@ -1,0 +1,112 @@
+{
+  "events": {
+    "high_signal": [
+      {
+        "kind": "project_decision",
+        "content": "Use PostgreSQL for all persistence in this service. SQLite is not acceptable in production.",
+        "message_ref": "perf-high-1",
+        "timestamp": "2026-03-26T08:00:00Z",
+        "tags": ["key:database-choice"],
+        "label": "high_signal"
+      },
+      {
+        "kind": "environment_requirement",
+        "content": "Node 22 is required. Node 20 has a known memory leak in the crypto module that affects our auth flow.",
+        "message_ref": "perf-high-2",
+        "timestamp": "2026-03-26T08:10:00Z",
+        "tags": ["key:node-version"],
+        "label": "high_signal"
+      },
+      {
+        "kind": "workflow_step",
+        "content": "Deploy workflow:\n1. Run database migrations\n2. Build Docker image\n3. Push to registry\n4. Update Kubernetes deployment\n5. Verify health checks pass",
+        "message_ref": "perf-high-3",
+        "timestamp": "2026-03-26T08:20:00Z",
+        "tags": ["workflow:deploy", "success:true"],
+        "label": "high_signal"
+      },
+      {
+        "kind": "workflow_step",
+        "content": "Deploy workflow:\n1. Run database migrations\n2. Build Docker image\n3. Push to registry\n4. Update Kubernetes deployment\n5. Verify health checks pass",
+        "message_ref": "perf-high-3b",
+        "timestamp": "2026-03-26T08:25:00Z",
+        "tags": ["workflow:deploy", "success:true"],
+        "label": "high_signal"
+      },
+      {
+        "kind": "preference_signal",
+        "content": "Always use structured logging with JSON output. Never use console.log in production code.",
+        "message_ref": "perf-high-4",
+        "timestamp": "2026-03-26T08:30:00Z",
+        "tags": ["key:logging-preference"],
+        "label": "high_signal"
+      }
+    ],
+    "noise": [
+      {
+        "kind": "debug_outcome",
+        "content": "the thing worked",
+        "message_ref": "perf-noise-1",
+        "timestamp": "2026-03-26T08:40:00Z",
+        "tags": [],
+        "label": "noise"
+      },
+      {
+        "kind": "task_outcome",
+        "content": "ok done",
+        "message_ref": "perf-noise-2",
+        "timestamp": "2026-03-26T08:50:00Z",
+        "tags": [],
+        "label": "noise"
+      },
+      {
+        "kind": "debug_outcome",
+        "content": "it is fine now I think",
+        "message_ref": "perf-noise-3",
+        "timestamp": "2026-03-26T09:00:00Z",
+        "tags": [],
+        "label": "noise"
+      }
+    ],
+    "contradictions": [
+      {
+        "kind": "project_decision",
+        "content": "Use MySQL for all persistence in this service.",
+        "message_ref": "perf-contra-1",
+        "timestamp": "2026-03-26T09:10:00Z",
+        "tags": ["key:database-choice", "conflict:database-choice"],
+        "label": "contradiction"
+      }
+    ]
+  },
+  "queries": {
+    "should_match": [
+      {
+        "query": "What database should we use for this project?",
+        "expected_title": "Decision: database-choice"
+      },
+      {
+        "query": "What Node.js version is required and why?",
+        "expected_title": "Environment: node-version"
+      },
+      {
+        "query": "How do we deploy this service to production?",
+        "expected_title": "Workflow: deploy"
+      },
+      {
+        "query": "What are the logging requirements for this project?",
+        "expected_title": "Preference: logging-preference"
+      }
+    ],
+    "should_gate": [
+      {
+        "query": "ok",
+        "reason": "too short"
+      },
+      {
+        "query": "use which should setup",
+        "reason": "only noise tokens"
+      }
+    ]
+  }
+}

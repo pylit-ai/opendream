@@ -75,7 +75,7 @@ def _record_from_candidate(
     conflicts_with: list[str] | None = None,
 ) -> dict[str, Any]:
     candidate_created_at = candidate["created_at"]
-    return {
+    record: dict[str, Any] = {
         "memory_id": stable_id("mem", candidate["candidate_id"], now),
         "type": candidate["type"],
         "scope": candidate["scope"],
@@ -95,6 +95,10 @@ def _record_from_candidate(
         "created_at": candidate_created_at,
         "updated_at": candidate_created_at,
     }
+    workflow_steps = candidate.get("workflow_steps", [])
+    if workflow_steps:
+        record["workflow_steps"] = workflow_steps
+    return record
 
 
 def _make_operation(

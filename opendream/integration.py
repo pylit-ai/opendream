@@ -6,7 +6,7 @@ from typing import Any
 
 from .automation import tick as automation_tick
 from .consolidator import consolidate
-from .extractor import extract_candidates
+from .extractor import extract_candidates, filter_by_salience
 from .models import ContextAssembly, MemoryEvent
 from .retriever import retrieve
 from .storage import STORE_KIND_PRECEDENCE, MemoryStore, store_sort_key
@@ -141,7 +141,13 @@ def maintain(
 
     extract_run_id = stable_id("extract", timestamp, len(new_events), store.store_id)
     if new_events:
-        candidates = extract_candidates(new_events, origin_mode="scheduled", now=timestamp)
+        existing_records = store.load_durable_records()
+        candidates = extract_candidates(
+            new_events, origin_mode="scheduled", now=timestamp, existing_records=existing_records,
+        )
+        min_salience = store.config.get("write_policy", {}).get("min_salience", {})
+        if min_salience:
+            candidates = filter_by_salience(candidates, min_salience)
         if candidates:
             store.append_candidates(candidates, extract_run_id)
         store.mark_events_processed(event["event_id"] for event in new_events)

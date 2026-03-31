@@ -43,7 +43,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "dream": {"max_recent_episodes": 120, "min_episode_signals": 1},
     "planner": {"mode": "builtin", "command": None, "timeout_seconds": 20},
     "verifier": {"mode": "builtin", "command": None, "timeout_seconds": 20},
-    "retrieval": {"embedding_enabled": True, "semantic_merge_threshold": 0.72},
+    "retrieval": {
+        "embedding_enabled": True,
+        "semantic_merge_threshold": 0.72,
+        "gating_min_content_tokens": 3,
+        "rerank_ambiguity_threshold": 0.8,
+    },
+    "write_policy": {
+        "min_salience": {
+            "semantic_fact": 0.65,
+            "pending_item": 0.3,
+            "user_preference": 0.2,
+            "project_decision": 0.2,
+            "procedural_workflow": 0.2,
+            "anti_pattern": 0.3,
+            "contested_fact": 0.1,
+        },
+    },
     "retention": {
         "candidate_ttl_days": 14,
         "pending_item_decay_days": 7,
@@ -202,6 +218,7 @@ class MemoryStore:
         self.audit_worker_dir = self.memory_root / "audit" / "worker"
         self.audit_service_dir = self.memory_root / "audit" / "service"
         self.audit_autowire_dir = self.memory_root / "audit" / "autowire"
+        self.audit_memory_hurt_dir = self.memory_root / "audit" / "memory_hurt"
         self.audit_mutation_dir = self.memory_root / "audit" / "mutations"
         self.annotations_dir = self.memory_root / "audit" / "annotations"
         self.reviews_dir = self.memory_root / "audit" / "reviews"
@@ -878,6 +895,11 @@ class MemoryStore:
 
     def write_retrieval_audit(self, run_id: str, payload: dict[str, Any]) -> Path:
         path = self.audit_retrieval_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_memory_hurt_audit(self, run_id: str, payload: dict[str, Any]) -> Path:
+        path = self.audit_memory_hurt_dir / f"{run_id}.json"
         write_json(path, payload)
         return path
 

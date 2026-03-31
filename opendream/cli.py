@@ -34,7 +34,7 @@ from .automation import (
 from .bootstrap import bootstrap_index
 from .consolidator import consolidate
 from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
-from .evaluation import run_dream_fidelity_eval, run_memory_quality_eval
+from .evaluation import run_dream_fidelity_eval, run_memory_quality_eval, run_performance_eval
 from .extractor import extract_candidates
 from .integration import (
     emit_event,
@@ -713,6 +713,18 @@ def command_eval_dream_fidelity(args: argparse.Namespace) -> dict[str, Any]:
     return run_dream_fidelity_eval(store, fixture_path=fixture_path, now=args.now)
 
 
+def command_eval_performance(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    fixture_path = Path(args.fixture) if args.fixture else None
+    return run_performance_eval(store, fixture_path=fixture_path, now=args.now)
+
+
 def command_index_observability(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(
         args.workspace,
@@ -1146,6 +1158,15 @@ def build_parser() -> argparse.ArgumentParser:
     eval_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(eval_dream_parser)
     eval_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
+    eval_performance_parser = eval_subparsers.add_parser(
+        "performance",
+        help="Run composite performance evaluation with scorecard",
+    )
+    eval_performance_parser.add_argument("--workspace", required=True)
+    eval_performance_parser.add_argument("--fixture")
+    eval_performance_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_performance_parser)
+    eval_performance_parser.set_defaults(func=command_eval_performance, result_failure_statuses=("failed",))
 
     observe_parser = subparsers.add_parser("observe", help="Advanced: observability index and local web UI")
     observe_subparsers = observe_parser.add_subparsers(dest="observe_command", required=True)

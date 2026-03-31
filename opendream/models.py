@@ -46,9 +46,13 @@ class MemoryCandidate:
     retrieval_boost: float = 0.0
     memory_refs: list[str] = field(default_factory=list)
     conflicts_with: list[str] = field(default_factory=list)
+    workflow_steps: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if not self.workflow_steps:
+            payload.pop("workflow_steps")
+        return payload
 
 
 @dataclass(slots=True)
@@ -71,9 +75,13 @@ class MemoryRecord:
     last_accessed_at: str | None
     created_at: str
     updated_at: str
+    workflow_steps: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if not self.workflow_steps:
+            payload.pop("workflow_steps")
+        return payload
 
 
 @dataclass(slots=True)

@@ -1,0 +1,18 @@
+{
+  "job_id": "fix-radar",
+  "title": "Fix radar",
+  "description": "Project mined fixes/hardening items into automation records.",
+  "skill_ref": "builtin://projection-engine",
+  "trigger": {"type": "interval", "interval_seconds": 3600},
+  "input_selectors": {
+    "memory_types_any": ["mined_fix"],
+    "text_terms_any": [],
+    "statuses_any": ["active"],
+    "limit": 25
+  },
+  "output": {"record_type": "fix", "max_records": 15},
+  "merge_policy": {"dedupe_by": "title+summary"},
+  "decay_policy": {"stale_after_runs": 4},
+  "review_policy": {"require_manual_review": true, "auto_surface_limit": 5},
+  "security_policy": {"allow_sensitive": false}
+}
