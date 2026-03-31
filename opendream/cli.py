@@ -464,6 +464,16 @@ def command_tick(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def command_contract_export(args: argparse.Namespace) -> dict[str, Any]:
+    from .contract_export import build_contract_export
+    from .validation import validate_document
+
+    workspace = Path(args.workspace)
+    payload = build_contract_export(workspace)
+    validate_document("contract-export.schema.json", payload)
+    return payload
+
+
 def command_automation_register(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
     if not store.is_initialized():
@@ -974,6 +984,19 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(tick_parser)
     add_store_group_arguments(tick_parser)
     tick_parser.set_defaults(func=command_tick)
+
+    contract_parser = subparsers.add_parser(
+        "contract",
+        help="Agent-facing machine-readable contracts (schemas, command inventory)",
+    )
+    contract_subparsers = contract_parser.add_subparsers(dest="contract_command", required=True)
+    contract_export_parser = contract_subparsers.add_parser(
+        "export",
+        help="Emit versioned JSON describing CLI commands, schemas, and output versions",
+    )
+    contract_export_parser.add_argument("--workspace", required=True)
+    contract_export_parser.add_argument("--format", choices=["json"], default="json")
+    contract_export_parser.set_defaults(func=command_contract_export)
 
     automation_parser = subparsers.add_parser(
         "automation",

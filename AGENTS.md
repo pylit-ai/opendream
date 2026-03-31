@@ -27,13 +27,20 @@ Use it to find the correct source of truth.
 2. active `specs/<id>/plan.md`
 3. active `specs/<id>/tasks.md`
 4. `CONSTITUTION.md`
-5. relevant path-scoped rules and skills
+5. path-scoped `AGENTS.md` for the subtree you are editing (`opendream/`, `openspec/`, `.meta/spec-adapters/`, `tests/`)
+6. relevant path-scoped rules and skills
 
 ### If touching legacy code and `CURRENT_STATE.md` exists
 1. `CURRENT_STATE.md`
 2. `MIGRATION_GUARDRAILS.md`
 3. active spec bundle
 4. `CONSTITUTION.md`
+
+## Path-scoped guidance
+- `opendream/AGENTS.md` — runtime / CLI / schema conventions
+- `openspec/AGENTS.md` — OpenSpec change workflow under `openspec/`
+- `.meta/spec-adapters/AGENTS.md` — thin adapter payloads vs canonical policy
+- `tests/AGENTS.md` — verification and fixture conventions
 
 ## Core docs
 - `NORTHSTAR.md` — enduring product vision and non-goals
@@ -42,6 +49,7 @@ Use it to find the correct source of truth.
 - `docs/governance/DOCS_SYSTEM.md` — documentation taxonomy and precedence
 - `openspec/AGENTS.md` — OpenSpec proposal workflow and promotion rules
 - `docs/architecture/overview.md` — enduring technical structure
+- `docs/automation/dream-task-playbook.md` — reproducible pattern for dream automations (capture, projection jobs, optional semantic refresh)
 - `docs/mcp/servers.md` — MCP servers, tool contracts, and trust boundaries
 - `specs/registry.yaml` — active / superseded / archived change registry
 
@@ -53,6 +61,7 @@ Use it to find the correct source of truth.
 
 ## Skills (on-demand)
 - **repo-os-greenfield-bootstrap** — After `copier copy`, run this to fill NORTHSTAR/PRD/specs placeholders and align Commands. Claude: use `.claude/commands/bootstrap-repo` or repo-bootstrapper subagent.
+- **opendream-dream-automation** — Wire OpenDream capture, automation projection jobs, and optional semantic refresh (feature/bug/fix radar and similar). Cursor: `.cursor/skills/opendream-dream-automation/SKILL.md`. Canonical prose: `docs/automation/dream-task-playbook.md`.
 
 ## Commands
 - setup: `make setup`

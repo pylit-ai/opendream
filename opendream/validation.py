@@ -29,6 +29,7 @@ REQUIRED_SCHEMA_FILES = (
     "automation-job.schema.json",
     "automation-record.schema.json",
     "automation-run-report.schema.json",
+    "contract-export.schema.json",
 )
 
 

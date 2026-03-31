@@ -14,6 +14,8 @@ Short reference for tools that drive the CLI (hooks, IDE agents, scripts).
 
 ## Typical hook sequence
 
+For **multi-layer automation** (durable capture, deterministic automation projections, optional scheduled reconciliation), see [Dream task playbook](automation/dream-task-playbook.md). Cursor agents can follow the on-demand skill at [`.cursor/skills/opendream-dream-automation/SKILL.md`](../.cursor/skills/opendream-dream-automation/SKILL.md).
+
 1. **Pre-task:** `opendream prepare-context --workspace "$WORKSPACE" --query "<task>"` → JSON with `prompt_context`, `selected_memory_ids`, `empty_reason`, and `hints`. When [automations](../README.md) have produced projections, the same payload also includes `selected_automation_record_ids` / `selected_automation_records`, and `prompt_context` adds an **Active Automation Projections** section (separate from durable memory).
 2. **Post-task:** `opendream emit-event --workspace "$WORKSPACE" --kind task_outcome --content "<summary>" --message-ref "<ref>"` (plus required flags; see `emit-event -h`).
 3. **Maintenance:** `opendream maintain --workspace "$WORKSPACE"` (often chained after emit in hooks).
@@ -38,6 +40,16 @@ Section headers in `prompt_context` may appear with **no body** when there is no
 Selected command payloads include **`cli_output_version`** (integer). Bump tolerance in your integration when this number changes.
 
 `--now` exists to make tests, fixtures, and scripted repros deterministic. Production hooks, cron jobs, and normal CLI usage should usually omit it and rely on wall-clock time.
+
+## Machine-readable contract export
+
+Operators and integrators can dump a **versioned contract document** (command names, schema inventory, output version map, placeholders for future engine/package targets):
+
+```bash
+opendream contract export --workspace "$WORKSPACE" --format json
+```
+
+The payload validates against `opendream/schema/contract-export.schema.json`. When the export shape changes, the **`cli_output_version`** field inside the document increments; update consumers and golden fixtures together.
 
 ## What not to hand-edit
 

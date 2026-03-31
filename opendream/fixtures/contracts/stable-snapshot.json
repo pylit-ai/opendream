@@ -1,0 +1,184 @@
+{
+  "cli_output_version": "1",
+  "command_inventory": [
+    {
+      "name": "activate"
+    },
+    {
+      "name": "activation-plan"
+    },
+    {
+      "name": "append-event"
+    },
+    {
+      "name": "automation"
+    },
+    {
+      "name": "bootstrap-index"
+    },
+    {
+      "name": "consolidate"
+    },
+    {
+      "name": "contract"
+    },
+    {
+      "name": "deactivate"
+    },
+    {
+      "name": "demo"
+    },
+    {
+      "name": "doctor"
+    },
+    {
+      "name": "dream"
+    },
+    {
+      "name": "emit-event"
+    },
+    {
+      "name": "eval"
+    },
+    {
+      "name": "extract"
+    },
+    {
+      "name": "init"
+    },
+    {
+      "name": "install-service"
+    },
+    {
+      "name": "maintain"
+    },
+    {
+      "name": "observe"
+    },
+    {
+      "name": "prepare-context"
+    },
+    {
+      "name": "retrieve"
+    },
+    {
+      "name": "service"
+    },
+    {
+      "name": "status"
+    },
+    {
+      "name": "tick"
+    },
+    {
+      "name": "uninstall-service"
+    },
+    {
+      "name": "update-service"
+    }
+  ],
+  "contract_schema_version": "contract-export.schema.json",
+  "example_payloads": [
+    {
+      "id": "memory-event-minimal",
+      "payload_sha256": "d61adbf97ce128b48c7cd25ce10d29c17f5d780b4aed57f8581efb4768bd4ff8",
+      "schema_name": "memory-event.schema.json",
+      "summary": "Minimal memory event shape used for hashing smoke"
+    },
+    {
+      "id": "empty-object",
+      "payload_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "summary": "Degenerate object for parser sanity"
+    }
+  ],
+  "output_version_map": {
+    "cli_json": "2",
+    "contract_export": "1"
+  },
+  "schema_inventory": [
+    {
+      "name": "activation-plan.schema.json"
+    },
+    {
+      "name": "activation-report.schema.json"
+    },
+    {
+      "name": "activation-state.schema.json"
+    },
+    {
+      "name": "adapter-manifest.schema.json"
+    },
+    {
+      "name": "agent-target.schema.json"
+    },
+    {
+      "name": "automation-job.schema.json"
+    },
+    {
+      "name": "automation-record.schema.json"
+    },
+    {
+      "name": "automation-run-report.schema.json"
+    },
+    {
+      "name": "autowire-report.schema.json"
+    },
+    {
+      "name": "compressed-status.schema.json"
+    },
+    {
+      "name": "consolidation-op.schema.json"
+    },
+    {
+      "name": "contract-export.schema.json"
+    },
+    {
+      "name": "dream-job.schema.json"
+    },
+    {
+      "name": "dream-plan.schema.json"
+    },
+    {
+      "name": "managed-surface.schema.json"
+    },
+    {
+      "name": "memory-candidate.schema.json"
+    },
+    {
+      "name": "memory-event.schema.json"
+    },
+    {
+      "name": "memory-index.schema.json"
+    },
+    {
+      "name": "memory-topic.schema.json"
+    },
+    {
+      "name": "repair-report.schema.json"
+    },
+    {
+      "name": "service-install-report.schema.json"
+    },
+    {
+      "name": "supervisor-manifest.schema.json"
+    },
+    {
+      "name": "target-registry.schema.json"
+    },
+    {
+      "name": "verifier-report.schema.json"
+    },
+    {
+      "name": "worker-health.schema.json"
+    }
+  ],
+  "supported_engine_ids": [
+    "builtin://projection-engine"
+  ],
+  "supported_package_targets": [
+    "codex",
+    "claude-code",
+    "cursor",
+    "github-copilot"
+  ]
+}

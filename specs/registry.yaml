@@ -565,3 +565,31 @@ specs:
       - automation runs write typed projection records without mutating durable memory
       - top-level status and tick expose automation work alongside existing runtime state
       - make verify remains green with automation coverage
+  - id: 436-agent-ready-platform-complete
+    title: agent-ready platform — contracts, guidance, distribution, engines, isolation
+    status: active
+    owner: platform
+    created: 2026-03-30
+    touched_surfaces:
+      - cli
+      - docs
+      - adapters
+      - automation-runtime
+      - verification
+      - tests
+      - specs-lifecycle
+    depends_on:
+      - 435-opendream-automations
+      - 434-zero-touch-activation-and-command-surface-compression
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - openspec/changes/agent-ready-platform-complete/
+      - docs/architecture/overview.md
+      - docs/mcp/servers.md
+      - opendream/schema/contract-export.schema.json
+    verification:
+      - opendream contract export validates against contract-export.schema.json
+      - path-scoped AGENTS.md files exist and root AGENTS.md references them
+      - make verify remains green for landed slices
+      - MCP inventory documents trust boundaries and operator-local optional servers

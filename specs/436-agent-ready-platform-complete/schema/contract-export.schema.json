@@ -1,0 +1,68 @@
+{
+  "type": "object",
+  "required": [
+    "cli_output_version",
+    "command_inventory",
+    "contract_schema_version",
+    "example_payloads",
+    "opendream_version",
+    "output_version_map",
+    "schema_inventory",
+    "supported_engine_ids",
+    "supported_package_targets"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "cli_output_version": { "type": "string" },
+    "contract_schema_version": { "type": "string" },
+    "opendream_version": { "type": "string" },
+    "command_inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "schema_inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "output_version_map": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "supported_engine_ids": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "supported_package_targets": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "example_payloads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "payload_sha256", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "summary": { "type": "string" },
+          "payload_sha256": { "type": "string" },
+          "schema_name": { "type": "string" }
+        }
+      }
+    }
+  }
+}

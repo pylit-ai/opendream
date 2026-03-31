@@ -4,7 +4,7 @@
 Enduring technical structure of the system. Task-level implementation detail belongs in specs and plans.
 
 ## High-level components
-- `opendream.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, dreaming, service lifecycle, retrieval, evaluation, and release-oriented verification hooks
+- `opendream.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, dreaming, service lifecycle, retrieval, evaluation, contract export for agent integrations, and release-oriented verification hooks
 - `opendream.storage` — filesystem-backed memory store, lock handling, custom memory-root routing, markdown generation, and audit artifact emission
 - `opendream.extractor` — deterministic conversion from immutable events into typed memory candidates
 - `opendream.bootstrap` — first-pass historical indexing that stages candidates and category inventory without durable apply
@@ -34,6 +34,15 @@ Enduring technical structure of the system. Task-level implementation detail bel
 ## Dependencies
 - Python 3 standard library only
 - repository OpenSpec schemas and config as the normative design reference
+
+## Agent-ready platform (in progress)
+
+Workstream `436-agent-ready-platform-complete` (OpenSpec change `openspec/changes/agent-ready-platform-complete/`) extends the architecture with:
+
+- **Path-scoped guidance** — subtree `AGENTS.md` files plus root routing (`opendream/`, `openspec/`, `.meta/spec-adapters/`, `tests/`).
+- **Contract export** — `opendream contract export` emits schema-validated JSON (`opendream/schema/contract-export.schema.json`) describing CLI commands, schema inventory, and version maps.
+- **Distribution & engines (planned)** — thin vendor packages and an automation engine registry per ADR-003 and ADR-004.
+- **Guidance drift & isolated execution (planned)** — proposal-only drift loop (ADR-006) and worktree-isolated code mutation (ADR-005).
 
 ## Out of scope for this doc
 - Per-change rollout, file lists, and verification steps → `specs/<id>/plan.md`

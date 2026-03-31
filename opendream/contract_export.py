@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+from . import __version__
+from .util import CLI_JSON_VERSION, SCHEMA_ROOT
+
+
+def _payload_sha256(payload: Any) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def top_level_command_names() -> tuple[str, ...]:
+    """Return top-level CLI command names; keep aligned with build_parser()."""
+    from .cli import build_parser
+
+    parser = build_parser()
+    for action in parser._actions:
+        choices = getattr(action, "choices", None)
+        if choices is not None:
+            return tuple(sorted(choices.keys()))
+    return ()
+
+
+CONTRACT_EXPORT_DOCUMENT_VERSION = "1"
+CONTRACT_SCHEMA_FILE = "contract-export.schema.json"
+
+
+def build_contract_export(_workspace: Path) -> dict[str, Any]:
+    """Assemble the machine-readable OpenDream CLI/schema contract (static v1)."""
+    commands = [{"name": n} for n in top_level_command_names()]
+    schemas = [{"name": n} for n in sorted(p.name for p in SCHEMA_ROOT.glob("*.schema.json"))]
+    output_version_map = {
+        "cli_json": str(CLI_JSON_VERSION),
+        "contract_export": CONTRACT_EXPORT_DOCUMENT_VERSION,
+    }
+    minimal_event: dict[str, Any] = {
+        "kind": "task_outcome",
+        "content": "example",
+        "message_ref": "contract-export-example",
+        "channel": "cli",
+        "scope": "project",
+    }
+    examples: list[dict[str, Any]] = [
+        {
+            "id": "memory-event-minimal",
+            "summary": "Minimal memory event shape used for hashing smoke",
+            "payload_sha256": _payload_sha256(minimal_event),
+            "schema_name": "memory-event.schema.json",
+        },
+        {
+            "id": "empty-object",
+            "summary": "Degenerate object for parser sanity",
+            "payload_sha256": _payload_sha256({}),
+        },
+    ]
+    return {
+        "opendream_version": __version__,
+        "cli_output_version": CONTRACT_EXPORT_DOCUMENT_VERSION,
+        "contract_schema_version": CONTRACT_SCHEMA_FILE,
+        "command_inventory": commands,
+        "schema_inventory": schemas,
+        "output_version_map": output_version_map,
+        "supported_engine_ids": [
+            "builtin://projection-engine",
+        ],
+        "supported_package_targets": [
+            "codex",
+            "claude-code",
+            "cursor",
+            "github-copilot",
+        ],
+        "example_payloads": examples,
+    }
