@@ -1,5 +1,5 @@
 {
-  "cli_output_version": "1",
+  "cli_output_version": 2,
   "command_inventory": [
     {
       "name": "activate"
@@ -62,6 +62,9 @@
       "name": "retrieve"
     },
     {
+      "name": "semantic"
+    },
+    {
       "name": "service"
     },
     {
@@ -93,7 +96,7 @@
   ],
   "output_version_map": {
     "cli_json": "2",
-    "contract_export": "1"
+    "contract_export": "2"
   },
   "schema_inventory": [
     {
@@ -124,6 +127,9 @@
       "name": "autowire-report.schema.json"
     },
     {
+      "name": "benchmark-run-report.schema.json"
+    },
+    {
       "name": "compressed-status.schema.json"
     },
     {
@@ -137,6 +143,12 @@
     },
     {
       "name": "dream-plan.schema.json"
+    },
+    {
+      "name": "harness-optimization-report.schema.json"
+    },
+    {
+      "name": "learned-context-record.schema.json"
     },
     {
       "name": "managed-surface.schema.json"
@@ -154,7 +166,19 @@
       "name": "memory-topic.schema.json"
     },
     {
+      "name": "provider-entry.schema.json"
+    },
+    {
+      "name": "query-family.schema.json"
+    },
+    {
       "name": "repair-report.schema.json"
+    },
+    {
+      "name": "semantic-dream-config.schema.json"
+    },
+    {
+      "name": "semantic-dream-report.schema.json"
     },
     {
       "name": "service-install-report.schema.json"
@@ -173,7 +197,9 @@
     }
   ],
   "supported_engine_ids": [
-    "builtin://projection-engine"
+    "builtin://projection-engine",
+    "builtin://semantic-dreamer",
+    "builtin://harness-optimizer"
   ],
   "supported_package_targets": [
     "codex",

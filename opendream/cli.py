@@ -36,7 +36,12 @@ from .automation import (
 from .bootstrap import bootstrap_index
 from .consolidator import consolidate
 from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
-from .evaluation import run_dream_fidelity_eval, run_memory_quality_eval, run_performance_eval
+from .evaluation import (
+    run_dream_fidelity_eval,
+    run_memory_quality_eval,
+    run_performance_eval,
+    run_semantic_benchmark_eval,
+)
 from .extractor import extract_candidates
 from .integration import (
     emit_event,
@@ -626,13 +631,25 @@ def command_dream_run(args: argparse.Namespace) -> dict[str, Any]:
     if not store.is_initialized():
         store.initialize(store_kind="project", compat_mode=args.compat_mode)
     episode_paths = resolve_episode_paths(store, getattr(args, "episodes", None))
-    result = dream_run(
-        store,
-        episode_paths=episode_paths,
-        now=args.now,
-        max_recent_episodes=args.max_recent_episodes,
-        min_episode_signals=args.min_episode_signals,
-    )
+    mode = getattr(args, "mode", None)
+    if mode and mode in ("semantic", "hybrid"):
+        from .semantic_dreamer import semantic_dream_run
+        result = semantic_dream_run(
+            store,
+            episode_paths=episode_paths,
+            mode=mode,
+            now=args.now,
+            max_recent_episodes=args.max_recent_episodes,
+            min_episode_signals=args.min_episode_signals,
+        )
+    else:
+        result = dream_run(
+            store,
+            episode_paths=episode_paths,
+            now=args.now,
+            max_recent_episodes=args.max_recent_episodes,
+            min_episode_signals=args.min_episode_signals,
+        )
     result["workspace"] = str(store.workspace)
     result["memory_root"] = str(store.memory_root)
     return result
@@ -893,6 +910,61 @@ def command_service_autowire(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+def command_eval_semantic_benchmark(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return run_semantic_benchmark_eval(store, mode=args.mode, now=args.now)
+
+
+def command_eval_memory_agent_bench(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    from .benchmark_adapters import run_memory_agent_bench
+    return run_memory_agent_bench(store, mode=args.mode, now=args.now)
+
+
+def command_eval_coding_task(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    from .benchmark_adapters import run_coding_task_eval
+    return run_coding_task_eval(store, mode=args.mode, now=args.now)
+
+
+def command_eval_harness_optimize(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    from .harness_optimizer import run_optimization
+    return run_optimization(store, max_iterations=args.max_iterations, now=args.now)
+
+
+def command_semantic_config(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .provider_registry import load_semantic_config
+    return load_semantic_config(store)
+
+
+def command_semantic_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .semantic_dreamer import dream_status_semantic
+    return dream_status_semantic(store)
+
+
+def command_semantic_provider_health(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .provider_registry import check_all_provider_health
+    return check_all_provider_health(store)
+
+
+def command_semantic_bootstrap(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .harness_optimizer import capture_environment_bootstrap
+    return capture_environment_bootstrap(Path(args.workspace), store=store)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = OpenDreamArgumentParser(
         prog="opendream",
@@ -1137,6 +1209,12 @@ def build_parser() -> argparse.ArgumentParser:
     dream_run_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     dream_run_parser.add_argument("--max-recent-episodes", type=int)
     dream_run_parser.add_argument("--min-episode-signals", type=int)
+    dream_run_parser.add_argument(
+        "--mode",
+        choices=["deterministic", "semantic", "hybrid"],
+        default=None,
+        help="Dream mode: deterministic (default), semantic, or hybrid",
+    )
     add_layout_arguments(dream_run_parser)
     dream_run_parser.set_defaults(func=command_dream_run)
     dream_status_parser = dream_subparsers.add_parser("status", help="Inspect dream, queue, and worker state")
@@ -1251,16 +1329,96 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(eval_performance_parser)
     eval_performance_parser.set_defaults(func=command_eval_performance, result_failure_statuses=("failed",))
 
+    eval_semantic_parser = eval_subparsers.add_parser(
+        "semantic-benchmark",
+        help="Run semantic benchmark suite (internal + MAB + coding-task)",
+    )
+    eval_semantic_parser.add_argument("--workspace", required=True)
+    eval_semantic_parser.add_argument(
+        "--mode", choices=["deterministic", "semantic", "hybrid"], default="hybrid",
+    )
+    eval_semantic_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_semantic_parser)
+    eval_semantic_parser.set_defaults(func=command_eval_semantic_benchmark, result_failure_statuses=("failed",))
+
+    eval_mab_parser = eval_subparsers.add_parser(
+        "memory-agent-bench",
+        help="Run MemoryAgentBench-style competency benchmarks",
+    )
+    eval_mab_parser.add_argument("--workspace", required=True)
+    eval_mab_parser.add_argument("--config")
+    eval_mab_parser.add_argument(
+        "--mode", choices=["deterministic", "semantic", "hybrid"], default="hybrid",
+    )
+    eval_mab_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_mab_parser)
+    eval_mab_parser.set_defaults(func=command_eval_memory_agent_bench, result_failure_statuses=("failed",))
+
+    eval_coding_parser = eval_subparsers.add_parser(
+        "coding-task",
+        help="Run coding-task evaluation with memory-hurt accounting",
+    )
+    eval_coding_parser.add_argument("--workspace", required=True)
+    eval_coding_parser.add_argument(
+        "--mode", choices=["deterministic", "semantic", "hybrid"], default="hybrid",
+    )
+    eval_coding_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_coding_parser)
+    eval_coding_parser.set_defaults(func=command_eval_coding_task, result_failure_statuses=("failed",))
+
+    eval_harness_parser = eval_subparsers.add_parser(
+        "harness-optimize",
+        help="Run harness optimization search",
+    )
+    eval_harness_parser.add_argument("--workspace", required=True)
+    eval_harness_parser.add_argument("--max-iterations", type=int, default=10)
+    eval_harness_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_harness_parser)
+    eval_harness_parser.set_defaults(func=command_eval_harness_optimize)
+
+    # Semantic config inspection
+    semantic_parser = subparsers.add_parser(
+        "semantic",
+        help="Advanced: semantic sleep-time mode config and provider management",
+    )
+    semantic_subparsers = semantic_parser.add_subparsers(dest="semantic_command", required=True)
+
+    semantic_config_parser = semantic_subparsers.add_parser("config", help="Show semantic mode config")
+    semantic_config_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_config_parser)
+    semantic_config_parser.set_defaults(func=command_semantic_config)
+
+    semantic_status_parser = semantic_subparsers.add_parser("status", help="Show semantic mode status")
+    semantic_status_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_status_parser)
+    semantic_status_parser.set_defaults(func=command_semantic_status)
+
+    semantic_provider_parser = semantic_subparsers.add_parser("provider-health", help="Check provider health")
+    semantic_provider_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_provider_parser)
+    semantic_provider_parser.set_defaults(func=command_semantic_provider_health)
+
+    semantic_bootstrap_parser = semantic_subparsers.add_parser("bootstrap", help="Capture environment bootstrap")
+    semantic_bootstrap_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_bootstrap_parser)
+    semantic_bootstrap_parser.set_defaults(func=command_semantic_bootstrap)
+
     observe_parser = subparsers.add_parser("observe", help="Advanced: observability index and local web UI")
     observe_subparsers = observe_parser.add_subparsers(dest="observe_command", required=True)
 
-    observe_index_parser = observe_subparsers.add_parser("index")
+    observe_index_parser = observe_subparsers.add_parser(
+        "index",
+        help="Build or refresh the observability index JSON for the workspace store",
+    )
     observe_index_parser.add_argument("--workspace", required=True)
     observe_index_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(observe_index_parser)
     observe_index_parser.set_defaults(func=command_index_observability)
 
-    observe_serve_parser = observe_subparsers.add_parser("serve")
+    observe_serve_parser = observe_subparsers.add_parser(
+        "serve",
+        help="Run the local read-only observability web UI (blocks until interrupted)",
+    )
     observe_serve_parser.add_argument("--workspace", required=True)
     observe_serve_parser.add_argument("--host", default="127.0.0.1")
     observe_serve_parser.add_argument("--port", type=int, default=8000)

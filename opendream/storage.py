@@ -228,8 +228,17 @@ class MemoryStore:
         self.automation_state_dir = self.automation_root / "state"
         self.automation_records_dir = self.automation_root / "records"
         self.automation_audit_dir = self.automation_root / "audit"
+        self.audit_semantic_dream_dir = self.memory_root / "audit" / "semantic_dream"
+        self.audit_semantic_verifier_dir = self.memory_root / "audit" / "semantic_verifier"
+        self.audit_benchmark_dir = self.memory_root / "audit" / "benchmark"
+        self.audit_harness_dir = self.memory_root / "audit" / "harness"
+        self.learned_context_topics_dir = self.topics_dir / "learned-context"
         self.locks_dir = self.memory_root / "locks"
         self.state_dir = self.memory_root / "state"
+        self.learned_context_path = self.state_dir / "learned_context_records.json"
+        self.semantic_config_path = self.state_dir / "semantic_config.json"
+        self.provider_registry_path = self.state_dir / "provider_registry.json"
+        self.query_families_path = self.state_dir / "query_families.json"
         self.durable_records_path = self.state_dir / "durable_records.json"
         self.index_json_path = self.state_dir / "index.json"
         self.observability_index_path = self.state_dir / "observability_index.json"
@@ -381,6 +390,11 @@ class MemoryStore:
             self.automation_state_dir,
             self.automation_records_dir,
             self.automation_audit_dir,
+            self.audit_semantic_dream_dir,
+            self.audit_semantic_verifier_dir,
+            self.audit_benchmark_dir,
+            self.audit_harness_dir,
+            self.learned_context_topics_dir,
             self.locks_dir,
             self.state_dir,
         ]:
@@ -399,6 +413,12 @@ class MemoryStore:
             write_json(self.service_manifest_path, {})
         if not self.service_runtime_path.exists():
             write_json(self.service_runtime_path, {})
+        if not self.learned_context_path.exists():
+            write_json(self.learned_context_path, [])
+        if not self.query_families_path.exists():
+            write_json(self.query_families_path, [])
+        if not self.provider_registry_path.exists():
+            write_json(self.provider_registry_path, [])
         if not self.memory_md_path.exists():
             atomic_write_text(self.memory_md_path, "# Startup Memory Index\n\n")
 
@@ -1129,6 +1149,126 @@ class MemoryStore:
             for record in selected:
                 lines.append(f"- [{record['type']}] {record['title']} :: {record['summary']}")
             atomic_write_text(self.memory_root / filename, "\n".join(lines).rstrip() + "\n")
+
+    # --- Learned context ---
+
+    def load_learned_context_records(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        payload = read_json(self.learned_context_path, [])
+        return payload if isinstance(payload, list) else []
+
+    def save_learned_context_records(self, records: list[dict[str, Any]]) -> None:
+        self.ensure_layout()
+        write_json(self.learned_context_path, records)
+        self._write_learned_context_views(records)
+
+    def _write_learned_context_views(self, records: list[dict[str, Any]]) -> None:
+        active = [r for r in records if r.get("status") == "active"]
+        for record in active:
+            rid = str(record.get("record_id", "unknown"))
+            path = self.learned_context_topics_dir / f"{rid}.md"
+            lines = [
+                f"# {record.get('summary', 'Untitled')}",
+                "",
+                f"- record_id: {rid}",
+                f"- provider: {record.get('provider_id', 'unknown')}",
+                f"- model: {record.get('model_id', 'unknown')}",
+                f"- confidence: {record.get('confidence', 0)}",
+                f"- fresh_until: {record.get('fresh_until', 'unknown')}",
+                f"- verifier_status: {record.get('verifier_status', 'unknown')}",
+                f"- query_families: {', '.join(record.get('query_family_tags', []))}",
+                "",
+                "## Details",
+                record.get("details", ""),
+                "",
+                "## Assumptions",
+                record.get("assumptions", ""),
+            ]
+            atomic_write_text(path, "\n".join(lines) + "\n")
+
+    # --- Provider registry ---
+
+    def load_provider_registry(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        payload = read_json(self.provider_registry_path, [])
+        return payload if isinstance(payload, list) else []
+
+    def save_provider_registry(self, providers: list[dict[str, Any]]) -> None:
+        self.ensure_layout()
+        write_json(self.provider_registry_path, providers)
+
+    # --- Query families ---
+
+    def load_query_families(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        payload = read_json(self.query_families_path, [])
+        return payload if isinstance(payload, list) else []
+
+    def save_query_families(self, families: list[dict[str, Any]]) -> None:
+        self.ensure_layout()
+        write_json(self.query_families_path, families)
+
+    # --- Semantic config ---
+
+    def load_semantic_config(self) -> dict[str, Any]:
+        self.ensure_layout()
+        if self.semantic_config_path.exists():
+            payload = read_json(self.semantic_config_path, {})
+            return payload if isinstance(payload, dict) else {}
+        return {
+            "mode": "deterministic",
+            "providers": [],
+            "budgets": {
+                "max_tokens_per_run": 100000,
+                "max_cost_per_run_usd": 1.0,
+                "daily_sleep_budget_usd": 5.0,
+                "max_query_families": 10,
+                "max_proposals_per_run": 20,
+            },
+            "anticipation": {
+                "enabled": True,
+                "static_family_manifests": [],
+                "dynamic_discovery": True,
+                "family_allow_list": [],
+                "family_deny_list": [],
+            },
+            "verification": {
+                "deterministic_enabled": True,
+                "semantic_enabled": True,
+                "require_both": True,
+            },
+            "fallback_policy": "fallback_to_deterministic",
+        }
+
+    def save_semantic_config(self, config: dict[str, Any]) -> None:
+        self.ensure_layout()
+        write_json(self.semantic_config_path, config)
+
+    # --- Semantic audit ---
+
+    def write_semantic_dream_audit(self, run_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.audit_semantic_dream_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_semantic_verifier_audit(self, run_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.audit_semantic_verifier_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_benchmark_report(self, run_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.audit_benchmark_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_harness_report(self, run_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.audit_harness_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
 
     @staticmethod
     def _load_jsonl(path: Path) -> list[dict[str, Any]]:

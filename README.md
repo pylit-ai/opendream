@@ -26,7 +26,7 @@ opendream activate --workspace "$PWD" --repair
 opendream deactivate --workspace "$PWD"
 ```
 
-**PyPI can lag the README.** If `opendream init -h` does not list `--activate-configured`, or `opendream --help` has no `activate` / `deactivate` commands, upgrade from **Git** (below) or use a **local editable install** from this repository. `uv tool install opendream` only updates when a newer wheel is published.
+**PyPI can lag the README.** If `opendream init -h` does not list `--activate-configured`, or `opendream --help` has no `activate` / `deactivate` commands, upgrade from **Git** (below) or use a **local editable install** from this repository. `uv tool install opendream` only updates when a newer wheel is published. After upgrading, `opendream semantic --help` and `opendream eval --help` are quick checks that your install matches the docs for semantic sleep-time and evaluation commands.
 
 Bleeding-edge from Git (overwrites the tool env): `uv tool install --force "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
 
@@ -215,12 +215,22 @@ opendream activate --workspace "$PWD" --repair
 opendream deactivate --workspace "$PWD"
 ```
 
+Semantic mode (optional, requires provider configuration):
+
+```bash
+opendream semantic config --workspace "$PWD"
+opendream semantic status --workspace "$PWD"
+opendream semantic provider-health --workspace "$PWD"
+opendream dream run --workspace "$PWD" --mode hybrid --episodes tests/fixtures/transcript_only_dream.jsonl
+```
+
 Eval:
 
 ```bash
 opendream eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodream
 opendream eval memory-quality --workspace .tmp/eval
 opendream eval performance --workspace .tmp/eval
+opendream eval semantic-benchmark --workspace .tmp/eval --mode hybrid
 ```
 
 Eval commands print JSON to stdout; if the report includes `"status": "failed"`, the process exits **non-zero** (typically `1`) so scripts and CI can fail the step without parsing the payload.

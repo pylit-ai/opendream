@@ -30,6 +30,13 @@ REQUIRED_SCHEMA_FILES = (
     "automation-record.schema.json",
     "automation-run-report.schema.json",
     "contract-export.schema.json",
+    "learned-context-record.schema.json",
+    "semantic-dream-config.schema.json",
+    "semantic-dream-report.schema.json",
+    "benchmark-run-report.schema.json",
+    "harness-optimization-report.schema.json",
+    "query-family.schema.json",
+    "provider-entry.schema.json",
 )
 
 

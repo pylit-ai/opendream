@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LearnedContextRecord",
+  "type": "object",
+  "required": [
+    "record_id",
+    "summary",
+    "query_family_tags",
+    "provider_id",
+    "model_id",
+    "created_at",
+    "verifier_status"
+  ],
+  "properties": {
+    "record_id": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "details": {
+      "type": "string"
+    },
+    "query_family_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "source_event_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "source_episode_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "provider_id": {
+      "type": "string"
+    },
+    "model_id": {
+      "type": "string"
+    },
+    "prompt_version": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "fresh_until": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number"
+    },
+    "verifier_status": {
+      "type": "string",
+      "enum": [
+        "proposed",
+        "verified",
+        "rejected",
+        "needs_review"
+      ]
+    },
+    "conflict_state": {
+      "type": "string",
+      "enum": [
+        "none",
+        "contested",
+        "superseded"
+      ]
+    },
+    "harm_signals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

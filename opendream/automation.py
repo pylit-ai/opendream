@@ -388,3 +388,110 @@ def load_job_spec(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("automation spec must decode to an object")
     return payload
+
+
+# ── Semantic automation jobs (WS8: T41-T45) ──────────────────────────────
+
+SEMANTIC_REFRESH_JOB_TEMPLATE: dict[str, Any] = {
+    "version": 1,
+    "title": "Semantic refresh",
+    "description": "Refresh learned context by re-running semantic dreaming on recent transcripts",
+    "skill_ref": "builtin://semantic-refresh",
+    "enabled": True,
+    "trigger": {"type": "interval", "interval_seconds": 3600},
+    "input_selectors": {"types": ["semantic_fact", "project_decision"], "statuses": ["active"]},
+    "output": {"record_type": "semantic_refresh"},
+    "merge_policy": {"strategy": "dedupe_by_title"},
+    "decay_policy": {"stale_after_runs": 5},
+    "review_policy": {"auto_approve": True, "require_review_above_confidence": 0.9},
+    "security_policy": {"allow_code_mutation": False, "require_isolation": True},
+}
+
+STRATEGIST_JOB_TEMPLATE: dict[str, Any] = {
+    "version": 1,
+    "title": "Strategist",
+    "description": "Generate strategic projections using learned context",
+    "skill_ref": "builtin://strategist",
+    "enabled": True,
+    "trigger": {"type": "interval", "interval_seconds": 7200},
+    "input_selectors": {"types": ["project_decision", "semantic_fact"], "statuses": ["active"]},
+    "output": {"record_type": "strategy"},
+    "merge_policy": {"strategy": "dedupe_by_title"},
+    "decay_policy": {"stale_after_runs": 3},
+    "review_policy": {"auto_approve": False, "require_review_above_confidence": 0.7},
+    "security_policy": {"allow_code_mutation": False, "require_isolation": True},
+}
+
+
+def register_semantic_refresh_job(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+    """Register the semantic refresh automation job."""
+    job_payload = dict(SEMANTIC_REFRESH_JOB_TEMPLATE)
+    job_payload["job_id"] = "semantic-refresh"
+    job_payload["created_at"] = now or to_iso(utc_now())
+    job_payload["updated_at"] = job_payload["created_at"]
+    return register_job(store, job_payload, now=now)
+
+
+def register_strategist_job(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+    """Register the strategist automation job."""
+    job_payload = dict(STRATEGIST_JOB_TEMPLATE)
+    job_payload["job_id"] = "strategist"
+    job_payload["created_at"] = now or to_iso(utc_now())
+    job_payload["updated_at"] = job_payload["created_at"]
+    return register_job(store, job_payload, now=now)
+
+
+def run_semantic_refresh(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+    """Run semantic refresh: re-evaluate learned context freshness and quality.
+
+    This job:
+    1. Checks learned context freshness
+    2. Marks stale records
+    3. Detects conflicts with newer durable facts
+    4. Creates refresh projection records
+    """
+    timestamp = now or to_iso(utc_now())
+    learned_records = store.load_learned_context_records()
+    refreshed = 0
+    stale_marked = 0
+    conflicts_found = 0
+
+    for record in learned_records:
+        if record.get("status") != "active":
+            continue
+
+        # Check freshness
+        fresh_until = record.get("fresh_until", "")
+        if fresh_until:
+            try:
+                from .util import parse_timestamp
+                if parse_timestamp(fresh_until) < parse_timestamp(timestamp):
+                    record["status"] = "archived"
+                    record["harm_signals"] = record.get("harm_signals", []) + ["stale_auto_archived"]
+                    stale_marked += 1
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+        # Check for conflicts with durable facts
+        from .semantic_verifier import detect_conflicts
+        conflicts = detect_conflicts(store, str(record.get("record_id", "")))
+        if conflicts:
+            record["conflict_state"] = "detected"
+            record["harm_signals"] = record.get("harm_signals", []) + [
+                f"conflict_with:{c.get('durable_memory_id', '')}" for c in conflicts
+            ]
+            conflicts_found += len(conflicts)
+
+        refreshed += 1
+
+    store.save_learned_context_records(learned_records)
+
+    return {
+        "status": "completed",
+        "refreshed": refreshed,
+        "stale_marked": stale_marked,
+        "conflicts_found": conflicts_found,
+        "total_learned_records": len(learned_records),
+        "ran_at": timestamp,
+    }

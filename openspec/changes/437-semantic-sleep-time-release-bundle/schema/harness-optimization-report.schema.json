@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "harness-optimization-report.schema.json",
+  "title": "HarnessOptimizationReport",
+  "type": "object",
+  "required": [
+    "run_id",
+    "status",
+    "started_at"
+  ],
+  "properties": {
+    "run_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "partial", "failed"]
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "search_space": { "type": "object" },
+    "proposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "variant_id": { "type": "string" },
+          "description": { "type": "string" },
+          "score": { "type": "number" },
+          "details": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "winning_variant_id": { "type": "string" },
+    "baseline_score": { "type": "number" },
+    "best_score": { "type": "number" },
+    "improvement_delta": { "type": "number" },
+    "iterations": { "type": "integer" },
+    "duration_ms": { "type": "integer" },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SemanticDreamConfig",
+  "type": "object",
+  "required": [
+    "mode",
+    "provider",
+    "budgets"
+  ],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": [
+        "deterministic",
+        "semantic",
+        "hybrid"
+      ]
+    },
+    "provider": {
+      "type": "object",
+      "required": [
+        "provider_id",
+        "model_roles"
+      ],
+      "properties": {
+        "provider_id": {
+          "type": "string"
+        },
+        "model_roles": {
+          "type": "object"
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "properties": {
+        "max_prompt_tokens": {
+          "type": "integer"
+        },
+        "max_completion_tokens": {
+          "type": "integer"
+        },
+        "max_cost_usd": {
+          "type": "number"
+        },
+        "max_query_families": {
+          "type": "integer"
+        },
+        "max_proposals": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

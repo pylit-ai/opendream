@@ -21,4 +21,4 @@ Path-scoped guidance for the `opendream/` Python package (CLI implementation, me
 
 - Command: `opendream contract export --workspace <path> --format json`
 - Schema: `opendream/schema/contract-export.schema.json`
-- Bump `cli_output_version` inside the export payload when the shape changes.
+- Contract export: top-level **`cli_output_version`** tracks **`CLI_JSON_VERSION`** (same integer as other command JSON). Bump **`CONTRACT_EXPORT_DOCUMENT_VERSION`** / **`output_version_map.contract_export`** when the export document shape changes.

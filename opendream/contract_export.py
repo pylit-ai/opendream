@@ -26,12 +26,12 @@ def top_level_command_names() -> tuple[str, ...]:
     return ()
 
 
-CONTRACT_EXPORT_DOCUMENT_VERSION = "1"
+CONTRACT_EXPORT_DOCUMENT_VERSION = "2"
 CONTRACT_SCHEMA_FILE = "contract-export.schema.json"
 
 
 def build_contract_export(_workspace: Path) -> dict[str, Any]:
-    """Assemble the machine-readable OpenDream CLI/schema contract (static v1)."""
+    """Assemble the machine-readable OpenDream CLI/schema contract."""
     commands = [{"name": n} for n in top_level_command_names()]
     schemas = [{"name": n} for n in sorted(p.name for p in SCHEMA_ROOT.glob("*.schema.json"))]
     output_version_map = {
@@ -60,13 +60,15 @@ def build_contract_export(_workspace: Path) -> dict[str, Any]:
     ]
     return {
         "opendream_version": __version__,
-        "cli_output_version": CONTRACT_EXPORT_DOCUMENT_VERSION,
+        "cli_output_version": CLI_JSON_VERSION,
         "contract_schema_version": CONTRACT_SCHEMA_FILE,
         "command_inventory": commands,
         "schema_inventory": schemas,
         "output_version_map": output_version_map,
         "supported_engine_ids": [
             "builtin://projection-engine",
+            "builtin://semantic-dreamer",
+            "builtin://harness-optimizer",
         ],
         "supported_package_targets": [
             "codex",

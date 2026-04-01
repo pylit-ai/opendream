@@ -13,7 +13,10 @@
   ],
   "additionalProperties": false,
   "properties": {
-    "cli_output_version": { "type": "string" },
+    "cli_output_version": {
+      "type": "integer",
+      "description": "Same integer as command JSON payloads (e.g. status); string form duplicated in output_version_map.cli_json."
+    },
     "contract_schema_version": { "type": "string" },
     "opendream_version": { "type": "string" },
     "command_inventory": {

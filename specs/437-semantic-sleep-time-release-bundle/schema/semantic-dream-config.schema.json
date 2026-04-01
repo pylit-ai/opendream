@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "semantic-dream-config.schema.json",
+  "title": "SemanticDreamConfig",
+  "type": "object",
+  "required": [
+    "mode",
+    "providers"
+  ],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["deterministic", "semantic", "hybrid"]
+    },
+    "providers": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "default_provider_id": { "type": "string" },
+    "budgets": {
+      "type": "object",
+      "properties": {
+        "max_tokens_per_run": { "type": "integer" },
+        "max_cost_per_run_usd": { "type": "number" },
+        "daily_sleep_budget_usd": { "type": "number" },
+        "max_query_families": { "type": "integer" },
+        "max_proposals_per_run": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "anticipation": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "static_family_manifests": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "dynamic_discovery": { "type": "boolean" },
+        "family_allow_list": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "family_deny_list": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "deterministic_enabled": { "type": "boolean" },
+        "semantic_enabled": { "type": "boolean" },
+        "require_both": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "fallback_policy": {
+      "type": "string",
+      "enum": ["fail_fast", "fallback_to_deterministic"]
+    }
+  },
+  "additionalProperties": false
+}

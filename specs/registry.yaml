@@ -593,3 +593,54 @@ specs:
       - path-scoped AGENTS.md files exist and root AGENTS.md references them
       - make verify remains green for landed slices
       - MCP inventory documents trust boundaries and operator-local optional servers
+  - id: 437-semantic-sleep-time-release-bundle
+    title: semantic sleep-time mode — learned context, anticipation, benchmarks, release gates
+    status: deployed
+    owner: platform
+    created: 2026-03-31
+    touched_surfaces:
+      - memory-runtime
+      - cli
+      - tests
+      - docs
+      - verification
+      - specs-lifecycle
+      - schemas
+      - benchmarks
+      - automation-runtime
+    depends_on:
+      - 418-transcript-native-dream-engine
+      - 430-sota-dream-runtime-bundle
+      - 435-opendream-automations
+      - 436-agent-ready-platform-complete
+      - 420-truthful-verification-and-release
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/semantic_dreamer.py
+      - opendream/semantic_verifier.py
+      - opendream/query_families.py
+      - opendream/provider_registry.py
+      - opendream/benchmark_adapters.py
+      - opendream/harness_optimizer.py
+      - opendream/schema/learned-context-record.schema.json
+      - opendream/schema/semantic-dream-config.schema.json
+      - opendream/schema/semantic-dream-report.schema.json
+      - opendream/schema/benchmark-run-report.schema.json
+      - opendream/schema/harness-optimization-report.schema.json
+      - opendream/schema/query-family.schema.json
+      - opendream/schema/provider-entry.schema.json
+      - docs/architecture/overview.md
+      - docs/benchmarks/semantic-mode.md
+      - THIRD_PARTY_NOTICES.md
+    verification:
+      - semantic mode implemented with deterministic, semantic, and hybrid support
+      - learned-context layer exists and is auditable
+      - query-family anticipation exists
+      - verifier and promotion contracts exist
+      - retrieval fusion with attribution exists
+      - benchmark suite passes for internal, MAB-style, and coding-task evals
+      - meta-harness bootstrap and optimizer surfaces exist
+      - provenance and notice files are complete
+      - make verify and make release-check pass with semantic gates
+      - docs no longer describe semantic mode as absent

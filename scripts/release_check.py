@@ -369,6 +369,22 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
                 perf_scorecard = perf_output.get("scorecard")
             except (json.JSONDecodeError, TypeError):
                 pass
+        semantic_workspace = temp_path / "semantic-eval"
+        semantic_result = run_stage(
+            "eval-semantic-benchmark",
+            [
+                str(venv_dir / scripts_dir / "opendream"),
+                "eval",
+                "semantic-benchmark",
+                "--workspace",
+                str(semantic_workspace),
+                "--mode",
+                "hybrid",
+            ],
+            cwd=temp_path,
+            timeout_seconds=timeout_seconds,
+        )
+        stages.append(semantic_result)
         stages.append(
             run_stage(
                 "verify-clean-venv",

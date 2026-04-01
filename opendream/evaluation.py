@@ -352,3 +352,51 @@ def _duplicate_active_titles(records: list[dict[str, Any]]) -> list[str]:
             continue
         counts[record["title"]] = counts.get(record["title"], 0) + 1
     return sorted(title for title, count in counts.items() if count > 1)
+
+
+# ── Semantic benchmark evals (WS9-WS10) ─────────────────────────────────
+
+def run_semantic_benchmark_eval(
+    store: MemoryStore,
+    *,
+    mode: str = "hybrid",
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Run the unified semantic benchmark suite.
+
+    Runs internal, MemoryAgentBench-style, and coding-task evaluations.
+    Returns a combined scorecard.
+    """
+    from .benchmark_adapters import (
+        run_coding_task_eval,
+        run_internal_benchmark,
+        run_memory_agent_bench,
+    )
+
+    internal = run_internal_benchmark(store, mode=mode, now=now)
+    mab = run_memory_agent_bench(store, mode=mode, now=now)
+    coding = run_coding_task_eval(store, mode=mode, now=now)
+
+    # Combined scorecard
+    scores = {
+        "internal": internal.get("scores", {}).get("overall", 0),
+        "memory_agent_bench": mab.get("scores", {}).get("overall", 0),
+        "coding_task": coding.get("scores", {}).get("overall", 0),
+    }
+    scores["combined"] = round(sum(scores.values()) / max(1, len(scores)), 4)
+
+    tier_passed = sum(1 for s in [internal, mab, coding] if s.get("status") == "passed")
+    overall_status = "passed" if tier_passed >= 2 else "failed"
+
+    return {
+        "status": overall_status,
+        "mode": mode,
+        "scores": scores,
+        "tiers": {
+            "internal": internal,
+            "memory_agent_bench": mab,
+            "coding_task": coding,
+        },
+        "tiers_passed": tier_passed,
+        "tiers_total": 3,
+    }

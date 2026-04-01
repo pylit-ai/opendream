@@ -282,3 +282,156 @@ def _why_included(record: dict[str, Any], lexical_overlap: list[str], semantic_o
         evidence.append("record is contested and should be treated cautiously")
     evidence.append(f"type={record['type']}")
     return "; ".join(evidence)
+
+
+# ── Retrieval fusion with learned context (WS7: T35-T40) ────────────────
+
+LEARNED_CONTEXT_FRESHNESS_PENALTY = 0.3
+LEARNED_CONTEXT_CONFLICT_PENALTY = 0.5
+
+
+def retrieve_with_fusion(
+    store: MemoryStore,
+    *,
+    query: str,
+    limit: int = 5,
+    include_contested: bool = False,
+    include_learned_context: bool = True,
+    include_automation: bool = True,
+    now: str | None = None,
+    skip_retrieval: bool = False,
+) -> dict[str, Any]:
+    """Extended retrieval with fusion across durable, learned context, and automation sources.
+
+    Fuses results from:
+    1. Durable fact/preference/environment records (highest priority on direct conflict)
+    2. Procedural memory
+    3. Learned-context records (freshness-aware, query-family-matched)
+    4. Automation projections (non-canonical, labeled)
+
+    Returns per-source attribution in the response.
+    """
+    timestamp = now or to_iso(utc_now())
+
+    # Start with standard durable retrieval
+    base_result = retrieve(
+        store,
+        query=query,
+        limit=limit * 2,  # Fetch more to allow fusion ranking
+        include_contested=include_contested,
+        now=timestamp,
+        skip_retrieval=skip_retrieval,
+    )
+
+    if base_result.get("gated"):
+        base_result["selected_learned_context_ids"] = []
+        base_result["selected_automation_record_ids"] = []
+        base_result["source_attribution"] = {}
+        return base_result
+
+    query_tokens = tokenize(query) - LEXICAL_NOISE_TOKENS
+    query_semantic = semantic_tokens(query)
+
+    # Collect learned context matches
+    learned_context_results: list[tuple[float, dict[str, Any]]] = []
+    if include_learned_context:
+        learned_records = store.load_learned_context_records()
+        for record in learned_records:
+            if record.get("status") != "active":
+                continue
+            if record.get("verifier_status") not in ("approved", "review_required"):
+                continue
+
+            record_text = f"{record.get('summary', '')} {record.get('details', '')}"
+            record_tokens = tokenize(record_text) - LEXICAL_NOISE_TOKENS
+            record_semantic = semantic_tokens(record_text)
+
+            lexical_score = len(query_tokens & record_tokens) / max(1, len(query_tokens))
+            semantic_score = len(query_semantic & record_semantic) / max(1, len(query_semantic | record_semantic))
+
+            if lexical_score == 0 and semantic_score == 0:
+                continue
+
+            # Base score
+            score = lexical_score * 3 + semantic_score * 2 + float(record.get("confidence", 0.5))
+
+            # Query family bonus
+            family_tags = set(record.get("query_family_tags", []))
+            family_match = bool(family_tags & query_semantic)
+            if family_match:
+                score += 1.0
+
+            # Freshness penalty
+            fresh_until = record.get("fresh_until", "")
+            if fresh_until:
+                try:
+                    if parse_timestamp(fresh_until) < parse_timestamp(timestamp):
+                        score -= LEARNED_CONTEXT_FRESHNESS_PENALTY
+                except (ValueError, TypeError):
+                    pass
+
+            # Conflict penalty
+            if record.get("conflict_state") in ("detected", "overridden"):
+                score -= LEARNED_CONTEXT_CONFLICT_PENALTY
+
+            learned_context_results.append((round(score, 4), record))
+
+    learned_context_results.sort(key=lambda x: -x[0])
+
+    # Collect automation projection matches
+    automation_results: list[tuple[float, dict[str, Any]]] = []
+    if include_automation:
+        automation_records = store.load_automation_records()
+        for record in automation_records:
+            if record.get("status") != "active":
+                continue
+            record_text = f"{record.get('title', '')} {record.get('summary', '')}"
+            record_tokens = tokenize(record_text) - LEXICAL_NOISE_TOKENS
+            lexical_score = len(query_tokens & record_tokens) / max(1, len(query_tokens))
+            if lexical_score > 0:
+                score = lexical_score * 2 + float(record.get("confidence", 0.5))
+                automation_results.append((round(score, 4), record))
+
+    automation_results.sort(key=lambda x: -x[0])
+
+    # Build fused result with attribution
+    selected_durable_ids = base_result.get("selected_memory_ids", [])[:limit]
+    selected_learned_ids = [
+        r.get("record_id", "") for _, r in learned_context_results[:max(1, limit // 3)]
+    ]
+    selected_automation_ids = [
+        r.get("record_id", "") for _, r in automation_results[:max(1, limit // 4)]
+    ]
+
+    source_attribution = {
+        "durable_records": len(selected_durable_ids),
+        "learned_context": len(selected_learned_ids),
+        "automation_projections": len(selected_automation_ids),
+    }
+
+    # Merge into response
+    fused = dict(base_result)
+    fused["selected_memory_ids"] = selected_durable_ids
+    fused["selected_learned_context_ids"] = selected_learned_ids
+    fused["selected_automation_record_ids"] = selected_automation_ids
+    fused["source_attribution"] = source_attribution
+    fused["fusion_enabled"] = True
+
+    # Add harm signals for stale learned context
+    harm_signals: list[str] = []
+    for _, record in learned_context_results[:len(selected_learned_ids)]:
+        fresh_until = record.get("fresh_until", "")
+        if fresh_until:
+            try:
+                if parse_timestamp(fresh_until) < parse_timestamp(timestamp):
+                    harm_signals.append(f"stale_learned_context:{record.get('record_id', '')}")
+            except (ValueError, TypeError):
+                pass
+        if record.get("conflict_state") in ("detected", "overridden"):
+            harm_signals.append(f"conflicted_learned_context:{record.get('record_id', '')}")
+
+    if harm_signals:
+        fused.setdefault("memory_hurt", {})
+        fused["memory_hurt"]["learned_context_harm"] = harm_signals
+
+    return fused

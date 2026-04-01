@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "benchmark-run-report.schema.json",
+  "title": "BenchmarkRunReport",
+  "type": "object",
+  "required": [
+    "run_id",
+    "benchmark_type",
+    "mode",
+    "status",
+    "started_at"
+  ],
+  "properties": {
+    "run_id": { "type": "string" },
+    "benchmark_type": {
+      "type": "string",
+      "enum": ["internal", "memory_agent_bench", "coding_task"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["deterministic", "semantic", "hybrid"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["passed", "failed", "partial"]
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "scores": {
+      "type": "object",
+      "properties": {
+        "overall": { "type": "number" },
+        "accurate_retrieval": { "type": "number" },
+        "test_time_learning": { "type": "number" },
+        "long_range_understanding": { "type": "number" },
+        "conflict_resolution": { "type": "number" },
+        "task_success_rate": { "type": "number" },
+        "memory_hurt_rate": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "competency_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "score": { "type": "number" },
+          "passed": { "type": "boolean" },
+          "details": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "ablation_tag": { "type": "string" },
+    "memory_hurt": {
+      "type": "object",
+      "properties": {
+        "stale_recalled": { "type": "integer" },
+        "contradicted_recalled": { "type": "integer" },
+        "low_confidence_recalled": { "type": "integer" },
+        "irrelevant_recalled": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "duration_ms": { "type": "integer" },
+    "token_cost": { "type": "integer" },
+    "fixtures_used": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

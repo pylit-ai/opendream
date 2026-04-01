@@ -44,6 +44,32 @@ Workstream `436-agent-ready-platform-complete` (OpenSpec change `openspec/change
 - **Distribution & engines (planned)** — thin vendor packages and an automation engine registry per ADR-003 and ADR-004.
 - **Guidance drift & isolated execution (planned)** — proposal-only drift loop (ADR-006) and worktree-isolated code mutation (ADR-005).
 
+## Semantic sleep-time compute
+
+The semantic dreamer extends the system with offline model-driven synthesis, adding three architectural layers:
+
+### Learned-context layer (ADR-007)
+- `opendream.learned_context` — model-generated semantic abstractions (summaries, inferred relationships, cross-record insights) stored under `memory/learned_context/`
+- Separate from canonical durable records; independent freshness TTL and staleness policy
+- Records carry provenance metadata (source records, generation timestamp, model version)
+
+### Semantic verifier and promotion (ADR-008)
+- `opendream.verifier` — two-stage verification pipeline for learned-context proposals
+- Deterministic checks (provenance, timestamps, contradictions) are required; semantic checks (groundedness, compression quality) are optional
+- Promotion state machine: `proposal` → `verified` → `promoted` → `stale`
+- Only `promoted` records enter default retrieval results
+
+### Hybrid retrieval extensions (ADR-009)
+- `opendream.retriever` gains source-type weighting: durable facts outrank learned context on direct conflict; learned context may outrank raw facts when query family is strongly matched and freshness is high
+- Per-source attribution tags every injected context block
+- Harm-aware suppression filters flagged learned-context records
+
+### Benchmark suite and harness optimizer (ADR-010, ADR-011)
+- `opendream.benchmark` — unified evaluation framework with internal fixture tests, MemoryAgentBench-style clean-room adapters, and coding-task evals
+- Harness optimization via automated parameter sweeps over retrieval weights, context budgets, and prompt templates
+- Release gates require benchmark pass thresholds before tagging
+- Third-party provenance tracked in `THIRD_PARTY_NOTICES.md`; unlicensed benchmark protocols reimplemented via clean-room adapters only
+
 ## Out of scope for this doc
 - Per-change rollout, file lists, and verification steps → `specs/<id>/plan.md`
 - Product intent → `NORTHSTAR.md`, `PRD.md`

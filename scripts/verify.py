@@ -101,6 +101,20 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
             ),
             ("adapters-check", [sys.executable, "scripts/check_adapters.py"]),
             ("packaging-smoke", [sys.executable, "-m", "unittest", "tests.test_release_artifact", "-v"]),
+            (
+                "semantic-benchmark",
+                [
+                    sys.executable,
+                    "-m",
+                    "opendream.cli",
+                    "eval",
+                    "semantic-benchmark",
+                    "--workspace",
+                    str(Path(temp_dir) / "semantic-eval"),
+                    "--mode",
+                    "hybrid",
+                ],
+            ),
         ]
         for name, command in stages:
             result = run_command(command, timeout_seconds=timeout_seconds)

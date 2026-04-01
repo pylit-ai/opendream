@@ -54,7 +54,7 @@ Operators and integrators can dump a **versioned contract document** (command na
 opendream contract export --workspace "$WORKSPACE" --format json
 ```
 
-The payload validates against `opendream/schema/contract-export.schema.json`. When the export shape changes, the **`cli_output_version`** field inside the document increments; update consumers and golden fixtures together.
+The payload validates against `opendream/schema/contract-export.schema.json`. **`cli_output_version`** is the same integer as command JSON (e.g. `status`) and matches the numeric meaning of **`output_version_map.cli_json`**. When the **export document** shape changes, bump **`output_version_map.contract_export`** and update consumers and golden fixtures together.
 
 ## What not to hand-edit
 
