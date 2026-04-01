@@ -386,11 +386,30 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
             except (ValueError, TypeError):
                 pass
 
+    # Execution strategy and adapter info (438 bundle)
+    execution_strategy = config.get("execution_strategy", "deterministic")
+    preferred_auth_mode = config.get("preferred_auth_mode", "no-extra-key")
+    active_adapter = config.get("active_adapter")
+    candidate_strategies = config.get("candidate_strategies", [])
+
+    auth_source_map = {
+        "deterministic": "none",
+        "direct-provider": "provider-api-key",
+        "codex-account": "chatgpt-account",
+        "claude-scheduled-task": "claude-account-task",
+        "cursor-automation": "cursor-account-automation",
+    }
+
     return {
         "mode": config.get("mode", "deterministic"),
         "available": availability.get("available", False),
         "availability_reason": availability.get("reason", ""),
         "fallback_policy": config.get("fallback_policy", "fallback_to_deterministic"),
+        "execution_strategy": execution_strategy,
+        "preferred_auth_mode": preferred_auth_mode,
+        "active_adapter": active_adapter,
+        "auth_source": auth_source_map.get(execution_strategy, "none"),
+        "candidate_strategies": candidate_strategies,
         "learned_context": {
             "total": len(learned_records),
             "active": len(active_learned),

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RelationEdge",
+  "type": "object",
+  "required": [
+    "edge_id",
+    "from_id",
+    "to_id",
+    "kind",
+    "created_at"
+  ],
+  "properties": {
+    "edge_id": {
+      "type": "string"
+    },
+    "from_id": {
+      "type": "string"
+    },
+    "to_id": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "supports",
+        "conflicts_with",
+        "supersedes",
+        "derived_from",
+        "verified_by",
+        "invalidated_by"
+      ]
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -51,7 +51,11 @@
     },
     "origin_mode": {
       "type": "string",
-      "enum": ["bootstrap", "scheduled"]
+      "enum": ["bootstrap", "scheduled", "dream", "semantic_distillation"]
+    },
+    "claim_class": {
+      "type": "string",
+      "enum": ["externally_checkable", "derived_abstraction", "speculative"]
     },
     "memory_refs": {
       "type": "array",

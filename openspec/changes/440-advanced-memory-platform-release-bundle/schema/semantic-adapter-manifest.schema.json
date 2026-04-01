@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SemanticAdapterManifest",
+  "type": "object",
+  "required": [
+    "adapter_id",
+    "kind",
+    "execution_owner",
+    "auth_source",
+    "return_path_mode"
+  ],
+  "properties": {
+    "adapter_id": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "codex-account",
+        "claude-scheduled-task",
+        "cursor-automation"
+      ]
+    },
+    "execution_owner": {
+      "enum": [
+        "vendor-runtime"
+      ]
+    },
+    "auth_source": {
+      "enum": [
+        "chatgpt-account",
+        "claude-account-task",
+        "cursor-account-automation",
+        "cursor-api-key"
+      ]
+    },
+    "return_path_mode": {
+      "enum": [
+        "direct-report",
+        "delegated-envelope"
+      ]
+    },
+    "supports_feature_mining": {
+      "type": "boolean"
+    },
+    "supports_semantic_refresh": {
+      "type": "boolean"
+    },
+    "trust_boundary": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

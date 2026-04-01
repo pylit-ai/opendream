@@ -644,3 +644,43 @@ specs:
       - provenance and notice files are complete
       - make verify and make release-check pass with semantic gates
       - docs no longer describe semantic mode as absent
+  - id: 438-semantic-auth-adapters-release-bundle
+    title: semantic auth adapters — explicit execution/auth matrix, setup wizard, vendor adapters, delegated ingest
+    status: active
+    owner: platform
+    created: 2026-03-31
+    touched_surfaces:
+      - memory-runtime
+      - cli
+      - schemas
+      - adapters
+      - docs
+      - verification
+      - tests
+      - specs-lifecycle
+    depends_on:
+      - 404-framework-adapter-pack
+      - 436-agent-ready-platform-complete
+      - 437-semantic-sleep-time-release-bundle
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/semantic_setup.py
+      - opendream/semantic_adapters.py
+      - opendream/semantic_ingest.py
+      - opendream/schema/semantic-adapter-manifest.schema.json
+      - opendream/schema/semantic-adapter-status.schema.json
+      - opendream/schema/semantic-setup-report.schema.json
+      - opendream/schema/delegated-semantic-envelope.schema.json
+      - opendream/schema/semantic-execution-policy.schema.json
+      - docs/architecture/overview.md
+      - docs/adr/ADR-012-semantic-auth-execution-matrix.md
+      - docs/adr/ADR-013-delegated-semantic-ingest-model.md
+    verification:
+      - setup wizard produces machine-readable report
+      - adapter manifests validate against schema
+      - delegated envelope ingest validates and archives
+      - status surfaces show active execution strategy
+      - docs distinguish direct-provider vs vendor-delegated execution
+      - unsupported OAuth reuse is never recommended
+      - make verify and make release-check pass with adapter coverage

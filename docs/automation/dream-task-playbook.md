@@ -4,7 +4,9 @@ Canonical guide for wiring **recurring automation dreams** in OpenDream: capture
 
 **Audience:** operators and coding agents setting up feature queues, bug radar, research deltas, or similar in any repo using OpenDream.
 
-**Related:** [README — Automation](../../README.md) (CLI examples), [`docs/coding-agents.md`](../coding-agents.md) (hooks, `tick` vs `automation tick`, `--now`). Job schema: [`opendream/schema/automation-job.schema.json`](../../opendream/schema/automation-job.schema.json).
+**Related:** [README — Automation](../../README.md) (CLI examples), [`docs/coding-agents.md`](../coding-agents.md) (hooks, `tick` vs `automation tick`, `--now`). Job schema: [`opendream/schema/automation-job.schema.json`](../../opendream/schema/automation-job.schema.json). **Operator walkthrough (semantic dream vs feature radar):** [semantic-mode-and-feature-radar-setup.md](semantic-mode-and-feature-radar-setup.md). **Full command cookbook (ordered workflows + where LLMs run):** [complete-operator-workflow.md](complete-operator-workflow.md).
+
+**Clarification:** **Transcript `dream`** (episodes → consolidation / optional semantic pipeline) and **automation radar** (`automation register|run` projecting durable memory) are different subsystems. Feature mining uses **automation** + Layer A capture; see the setup guide above.
 
 **Cursor skill (on-demand workflow):** [`.cursor/skills/opendream-dream-automation/SKILL.md`](../../.cursor/skills/opendream-dream-automation/SKILL.md) — same Layer A/B/C steps in agent-executable form; portable `SKILL.md` body for other IDEs via **Platform deltas** in that file.
 
@@ -24,7 +26,7 @@ Automation is the **radar**: it surfaces what already exists in durable memory u
 
 ## 2. Prerequisites
 
-1. **Workspace:** repository root; pass `--workspace` consistently (see [`docs/coding-agents.md`](../coding-agents.md)).
+1. **Workspace:** repository root; pass `--workspace` consistently (see [`docs/coding-agents.md`](../coding-agents.md)). For a **single ordered list of commands** from `init` through `tick` (and optional Layer C), use [complete-operator-workflow.md](complete-operator-workflow.md).
 2. **Active memory root:** run `opendream doctor --surface memory` and use `memory_layout.active_memory_root` as the only store you reason about.
 3. **Initialized store** with ingest + `maintain` working (durable memories exist) before automation jobs return useful rows.
 4. **Operators:** use `opendream tick` for maintenance **and** due automation jobs; use `opendream automation tick` for automation only. Reserve `--now` for **tests and repros**, not production cron.
@@ -81,19 +83,35 @@ Document the choice in your project `AGENTS.md` or runbook so skills and jobs st
 
 ---
 
-## 6. Layer C — Semantic refresh checklist
+## 6. Layer C — Semantic refresh
 
 Use when the backlog must track **repository reality** or **external knowledge** (new framework, superseded design).
+
+### 6a. Local direct-provider Layer C
+
+When you have an explicit API key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) or use `codex-account` on trusted infrastructure:
 
 1. **Cadence:** weekly, or after large merges / dependency upgrades.
 2. **Inputs (paste into the agent session):**
    - `opendream automation review --workspace "$PWD" --job <job_id>` (JSON),
-   - recent `opendream prepare-context` output for the same workspace ,
+   - recent `opendream prepare-context` output for the same workspace,
    - short **git diff** or dependency manifest delta,
    - optional research notes with citations.
 3. **Outputs:** only **`emit-event`** calls (or edits to repo-native canonical file **plus** mirroring events). Prefer events such as: supersede, defer, `obsolete_reason`, merge-with-id — whatever your Layer A taxonomy defines.
 4. **Abstention:** if evidence is weak, emit a **single** `review_requested` (or equivalent) instead of mass-updating.
 5. **Follow-up:** `opendream maintain --workspace "$PWD"` then `opendream tick --workspace "$PWD"` so projections refresh.
+
+### 6b. Delegated Layer C (Claude / Cursor adapters)
+
+When using `claude-scheduled-task` or `cursor-automation`, the vendor runtime owns the model call:
+
+1. **Scaffold:** `opendream semantic adapters scaffold --workspace "$PWD" --adapter claude-scheduled-task` (or `cursor-automation`).
+2. **Schedule:** Configure the vendor's task/automation system to run the scaffolded prompt on your cadence.
+3. **Return path:** The vendor runtime writes a delegated semantic envelope to `.opendream/inbox/semantic/<adapter>/`.
+4. **Ingest:** `opendream semantic ingest --workspace "$PWD" --scan-inbox` validates and ingests envelopes through the standard verify-promote pipeline.
+5. **Follow-up:** same as 6a step 5.
+
+**Key distinction:** In delegated mode, OpenDream does not directly call the model. The vendor runtime owns execution; OpenDream owns memory, validation, and promotion. Docs and status surfaces must reflect this accurately.
 
 ---
 

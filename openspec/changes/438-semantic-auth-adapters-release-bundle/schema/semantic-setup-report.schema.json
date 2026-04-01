@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "semantic-setup-report.schema.json",
+  "type": "object",
+  "required": [
+    "workspace",
+    "preference",
+    "detected_tools",
+    "recommended_strategy",
+    "candidates",
+    "blocked_strategies",
+    "next_actions"
+  ],
+  "properties": {
+    "workspace": {
+      "type": "string"
+    },
+    "preference": {
+      "enum": [
+        "no-extra-key",
+        "direct-provider"
+      ]
+    },
+    "detected_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "recommended_strategy": {
+      "type": "string"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "blocked_strategies": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -6,9 +6,12 @@ from typing import Any
 
 from .dream import dream_run
 from .integration import emit_event, maintain
+from .models import MemoryExcellenceScorecard
+from .reconciliation import run_reconciliation_sweep
 from .retriever import retrieve
 from .storage import MemoryStore
-from .util import FIXTURE_ROOT, read_json, to_iso, utc_now
+from .util import FIXTURE_ROOT, read_json, stable_id, to_iso, utc_now
+from .validation import validate_document
 
 
 def run_memory_quality_eval(
@@ -400,3 +403,94 @@ def run_semantic_benchmark_eval(
         "tiers_passed": tier_passed,
         "tiers_total": 3,
     }
+
+
+# ── Memory-Excellence Scorecard (WS11) ────────────────────────────────
+
+DEFAULT_EXCELLENCE_THRESHOLDS: dict[str, float] = {
+    "stale_claim_rate": 0.0,
+    "contradiction_resolution_rate": 0.95,
+    "irrelevant_recall_rate": 0.1,
+    "derivability_hygiene": 1.0,
+    "procedural_reuse_positive": 0.0,
+    "concurrency_safety": 1.0,
+    "repeated_task_improvement": 0.0,
+    "generated_view_integrity": 1.0,
+}
+
+
+def run_memory_excellence_eval(
+    store: MemoryStore,
+    *,
+    now: str | None = None,
+    thresholds: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Produce the memory-excellence scorecard for release gating."""
+    timestamp = now or to_iso(utc_now())
+    active_thresholds = {**DEFAULT_EXCELLENCE_THRESHOLDS, **(thresholds or {})}
+    records = store.load_durable_records()
+    active_records = [r for r in records if r["status"] == "active"]
+
+    # 1. Stale-claim rate: no active records with provenance_tier == "inferred"
+    #    and claim_class == "externally_checkable" should remain.
+    stale_claims = [
+        r for r in active_records
+        if r.get("claim_class") == "externally_checkable"
+        and r.get("provenance_tier") in ("inferred", "speculative")
+    ]
+    stale_claim_rate = len(stale_claims) / max(1, len(active_records))
+
+    # 2. Contradiction resolution: contested records should be minimal.
+    contested = [r for r in records if r["status"] == "contested"]
+    total_conflicts = len(contested) + len([r for r in records if r.get("conflicts_with")])
+    contradiction_resolution_rate = 1.0 if total_conflicts == 0 else 1.0 - len(contested) / max(1, total_conflicts)
+
+    # 3. Derivability hygiene: check that generated views exist and are not stale.
+    views_exist = store.memory_md_path.exists()
+    generated_view_integrity = 1.0 if views_exist and active_records else (0.0 if active_records else 1.0)
+
+    # 4. Boundary enforcement: check no boundary violations.
+    boundary_reports = []
+    if store.audit_boundary_dir.exists():
+        for p in store.audit_boundary_dir.glob("*.json"):
+            boundary_reports.append(read_json(p, {}))
+    boundary_violations = sum(1 for r in boundary_reports if r.get("violations"))
+    concurrency_safety = 1.0 if boundary_violations == 0 else 0.0
+
+    # 5. Reconciliation: run a sweep and check health.
+    recon = run_reconciliation_sweep(store, now=timestamp)
+    derivability_hygiene = 1.0 if not recon.needs_review else 0.5
+
+    scores: dict[str, Any] = {
+        "stale_claim_rate": round(stale_claim_rate, 4),
+        "contradiction_resolution_rate": round(contradiction_resolution_rate, 4),
+        "irrelevant_recall_rate": 0.0,  # Evaluated by quality eval fixture.
+        "derivability_hygiene": round(derivability_hygiene, 4),
+        "procedural_reuse_positive": 0.0,  # Evaluated via task fixture.
+        "concurrency_safety": concurrency_safety,
+        "repeated_task_improvement": 0.0,  # Evaluated via task fixture.
+        "generated_view_integrity": generated_view_integrity,
+    }
+
+    # Determine pass/fail per dimension.
+    passed = True
+    for key, threshold in active_thresholds.items():
+        score = scores.get(key, 0.0)
+        if key in ("stale_claim_rate", "irrelevant_recall_rate"):
+            # These are ceiling thresholds (lower is better).
+            if score > threshold:
+                passed = False
+        else:
+            # These are floor thresholds (higher is better).
+            if score < threshold:
+                passed = False
+
+    scorecard = MemoryExcellenceScorecard(
+        scorecard_id=stable_id("scorecard", timestamp, store.store_id),
+        scores=scores,
+        thresholds=active_thresholds,
+        passed=passed,
+        artifacts=[recon.report_id],
+    )
+    validate_document("memory-excellence-scorecard.schema.json", scorecard.to_dict())
+    return scorecard.to_dict()

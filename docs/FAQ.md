@@ -24,14 +24,14 @@ See [docs/benchmarks/autodream-comparison.md](benchmarks/autodream-comparison.md
 ## What does OpenDream NOT do?
 
 - **No cloud storage**: All memory is local. There is no remote sync, hosted service, or telemetry.
-- **Hybrid consolidation**: Consolidation defaults to deterministic rules for reproducibility and cost. When semantic mode is enabled with a configured provider, OpenDream can also run model-backed synthesis (sleep-time compute) to generate learned-context abstractions — these remain proposals until promoted through verification.
+- **Hybrid / semantic dream pipeline**: With `semantic_config.json` set to `hybrid` or `semantic` and a valid provider registry, `dream run` can execute the extended learned-context pipeline (anticipation, synthesis, verification, promotion). **In the current stdlib-only implementation, synthesis and semantic verification use in-process heuristics**; provider entries and API keys drive **availability and health checks** ahead of future outbound LLM transports. Learned-context proposals still pass through verification before promotion.
 - **No vector database**: Retrieval uses hybrid lexical + semantic scoring without external dependencies.
 - **No code mutation**: OpenDream reads and remembers — it does not modify your codebase.
 - **No cross-project memory by default**: Each project has its own store. Global memory is opt-in via `--store-kind global`.
 
 ## Is it local-first / private?
 
-Yes. All data stays on your machine under `.opendream/memory/` in your project directory. No network calls are made. No data leaves your filesystem. The observability UI runs on `localhost` only when you explicitly start it.
+Yes for **data**: artifacts stay under your workspace memory root (default `.opendream/memory/`). The default **deterministic** consolidation and **automation** paths do not open network connections from this package. **Optional** semantic provider configuration is intended for future outbound API calls to your chosen vendor; today the bundled semantic path still runs **without** those calls (heuristic synthesis/verification). The observability UI listens on `localhost` only when you start it. Operators: [semantic-mode-and-feature-radar-setup.md](automation/semantic-mode-and-feature-radar-setup.md).
 
 ## What is the license?
 
@@ -53,11 +53,29 @@ opendream eval performance --workspace .tmp/eval
 
 The scorecard covers write precision (20%), retrieval precision (20%), latency (15%), concurrency safety (15%), contradiction handling (10%), procedural reuse (10%), and gating accuracy (10%). Pass threshold: weighted total >= 80. See [docs/benchmarks/methodology.md](benchmarks/methodology.md) for full details.
 
+## Do I need extra API keys for semantic mode?
+
+It depends on which **execution strategy** you choose:
+
+| Strategy | Extra API key? | How it works |
+|----------|---------------|-------------|
+| `deterministic` | No | No model call. Always available. |
+| `codex-account` | No | Uses your existing ChatGPT/Codex account via the Codex CLI. Trusted local infrastructure only. |
+| `claude-scheduled-task` | No | Claude runs the semantic refresh as a scheduled task under your existing plan. Results return via a delegated envelope. |
+| `cursor-automation` | No | A Cursor Automation runs the refresh under your account. Results return via a delegated envelope. |
+| `direct-provider` | Yes | OpenDream calls a model API directly. Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. |
+
+Run `opendream semantic setup --workspace "$PWD" --prefer no-extra-key` to see which no-extra-key strategies are available on your system. The setup wizard detects installed tools and recommends the best option.
+
+**Important**: OpenDream never borrows or reuses vendor OAuth sessions directly. Codex account-auth uses the Codex CLI subprocess (which manages its own auth cache). Claude and Cursor adapters are vendor-delegated: the vendor runtime owns the model call, and results return to OpenDream through a validated envelope. Gemini CLI OAuth reuse is **unsupported** and never recommended.
+
 ## What is semantic sleep-time mode?
 
-Semantic mode adds offline model-backed synthesis to OpenDream's consolidation pipeline. When configured with a provider (e.g. Anthropic, OpenAI), OpenDream can anticipate likely future queries, synthesize learned-context abstractions from transcript evidence, and verify them before promotion. This is inspired by sleep-time compute research — the model "thinks" before queries are asked.
+Semantic mode adds an extended **learned-context pipeline** (anticipation, proposal synthesis, verification, promotion) on top of dreaming and retrieval. Configuration uses providers and execution strategies (API key, Codex account, or vendor-delegated Claude/Cursor). **In the current stdlib-only core, transcript `dream run --mode hybrid|semantic` still uses in-process heuristics for synthesis/verification**; providers mainly gate availability and health until outbound transports land. **Live model work** for backlog refresh is expected in **Layer C** (your agent session or delegated `semantic ingest`). See [complete-operator-workflow.md](automation/complete-operator-workflow.md) §1 and §3–4 for the exact split.
 
-Semantic mode is optional. Without a configured provider, OpenDream runs in deterministic-only mode with no behavioral change from prior versions. Use `opendream semantic config --workspace "$PWD"` and `opendream semantic status --workspace "$PWD"` to inspect and manage configuration.
+Semantic mode is optional. Without `semantic_config.json` (or with `"mode": "deterministic"`), the store behaves like deterministic-only for semantic **availability**. Use `opendream semantic config --workspace "$PWD"` and `opendream semantic status --workspace "$PWD"` to inspect configuration; see [semantic-mode-and-feature-radar-setup.md](automation/semantic-mode-and-feature-radar-setup.md) for file paths and a full setup sequence.
+
+Use `opendream semantic setup --workspace "$PWD"` to detect available execution strategies and get a clear recommendation.
 
 ## What is learned context?
 

@@ -59,6 +59,9 @@
       "name": "prepare-context"
     },
     {
+      "name": "reconcile"
+    },
+    {
       "name": "retrieve"
     },
     {
@@ -130,6 +133,9 @@
       "name": "benchmark-run-report.schema.json"
     },
     {
+      "name": "claim-verification-report.schema.json"
+    },
+    {
       "name": "compressed-status.schema.json"
     },
     {
@@ -137,6 +143,9 @@
     },
     {
       "name": "contract-export.schema.json"
+    },
+    {
+      "name": "delegated-semantic-envelope.schema.json"
     },
     {
       "name": "dream-job.schema.json"
@@ -160,6 +169,9 @@
       "name": "memory-event.schema.json"
     },
     {
+      "name": "memory-excellence-scorecard.schema.json"
+    },
+    {
       "name": "memory-index.schema.json"
     },
     {
@@ -172,13 +184,31 @@
       "name": "query-family.schema.json"
     },
     {
+      "name": "reconciliation-report.schema.json"
+    },
+    {
+      "name": "relation-edge.schema.json"
+    },
+    {
       "name": "repair-report.schema.json"
+    },
+    {
+      "name": "semantic-adapter-manifest.schema.json"
+    },
+    {
+      "name": "semantic-adapter-status.schema.json"
     },
     {
       "name": "semantic-dream-config.schema.json"
     },
     {
       "name": "semantic-dream-report.schema.json"
+    },
+    {
+      "name": "semantic-execution-policy.schema.json"
+    },
+    {
+      "name": "semantic-setup-report.schema.json"
     },
     {
       "name": "service-install-report.schema.json"
@@ -190,16 +220,54 @@
       "name": "target-registry.schema.json"
     },
     {
+      "name": "transcript-probe-report.schema.json"
+    },
+    {
       "name": "verifier-report.schema.json"
     },
     {
       "name": "worker-health.schema.json"
     }
   ],
+  "semantic_adapter_inventory": [
+    {
+      "adapter_id": "codex-account",
+      "auth_source": "chatgpt-account",
+      "execution_owner": "opendream-local",
+      "ingest_mode": "direct-report"
+    },
+    {
+      "adapter_id": "claude-scheduled-task",
+      "auth_source": "claude-account-task",
+      "execution_owner": "vendor-runtime",
+      "ingest_mode": "delegated-envelope"
+    },
+    {
+      "adapter_id": "cursor-automation",
+      "auth_source": "cursor-account-automation",
+      "execution_owner": "vendor-runtime",
+      "ingest_mode": "delegated-envelope"
+    }
+  ],
+  "semantic_auth_matrix": {
+    "strategies": [
+      "deterministic",
+      "direct-provider",
+      "codex-account",
+      "claude-scheduled-task",
+      "cursor-automation"
+    ],
+    "unsupported": [
+      "gemini-oauth-reuse"
+    ]
+  },
   "supported_engine_ids": [
     "builtin://projection-engine",
     "builtin://semantic-dreamer",
-    "builtin://harness-optimizer"
+    "builtin://harness-optimizer",
+    "builtin://claim-verifier",
+    "builtin://transcript-prober",
+    "builtin://reconciliation-sweeper"
   ],
   "supported_package_targets": [
     "codex",

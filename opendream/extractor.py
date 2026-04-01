@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .claim_verification import classify_claim
 from .models import MemoryCandidate
 from .util import STOPWORDS, first_tag, parse_tags, semantic_tokens, stable_id, summarize, to_iso, tokenize, utc_now
 
@@ -157,6 +158,8 @@ def extract_candidate(
     if candidate_type == "procedural_workflow":
         workflow_steps = parse_workflow_steps(body)
 
+    claim_class = classify_claim(body, title=title)
+
     return MemoryCandidate(
         candidate_id=candidate_id,
         derived_from_event_ids=[event["event_id"]],
@@ -174,6 +177,7 @@ def extract_candidate(
         memory_refs=[],
         conflicts_with=conflicts_with,
         workflow_steps=workflow_steps,
+        claim_class=claim_class,
     )
 
 

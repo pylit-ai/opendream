@@ -38,6 +38,7 @@ from .consolidator import consolidate
 from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
 from .evaluation import (
     run_dream_fidelity_eval,
+    run_memory_excellence_eval,
     run_memory_quality_eval,
     run_performance_eval,
     run_semantic_benchmark_eval,
@@ -54,6 +55,7 @@ from .integration import (
 )
 from .models import MemoryEvent
 from .observability import index_observability
+from .reconciliation import run_reconciliation_sweep
 from .retriever import retrieve
 from .service import (
     autowire_adapters,
@@ -788,6 +790,32 @@ def command_eval_performance(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def command_eval_memory_excellence(args: argparse.Namespace) -> dict[str, Any]:
+    """Run memory-excellence scorecard for release gating."""
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=getattr(args, "compat_mode", None))
+    result = run_memory_excellence_eval(store, now=args.now)
+    return result
+
+
+def command_reconcile(args: argparse.Namespace) -> dict[str, Any]:
+    """Run reconciliation sweep."""
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=getattr(args, "compat_mode", None))
+    report = run_reconciliation_sweep(store, now=args.now)
+    return report.to_dict()
+
+
 def command_index_observability(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(
         args.workspace,
@@ -963,6 +991,55 @@ def command_semantic_bootstrap(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
     from .harness_optimizer import capture_environment_bootstrap
     return capture_environment_bootstrap(Path(args.workspace), store=store)
+
+
+def command_semantic_setup(args: argparse.Namespace) -> dict[str, Any]:
+    from .semantic_setup import semantic_setup
+    return semantic_setup(Path(args.workspace), preference=args.prefer)
+
+
+def command_semantic_adapters_list(args: argparse.Namespace) -> dict[str, Any]:
+    from .semantic_adapters import list_adapter_manifests
+    return {"adapters": list_adapter_manifests()}
+
+
+def command_semantic_adapters_detect(args: argparse.Namespace) -> dict[str, Any]:
+    from .semantic_adapters import detect_all_tools
+    return detect_all_tools(Path(args.workspace))
+
+
+def command_semantic_adapters_scaffold(args: argparse.Namespace) -> dict[str, Any]:
+    from .semantic_adapters import scaffold_adapter
+    return scaffold_adapter(Path(args.workspace), args.adapter)
+
+
+def command_semantic_adapters_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    config = store.load_semantic_config()
+    from .semantic_adapters import adapter_status
+    return adapter_status(
+        Path(args.workspace),
+        active_strategy=config.get("execution_strategy", "deterministic"),
+        active_adapter=config.get("active_adapter"),
+    )
+
+
+def command_semantic_adapters_validate(args: argparse.Namespace) -> dict[str, Any]:
+    from .semantic_adapters import get_adapter_manifest, validate_adapter_manifest
+    manifest = get_adapter_manifest(args.adapter)
+    if manifest is None:
+        return {"valid": False, "error": f"unknown adapter: {args.adapter}"}
+    return validate_adapter_manifest(manifest)
+
+
+def command_semantic_ingest(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .semantic_ingest import ingest_file, scan_inbox
+    if args.scan_inbox:
+        return scan_inbox(store, now=args.now)
+    if args.path:
+        return ingest_file(store, Path(args.path), now=args.now)
+    return {"status": "error", "reason": "specify --path or --scan-inbox"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1376,6 +1453,25 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(eval_harness_parser)
     eval_harness_parser.set_defaults(func=command_eval_harness_optimize)
 
+    eval_excellence_parser = eval_subparsers.add_parser(
+        "memory-excellence",
+        help="Run memory-excellence scorecard for release gating",
+    )
+    eval_excellence_parser.add_argument("--workspace", required=True)
+    eval_excellence_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_excellence_parser)
+    eval_excellence_parser.set_defaults(func=command_eval_memory_excellence, result_failure_statuses=("failed",))
+
+    # Reconciliation subcommand
+    reconciliation_parser = subparsers.add_parser(
+        "reconcile",
+        help="Run reconciliation sweep to detect and repair staleness, orphan views, and drift",
+    )
+    reconciliation_parser.add_argument("--workspace", required=True)
+    reconciliation_parser.add_argument("--now", help="Fixed ISO timestamp")
+    add_layout_arguments(reconciliation_parser)
+    reconciliation_parser.set_defaults(func=command_reconcile)
+
     # Semantic config inspection
     semantic_parser = subparsers.add_parser(
         "semantic",
@@ -1402,6 +1498,73 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_bootstrap_parser.add_argument("--workspace", required=True)
     add_layout_arguments(semantic_bootstrap_parser)
     semantic_bootstrap_parser.set_defaults(func=command_semantic_bootstrap)
+
+    semantic_setup_parser = semantic_subparsers.add_parser(
+        "setup",
+        help="Run the setup wizard to detect and recommend a semantic execution strategy",
+    )
+    semantic_setup_parser.add_argument("--workspace", required=True)
+    semantic_setup_parser.add_argument(
+        "--prefer",
+        choices=["no-extra-key", "direct-provider"],
+        default="no-extra-key",
+        help="Execution preference: no-extra-key (default) or direct-provider",
+    )
+    semantic_setup_parser.set_defaults(func=command_semantic_setup)
+
+    semantic_adapters_parser = semantic_subparsers.add_parser(
+        "adapters",
+        help="Manage semantic execution adapters",
+    )
+    semantic_adapters_subparsers = semantic_adapters_parser.add_subparsers(
+        dest="adapters_command", required=True,
+    )
+
+    semantic_adapters_list_parser = semantic_adapters_subparsers.add_parser("list", help="List all builtin adapters")
+    semantic_adapters_list_parser.set_defaults(func=command_semantic_adapters_list)
+
+    semantic_adapters_detect_parser = semantic_adapters_subparsers.add_parser("detect", help="Detect available tools")
+    semantic_adapters_detect_parser.add_argument("--workspace", required=True)
+    semantic_adapters_detect_parser.set_defaults(func=command_semantic_adapters_detect)
+
+    semantic_adapters_scaffold_parser = semantic_adapters_subparsers.add_parser(
+        "scaffold", help="Generate adapter artifacts for a workspace",
+    )
+    semantic_adapters_scaffold_parser.add_argument("--workspace", required=True)
+    semantic_adapters_scaffold_parser.add_argument(
+        "--adapter",
+        required=True,
+        choices=["codex-account", "claude-scheduled-task", "cursor-automation"],
+    )
+    semantic_adapters_scaffold_parser.set_defaults(func=command_semantic_adapters_scaffold)
+
+    semantic_adapters_status_parser = semantic_adapters_subparsers.add_parser(
+        "status", help="Show adapter status and active execution strategy",
+    )
+    semantic_adapters_status_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_adapters_status_parser)
+    semantic_adapters_status_parser.set_defaults(func=command_semantic_adapters_status)
+
+    semantic_adapters_validate_parser = semantic_adapters_subparsers.add_parser(
+        "validate", help="Validate a builtin adapter manifest",
+    )
+    semantic_adapters_validate_parser.add_argument(
+        "--adapter",
+        required=True,
+        choices=["codex-account", "claude-scheduled-task", "cursor-automation"],
+    )
+    semantic_adapters_validate_parser.set_defaults(func=command_semantic_adapters_validate)
+
+    semantic_ingest_parser = semantic_subparsers.add_parser(
+        "ingest",
+        help="Ingest delegated semantic envelopes from the inbox",
+    )
+    semantic_ingest_parser.add_argument("--workspace", required=True)
+    semantic_ingest_parser.add_argument("--path", help="Path to a specific envelope file")
+    semantic_ingest_parser.add_argument("--scan-inbox", action="store_true", help="Scan and ingest all inbox envelopes")
+    semantic_ingest_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(semantic_ingest_parser)
+    semantic_ingest_parser.set_defaults(func=command_semantic_ingest)
 
     observe_parser = subparsers.add_parser("observe", help="Advanced: observability index and local web UI")
     observe_subparsers = observe_parser.add_subparsers(dest="observe_command", required=True)

@@ -47,6 +47,7 @@ class MemoryCandidate:
     memory_refs: list[str] = field(default_factory=list)
     conflicts_with: list[str] = field(default_factory=list)
     workflow_steps: list[str] = field(default_factory=list)
+    claim_class: str = "derived_abstraction"
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -76,11 +77,20 @@ class MemoryRecord:
     created_at: str
     updated_at: str
     workflow_steps: list[str] = field(default_factory=list)
+    provenance_tier: str = "inferred"
+    claim_class: str = "derived_abstraction"
+    preconditions: list[str] = field(default_factory=list)
+    recovery_steps: list[str] = field(default_factory=list)
+    anti_patterns: list[str] = field(default_factory=list)
+    success_markers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         if not self.workflow_steps:
             payload.pop("workflow_steps")
+        for key in ("preconditions", "recovery_steps", "anti_patterns", "success_markers"):
+            if not payload.get(key):
+                payload.pop(key, None)
         return payload
 
 
@@ -397,6 +407,90 @@ class BenchmarkRunReport:
             payload.pop("competency_results")
         if not self.fixtures_used:
             payload.pop("fixtures_used")
+        return payload
+
+
+@dataclass(slots=True)
+class RelationEdge:
+    edge_id: str
+    from_id: str
+    to_id: str
+    kind: str
+    created_at: str
+    reason: str = ""
+    evidence_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        if not self.evidence_ids:
+            payload.pop("evidence_ids")
+        if not self.reason:
+            payload.pop("reason")
+        return payload
+
+
+@dataclass(slots=True)
+class ClaimVerificationReport:
+    report_id: str
+    claim_id: str
+    claim_class: str
+    provenance_tier: str
+    result: str
+    checked_at: str
+    verification_reads: list[str] = field(default_factory=list)
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        if not self.verification_reads:
+            payload.pop("verification_reads")
+        if not self.reason:
+            payload.pop("reason")
+        return payload
+
+
+@dataclass(slots=True)
+class TranscriptProbeReport:
+    run_id: str
+    probes: list[str]
+    hits: int
+    windows_read: int
+    escalations: int
+    bytes_read: int = 0
+    reasons: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        if not self.reasons:
+            payload.pop("reasons")
+        return payload
+
+
+@dataclass(slots=True)
+class ReconciliationReport:
+    report_id: str
+    workspace: str
+    findings: list[str]
+    actions: list[str]
+    created_at: str
+    needs_review: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class MemoryExcellenceScorecard:
+    scorecard_id: str
+    scores: dict[str, Any]
+    thresholds: dict[str, Any]
+    passed: bool
+    artifacts: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        if not self.artifacts:
+            payload.pop("artifacts")
         return payload
 
 

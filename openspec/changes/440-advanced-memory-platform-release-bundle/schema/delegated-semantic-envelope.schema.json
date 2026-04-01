@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DelegatedSemanticEnvelope",
+  "type": "object",
+  "required": [
+    "adapter_id",
+    "execution_owner",
+    "run_id",
+    "created_at",
+    "workspace_ref",
+    "anticipated_query_families",
+    "proposals"
+  ],
+  "properties": {
+    "adapter_id": {
+      "type": "string"
+    },
+    "execution_owner": {
+      "enum": [
+        "claude-scheduled-task",
+        "cursor-automation"
+      ]
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "workspace_ref": {
+      "type": "string"
+    },
+    "base_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "branch_or_worktree": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "anticipated_query_families": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "proposals": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "proposed_events": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "runtime_metadata": {
+      "type": "object"
+    },
+    "schedule_metadata": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

@@ -46,6 +46,41 @@ Selected command payloads include **`cli_output_version`** (integer). Bump toler
 
 `--now` exists to make tests, fixtures, and scripted repros deterministic. Production hooks, cron jobs, and normal CLI usage should usually omit it and rely on wall-clock time.
 
+## Semantic execution strategies and adapter matrix
+
+Semantic mode runs through one of five **execution strategies**:
+
+| Strategy | Execution owner | Auth source | Extra key? | Ingest |
+|----------|----------------|-------------|-----------|--------|
+| `deterministic` | opendream-local | none | No | n/a |
+| `direct-provider` | opendream-local | API key | Yes | direct-report |
+| `codex-account` | opendream-local | ChatGPT account | No | direct-report |
+| `claude-scheduled-task` | vendor-runtime | Claude account | No | delegated-envelope |
+| `cursor-automation` | vendor-runtime | Cursor account | No | delegated-envelope |
+
+**Setup quickstart:**
+
+```bash
+# Detect tools and get a recommendation
+opendream semantic setup --workspace "$PWD" --prefer no-extra-key
+
+# Scaffold adapter artifacts
+opendream semantic adapters scaffold --workspace "$PWD" --adapter codex-account
+
+# Check adapter status
+opendream semantic adapters status --workspace "$PWD"
+
+# Ingest delegated results (for Claude/Cursor adapters)
+opendream semantic ingest --workspace "$PWD" --scan-inbox
+```
+
+**Unsupported paths:** Gemini CLI OAuth reuse is explicitly unsupported and never recommended. Public/untrusted runners should not default to account-backed execution.
+
+## Semantic dream mode vs automation radar
+
+- **Transcript dream:** `opendream dream run … --mode hybrid|semantic` — episodes under the memory root; optional learned-context pipeline. Configuration files: `<active_memory_root>/state/semantic_config.json`, `provider_registry.json`. Operator walkthrough: [`docs/automation/semantic-mode-and-feature-radar-setup.md`](automation/semantic-mode-and-feature-radar-setup.md). **Full command sequences and where LLMs run:** [`docs/automation/complete-operator-workflow.md`](automation/complete-operator-workflow.md).
+- **Feature radar (and similar):** `opendream automation register|run|tick` — projects **durable** memories into automation records; independent of `dream run`.
+
 ## Machine-readable contract export
 
 Operators and integrators can dump a **versioned contract document** (command names, schema inventory, output version map, placeholders for future engine/package targets):

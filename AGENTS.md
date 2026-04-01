@@ -50,6 +50,8 @@ Use it to find the correct source of truth.
 - `openspec/AGENTS.md` — OpenSpec proposal workflow and promotion rules
 - `docs/architecture/overview.md` — enduring technical structure
 - `docs/automation/dream-task-playbook.md` — reproducible pattern for dream automations (capture, projection jobs, optional semantic refresh)
+- `docs/automation/complete-operator-workflow.md` — copy-paste command sequences: feature radar, hybrid dream smoke, Layer C / delegated AI refresh; where LLMs run vs heuristics
+- `docs/automation/semantic-mode-and-feature-radar-setup.md` — operator walkthrough: hybrid/semantic dream config, provider files, and feature-radar automation
 - `docs/mcp/servers.md` — MCP servers, tool contracts, and trust boundaries
 - `specs/registry.yaml` — active / superseded / archived change registry
 

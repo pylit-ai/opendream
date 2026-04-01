@@ -3,8 +3,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from .models import ConsolidationOperation, MemoryRecord, StartupIndexEntry
+from .claim_verification import classify_claim, verify_claim
+from .models import ConsolidationOperation, MemoryRecord, RelationEdge, StartupIndexEntry
 from .planner import build_plan
+from .relation_graph import create_relation_store
 from .storage import LockError, MemoryStore
 from .util import CLI_JSON_VERSION, semantic_tokens, stable_id, summarize, to_iso, utc_now
 from .verifier import verify_plan
@@ -98,6 +100,14 @@ def _record_from_candidate(
     workflow_steps = candidate.get("workflow_steps", [])
     if workflow_steps:
         record["workflow_steps"] = workflow_steps
+    # Claim verification: classify and assign provenance tier.
+    claim_class = candidate.get("claim_class") or classify_claim(candidate["body"], title=candidate["title"])
+    record["provenance_tier"] = candidate.get("provenance_tier", "inferred")
+    record["claim_class"] = claim_class
+    # Procedural memory enrichment.
+    for key in ("preconditions", "recovery_steps", "anti_patterns", "success_markers"):
+        if candidate.get(key):
+            record[key] = candidate[key]
     return record
 
 
@@ -249,11 +259,64 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
             now=now,
         )
 
-    record_models = [MemoryRecord(**record) for record in existing_records]
+    # Claim verification pass: verify externally checkable claims.
+    verification_reports: list[dict[str, Any]] = []
+    for record in existing_records:
+        if record.get("provenance_tier") == "inferred" and record.get("status") == "active":
+            claim_class = record.get("claim_class") or classify_claim(record["body"], title=record["title"])
+            if claim_class == "externally_checkable":
+                vr = verify_claim(
+                    claim_id=record["memory_id"],
+                    body=record["body"],
+                    title=record["title"],
+                    workspace=store.workspace,
+                )
+                verification_reports.append(vr.to_dict())
+                store.write_claim_verification_audit(vr.report_id, vr.to_dict())
+                if vr.result == "downgraded":
+                    record["provenance_tier"] = "inferred"
+                    record["confidence"] = min(record.get("confidence", 0.5), 0.45)
+                elif vr.result == "quarantined":
+                    record["status"] = "quarantined"
+                elif vr.result == "verified":
+                    record["provenance_tier"] = vr.provenance_tier
+
+    # Build relation edges for supersession and conflict operations.
+    relation_store = create_relation_store(store.memory_root)
+    for op_obj in operations:
+        if op_obj.op == "supersede" and op_obj.payload.get("replacement_id"):
+            edge = RelationEdge(
+                edge_id=stable_id("edge", op_obj.payload["replacement_id"], op_obj.target_id, "supersedes"),
+                from_id=op_obj.payload["replacement_id"],
+                to_id=op_obj.target_id,
+                kind="supersedes",
+                created_at=now,
+                reason=op_obj.reason,
+            )
+            relation_store.add_edge(edge)
+        if op_obj.op == "mark_contested":
+            for record in existing_records:
+                if record["memory_id"] == op_obj.target_id:
+                    for conflict_id in record.get("conflicts_with", []):
+                        edge = RelationEdge(
+                            edge_id=stable_id("edge", op_obj.target_id, conflict_id, "conflicts_with"),
+                            from_id=op_obj.target_id,
+                            to_id=conflict_id,
+                            kind="conflicts_with",
+                            created_at=now,
+                            reason=op_obj.reason,
+                        )
+                        relation_store.add_edge(edge)
+
+    record_models = [
+        MemoryRecord(**{k: v for k, v in record.items() if k in MemoryRecord.__dataclass_fields__})
+        for record in existing_records
+    ]
     store.save_durable_records(record_models)
     entries = _build_startup_index(existing_records, memory_dir=store.memory_dir_name)
     store.save_startup_index(entries, generated_at=now)
     summary["startup_index_entries"] = len(entries[: int(store.config["index_policy"]["max_entries"])])
+    summary["verification_reports"] = len(verification_reports)
     audit = store.write_consolidation_audit(run_id, operations, summary, before_snapshot)
     if processed_candidate_ids:
         store.mark_candidates_processed(processed_candidate_ids)

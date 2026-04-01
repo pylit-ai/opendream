@@ -64,6 +64,30 @@
     "workflow_steps": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "provenance_tier": {
+      "type": "string",
+      "enum": ["source_backed", "runtime_verified", "inferred", "speculative"]
+    },
+    "claim_class": {
+      "type": "string",
+      "enum": ["externally_checkable", "derived_abstraction", "speculative"]
+    },
+    "preconditions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "recovery_steps": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "anti_patterns": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "success_markers": {
+      "type": "array",
+      "items": { "type": "string" }
     }
   },
   "additionalProperties": false

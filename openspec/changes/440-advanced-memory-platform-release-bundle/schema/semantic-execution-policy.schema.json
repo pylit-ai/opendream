@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SemanticExecutionPolicy",
+  "type": "object",
+  "required": [
+    "requested_preference",
+    "candidate_order",
+    "unsupported_strategies"
+  ],
+  "properties": {
+    "requested_preference": {
+      "enum": [
+        "no-extra-key",
+        "direct-provider"
+      ]
+    },
+    "candidate_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unsupported_strategies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "public_runner_policy": {
+      "enum": [
+        "forbid-account-backed",
+        "warn",
+        "allow"
+      ]
+    },
+    "fallback_policy": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

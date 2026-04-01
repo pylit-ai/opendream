@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "semantic-execution-policy.schema.json",
+  "type": "object",
+  "required": [
+    "preferred_auth_mode",
+    "candidate_order",
+    "unsupported_strategies"
+  ],
+  "properties": {
+    "preferred_auth_mode": {
+      "enum": [
+        "no-extra-key",
+        "direct-provider"
+      ]
+    },
+    "candidate_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unsupported_strategies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "public_runner_policy": {
+      "enum": [
+        "forbid-account-auth",
+        "warn",
+        "allow"
+      ]
+    },
+    "gemini_oauth_reuse": {
+      "enum": [
+        "unsupported"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

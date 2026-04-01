@@ -9,4 +9,11 @@ dist/
 notepads/
 /.metactl/
 skills/
-.repomix/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Repomix: ignore generated pack outputs; keep bundle config tracked
+.repomix/*
+!.repomix/bundles.json

@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .boundaries import boundary_enforcement_report, default_allowed_write_roots, verify_no_code_writes
 from .episodes import latest_episode_timestamp, load_episode_rows, looks_memory_worthy, row_to_event
 from .integration import maintain
 from .storage import LockError, MemoryStore
@@ -144,6 +145,18 @@ def dream_run(
                 return summary
 
             maintenance = maintain(store, now=timestamp)
+
+            # Runtime boundary verification: check no code writes occurred.
+            after_snapshot = store.snapshot_store_text()
+            boundary_report = verify_no_code_writes(before_snapshot, after_snapshot, memory_root=store.memory_root)
+            allowed_roots = default_allowed_write_roots(store.memory_root)
+            enforcement = boundary_enforcement_report(
+                worker_type="dream",
+                allowed_roots=allowed_roots,
+                violations=boundary_report.get("violations", []),
+            )
+            store.write_boundary_audit(enforcement["report_id"], enforcement)
+
             duration_ms = round((time.monotonic() - started_at) * 1000)
             summary = {
                 "run_id": run_id,
@@ -158,6 +171,7 @@ def dream_run(
                 "files_consulted": [item["path"] for item in search_plan["files_consulted"]],
                 "latest_episode_timestamp": latest_input_timestamp,
                 "trigger_class": trigger_class,
+                "boundary_enforcement": enforcement,
             }
             store.save_dream_state(
                 {

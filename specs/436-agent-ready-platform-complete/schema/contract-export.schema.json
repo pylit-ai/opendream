@@ -66,6 +66,32 @@
           "schema_name": { "type": "string" }
         }
       }
+    },
+    "semantic_adapter_inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["adapter_id", "execution_owner", "auth_source", "ingest_mode"],
+        "properties": {
+          "adapter_id": { "type": "string" },
+          "execution_owner": { "type": "string" },
+          "auth_source": { "type": "string" },
+          "ingest_mode": { "type": "string" }
+        }
+      }
+    },
+    "semantic_auth_matrix": {
+      "type": "object",
+      "properties": {
+        "strategies": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "unsupported": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
     }
   }
 }

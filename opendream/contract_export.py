@@ -58,6 +58,38 @@ def build_contract_export(_workspace: Path) -> dict[str, Any]:
             "payload_sha256": _payload_sha256({}),
         },
     ]
+    # Semantic adapter inventory (438 bundle)
+    adapter_inventory = [
+        {
+            "adapter_id": "codex-account",
+            "execution_owner": "opendream-local",
+            "auth_source": "chatgpt-account",
+            "ingest_mode": "direct-report",
+        },
+        {
+            "adapter_id": "claude-scheduled-task",
+            "execution_owner": "vendor-runtime",
+            "auth_source": "claude-account-task",
+            "ingest_mode": "delegated-envelope",
+        },
+        {
+            "adapter_id": "cursor-automation",
+            "execution_owner": "vendor-runtime",
+            "auth_source": "cursor-account-automation",
+            "ingest_mode": "delegated-envelope",
+        },
+    ]
+    auth_matrix = {
+        "strategies": [
+            "deterministic",
+            "direct-provider",
+            "codex-account",
+            "claude-scheduled-task",
+            "cursor-automation",
+        ],
+        "unsupported": ["gemini-oauth-reuse"],
+    }
+
     return {
         "opendream_version": __version__,
         "cli_output_version": CLI_JSON_VERSION,
@@ -69,6 +101,9 @@ def build_contract_export(_workspace: Path) -> dict[str, Any]:
             "builtin://projection-engine",
             "builtin://semantic-dreamer",
             "builtin://harness-optimizer",
+            "builtin://claim-verifier",
+            "builtin://transcript-prober",
+            "builtin://reconciliation-sweeper",
         ],
         "supported_package_targets": [
             "codex",
@@ -77,4 +112,6 @@ def build_contract_export(_workspace: Path) -> dict[str, Any]:
             "github-copilot",
         ],
         "example_payloads": examples,
+        "semantic_adapter_inventory": adapter_inventory,
+        "semantic_auth_matrix": auth_matrix,
     }

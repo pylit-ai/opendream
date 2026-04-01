@@ -60,6 +60,21 @@
     "fallback_policy": {
       "type": "string",
       "enum": ["fail_fast", "fallback_to_deterministic"]
+    },
+    "execution_strategy": {
+      "type": "string",
+      "enum": ["deterministic", "direct-provider", "codex-account", "claude-scheduled-task", "cursor-automation"]
+    },
+    "preferred_auth_mode": {
+      "type": "string",
+      "enum": ["no-extra-key", "direct-provider"]
+    },
+    "active_adapter": {
+      "type": ["string", "null"]
+    },
+    "candidate_strategies": {
+      "type": "array",
+      "items": { "type": "string" }
     }
   },
   "additionalProperties": false

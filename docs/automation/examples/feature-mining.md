@@ -2,7 +2,7 @@
 
 Worked example for **Layer A + B** using separate automation jobs per record type. Adapt names and `memory_types_any` to match **your** consolidation rules and mining skill.
 
-**Prerequisites:** read [Dream task playbook](../dream-task-playbook.md) first. To run the same flow as an on-demand agent task, use the Cursor skill [`.cursor/skills/opendream-dream-automation/SKILL.md`](../../.cursor/skills/opendream-dream-automation/SKILL.md).
+**Prerequisites:** read [Dream task playbook](../dream-task-playbook.md) first. **Ordered CLI walkthrough** (`init` → `emit-event` → `maintain` → `automation register` → `tick`): [complete-operator-workflow.md](../complete-operator-workflow.md). **Config paths** (semantic dream vs automation): [semantic-mode-and-feature-radar-setup.md](../semantic-mode-and-feature-radar-setup.md). To run the same flow as an on-demand agent task, use the Cursor skill [`.cursor/skills/opendream-dream-automation/SKILL.md`](../../.cursor/skills/opendream-dream-automation/SKILL.md).
 
 ---
 

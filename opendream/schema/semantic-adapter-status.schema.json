@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "semantic-adapter-status.schema.json",
+  "type": "object",
+  "required": [
+    "workspace",
+    "active_strategy",
+    "auth_source",
+    "candidates",
+    "status"
+  ],
+  "properties": {
+    "workspace": {
+      "type": "string"
+    },
+    "active_strategy": {
+      "type": "string"
+    },
+    "auth_source": {
+      "type": "string"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "strategy",
+          "supported",
+          "reason"
+        ],
+        "properties": {
+          "strategy": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "degraded",
+        "disabled",
+        "unsupported"
+      ]
+    },
+    "last_run_owner": {
+      "type": "string"
+    },
+    "last_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "next_steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

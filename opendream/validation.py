@@ -37,6 +37,16 @@ REQUIRED_SCHEMA_FILES = (
     "harness-optimization-report.schema.json",
     "query-family.schema.json",
     "provider-entry.schema.json",
+    "semantic-adapter-manifest.schema.json",
+    "semantic-adapter-status.schema.json",
+    "semantic-setup-report.schema.json",
+    "delegated-semantic-envelope.schema.json",
+    "semantic-execution-policy.schema.json",
+    "relation-edge.schema.json",
+    "claim-verification-report.schema.json",
+    "transcript-probe-report.schema.json",
+    "reconciliation-report.schema.json",
+    "memory-excellence-scorecard.schema.json",
 )
 
 

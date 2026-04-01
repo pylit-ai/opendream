@@ -233,8 +233,13 @@ class MemoryStore:
         self.audit_benchmark_dir = self.memory_root / "audit" / "benchmark"
         self.audit_harness_dir = self.memory_root / "audit" / "harness"
         self.learned_context_topics_dir = self.topics_dir / "learned-context"
+        self.audit_reconciliation_dir = self.memory_root / "audit" / "reconciliation"
+        self.audit_claim_verification_dir = self.memory_root / "audit" / "claim_verification"
+        self.audit_transcript_probe_dir = self.memory_root / "audit" / "transcript_probe"
+        self.audit_boundary_dir = self.memory_root / "audit" / "boundary"
         self.locks_dir = self.memory_root / "locks"
         self.state_dir = self.memory_root / "state"
+        self.relation_edges_path = self.state_dir / "relation_edges.json"
         self.learned_context_path = self.state_dir / "learned_context_records.json"
         self.semantic_config_path = self.state_dir / "semantic_config.json"
         self.provider_registry_path = self.state_dir / "provider_registry.json"
@@ -395,6 +400,10 @@ class MemoryStore:
             self.audit_benchmark_dir,
             self.audit_harness_dir,
             self.learned_context_topics_dir,
+            self.audit_reconciliation_dir,
+            self.audit_claim_verification_dir,
+            self.audit_transcript_probe_dir,
+            self.audit_boundary_dir,
             self.locks_dir,
             self.state_dir,
         ]:
@@ -419,6 +428,8 @@ class MemoryStore:
             write_json(self.query_families_path, [])
         if not self.provider_registry_path.exists():
             write_json(self.provider_registry_path, [])
+        if not self.relation_edges_path.exists():
+            write_json(self.relation_edges_path, [])
         if not self.memory_md_path.exists():
             atomic_write_text(self.memory_md_path, "# Startup Memory Index\n\n")
 
@@ -1267,6 +1278,37 @@ class MemoryStore:
     def write_harness_report(self, run_id: str, payload: dict[str, Any]) -> Path:
         self.ensure_layout()
         path = self.audit_harness_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
+
+    def load_relation_edges(self) -> list[dict[str, Any]]:
+        result = read_json(self.relation_edges_path, [])
+        return result if isinstance(result, list) else []
+
+    def save_relation_edges(self, edges: list[dict[str, Any]]) -> None:
+        write_json(self.relation_edges_path, edges)
+
+    def write_claim_verification_audit(self, report_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.audit_claim_verification_dir / f"{report_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_transcript_probe_audit(self, run_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.audit_transcript_probe_dir / f"{run_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_reconciliation_audit(self, report_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.audit_reconciliation_dir / f"{report_id}.json"
+        write_json(path, payload)
+        return path
+
+    def write_boundary_audit(self, report_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.audit_boundary_dir / f"{report_id}.json"
         write_json(path, payload)
         return path
 

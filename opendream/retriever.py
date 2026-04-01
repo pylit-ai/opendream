@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from .relation_graph import build_relation_explanations, relation_aware_score_adjustment
 from .storage import MemoryStore
 from .util import (
     CLI_JSON_VERSION,
     STOPWORDS,
     parse_timestamp,
+    read_json,
     semantic_tokens,
     stable_id,
     summarize,
@@ -84,6 +86,15 @@ def retrieve(
         }
 
     records = store.load_durable_records()
+
+    # Load relation edges for relation-aware retrieval.
+    relation_edges: list[dict[str, Any]] = read_json(store.relation_edges_path, [])
+    edges_by_id: dict[str, list[dict[str, Any]]] = {}
+    for edge in relation_edges:
+        edges_by_id.setdefault(edge["from_id"], []).append(edge)
+        edges_by_id.setdefault(edge["to_id"], []).append(edge)
+    records_by_id = {r["memory_id"]: r for r in records}
+
     query_tokens = tokenize(query) - LEXICAL_NOISE_TOKENS
     query_semantic = semantic_tokens(query)
     use_embeddings = store.config["retrieval"]["embedding_enabled"] if embedding_enabled is None else embedding_enabled
@@ -172,7 +183,18 @@ def retrieve(
             if use_embeddings:
                 total_score += embedding_score * 3 + scope_prior
 
+        # Relation-aware adjustment.
+        record_edges = edges_by_id.get(record["memory_id"], [])
+        relation_adj = relation_aware_score_adjustment(record["memory_id"], record_edges)
+        total_score += relation_adj
+
+        # Procedural-aware boost for task-shaped queries.
+        if record["type"] == "procedural_workflow" and _is_task_shaped_query(query):
+            total_score += 1.5
+
         total_score = round(total_score, 4)
+
+        relation_notes = build_relation_explanations(record["memory_id"], record_edges, records_by_id)
 
         explanation = {
             "memory_id": record["memory_id"],
@@ -188,11 +210,14 @@ def retrieve(
                 "scope_prior": round(scope_prior, 4) if use_embeddings else 0.0,
                 "confidence": round(float(record["confidence"]), 4),
                 "salience": round(float(record["salience"]), 4),
+                "relation_adjustment": round(relation_adj, 4),
             },
             "why_included": _why_included(record, lexical_overlap, embedding_overlap),
+            "relation_notes": relation_notes,
             "why_excluded": None,
             "score": total_score,
             "status": record["status"],
+            "provenance_tier": record.get("provenance_tier", "inferred"),
         }
         scored.append((total_score, record, explanation))
 
@@ -270,6 +295,18 @@ def _build_memory_hurt(
         "contradicted_recalled": contradicted,
         "low_confidence_recalled": low_confidence,
     }
+
+
+_TASK_PATTERNS = {
+    "how", "step", "steps", "workflow", "migrate", "migration",
+    "deploy", "setup", "install", "configure", "run", "fix", "debug",
+}
+
+
+def _is_task_shaped_query(query: str) -> bool:
+    """Return True if the query looks like a task/procedure request."""
+    tokens = tokenize(query)
+    return bool(tokens & _TASK_PATTERNS)
 
 
 def _why_included(record: dict[str, Any], lexical_overlap: list[str], semantic_overlap: list[str]) -> str:

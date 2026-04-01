@@ -146,6 +146,42 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
         "recent_sessions": _recent_sessions(events),
         "recent_runs": runs[:5],
         "last_consolidation_run": runs[0] if runs else None,
+        "memory_excellence": _build_memory_excellence_overview(store, records),
+    }
+
+
+def _build_memory_excellence_overview(store: MemoryStore, records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build memory-excellence summary for observability overview."""
+    provenance_counts: dict[str, int] = defaultdict(int)
+    claim_class_counts: dict[str, int] = defaultdict(int)
+    for record in records:
+        provenance_counts[record.get("provenance_tier", "inferred")] += 1
+        claim_class_counts[record.get("claim_class", "derived_abstraction")] += 1
+
+    relation_edges = read_json(store.relation_edges_path, [])
+    edge_kind_counts: dict[str, int] = defaultdict(int)
+    for edge in relation_edges:
+        edge_kind_counts[edge.get("kind", "unknown")] += 1
+
+    verification_reports = _load_json_records(store.audit_claim_verification_dir)
+    reconciliation_reports = _load_json_records(store.audit_reconciliation_dir)
+    boundary_reports = _load_json_records(store.audit_boundary_dir)
+    probe_reports = _load_json_records(store.audit_transcript_probe_dir)
+
+    return {
+        "provenance_tiers": dict(sorted(provenance_counts.items())),
+        "claim_classes": dict(sorted(claim_class_counts.items())),
+        "relation_edges": {
+            "total": len(relation_edges),
+            "by_kind": dict(sorted(edge_kind_counts.items())),
+        },
+        "verification_reports": len(verification_reports),
+        "reconciliation_reports": len(reconciliation_reports),
+        "boundary_reports": len(boundary_reports),
+        "boundary_violations": sum(
+            1 for r in boundary_reports if not r.get("passed", True) and r.get("violations")
+        ),
+        "probe_reports": len(probe_reports),
     }
 
 
@@ -161,6 +197,11 @@ def _build_entities(store: MemoryStore) -> dict[str, Any]:
     exports = store.load_export_records()
     health = _build_health(memories, retrievals, runs, reviews)
     graph = _build_graph_entities(memories, retrievals, runs, annotations, reviews)
+    relation_edges = read_json(store.relation_edges_path, [])
+    verification_reports = _load_json_records(store.audit_claim_verification_dir)
+    probe_reports = _load_json_records(store.audit_transcript_probe_dir)
+    reconciliation_reports = _load_json_records(store.audit_reconciliation_dir)
+    boundary_reports = _load_json_records(store.audit_boundary_dir)
     return {
         "memories": memories,
         "runs": runs,
@@ -173,6 +214,11 @@ def _build_entities(store: MemoryStore) -> dict[str, Any]:
         "exports": exports,
         "health": health,
         "graph": graph,
+        "relation_edges": relation_edges,
+        "verification_reports": verification_reports,
+        "probe_reports": probe_reports,
+        "reconciliation_reports": reconciliation_reports,
+        "boundary_reports": boundary_reports,
     }
 
 

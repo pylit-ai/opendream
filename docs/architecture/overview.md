@@ -25,7 +25,8 @@ Enduring technical structure of the system. Task-level implementation detail bel
 - direct writes, dream runs, consolidation, retrieval, and release checks emit audit artifacts
 
 ## Boundaries
-- no external network or database boundary in the default implementation
+- no external database; **default deterministic** consolidation and automation paths do not open network connections from this package
+- optional semantic **provider** configuration is on-disk (`state/provider_registry.json`) for health checks and future vendor transports; current synthesis/verification paths remain in-process heuristics (see `opendream/semantic_dreamer.py`, `opendream/semantic_verifier.py`)
 - consolidator writes are restricted to the workspace `memory/` subtree
 - automation writes are restricted to the workspace `memory/automation/` subtree
 - topic markdown is a generated user-editable representation of canonical durable state
@@ -46,29 +47,46 @@ Workstream `436-agent-ready-platform-complete` (OpenSpec change `openspec/change
 
 ## Semantic sleep-time compute
 
-The semantic dreamer extends the system with offline model-driven synthesis, adding three architectural layers:
+The semantic dreamer (`opendream.semantic_dreamer`) extends dreaming with a learned-context pipeline configured via `state/semantic_config.json` and `state/provider_registry.json`. **Operator setup:** [docs/automation/semantic-mode-and-feature-radar-setup.md](../automation/semantic-mode-and-feature-radar-setup.md). **Command-order cookbook and LLM vs heuristic boundaries:** [docs/automation/complete-operator-workflow.md](../automation/complete-operator-workflow.md).
 
 ### Learned-context layer (ADR-007)
-- `opendream.learned_context` — model-generated semantic abstractions (summaries, inferred relationships, cross-record insights) stored under `memory/learned_context/`
+- Learned-context **records** persist via `opendream.storage` (`state/learned_context_records.json`, related topic paths)
 - Separate from canonical durable records; independent freshness TTL and staleness policy
-- Records carry provenance metadata (source records, generation timestamp, model version)
+- Records carry provenance metadata (source events, provider/model identifiers, prompt version)
 
 ### Semantic verifier and promotion (ADR-008)
-- `opendream.verifier` — two-stage verification pipeline for learned-context proposals
-- Deterministic checks (provenance, timestamps, contradictions) are required; semantic checks (groundedness, compression quality) are optional
-- Promotion state machine: `proposal` → `verified` → `promoted` → `stale`
-- Only `promoted` records enter default retrieval results
+- `opendream.semantic_verifier` — deterministic and heuristic semantic checks on proposals before promotion
+- Promotion integrates with the learned-context store; durable vs learned retrieval weighting follows ADR-009 in `opendream.retriever`
 
 ### Hybrid retrieval extensions (ADR-009)
-- `opendream.retriever` gains source-type weighting: durable facts outrank learned context on direct conflict; learned context may outrank raw facts when query family is strongly matched and freshness is high
-- Per-source attribution tags every injected context block
-- Harm-aware suppression filters flagged learned-context records
+- `opendream.retriever` applies source-type weighting and gating between durable facts and learned context
+- Per-source attribution and harm-aware suppression for learned-context records
 
 ### Benchmark suite and harness optimizer (ADR-010, ADR-011)
-- `opendream.benchmark` — unified evaluation framework with internal fixture tests, MemoryAgentBench-style clean-room adapters, and coding-task evals
-- Harness optimization via automated parameter sweeps over retrieval weights, context budgets, and prompt templates
-- Release gates require benchmark pass thresholds before tagging
-- Third-party provenance tracked in `THIRD_PARTY_NOTICES.md`; unlicensed benchmark protocols reimplemented via clean-room adapters only
+- `opendream.benchmark_adapters`, `opendream.evaluation`, `opendream.harness_optimizer` — internal fixtures, MemoryAgentBench-style adapters, coding-task evals, harness search
+- Third-party provenance in `THIRD_PARTY_NOTICES.md`; benchmark protocols reimplemented clean-room where applicable
+
+### Semantic execution strategies (ADR-012)
+Semantic mode runs are classified by execution strategy and auth source:
+
+- **direct-provider**: OpenDream calls a model API using an explicit API key. Ingest is a direct run report.
+- **codex-account**: OpenDream invokes Codex CLI as a local subprocess using the operator's ChatGPT account auth. Trusted local/private infrastructure only. Ingest is a direct run report.
+- **claude-scheduled-task**: Claude runs a scheduled task or command/skill. Results return via a delegated semantic envelope into `.opendream/inbox/semantic/claude-scheduled-task/`. Ingest is validated envelope-based.
+- **cursor-automation**: A Cursor automation writes a semantic envelope artifact into the repo. Results return via `.opendream/inbox/semantic/cursor-automation/`. Ingest is validated envelope-based.
+- **deterministic**: No model call. Always available as a fallback.
+
+The setup wizard (`opendream semantic setup`) resolves a single recommended strategy. `--prefer no-extra-key` (default) prefers vendor-account-backed paths; `--prefer direct-provider` prefers explicit API keys.
+
+### Delegated semantic ingest (ADR-013)
+- Vendor-delegated runs write structured envelopes to `.opendream/inbox/semantic/<adapter>/`
+- `opendream semantic ingest` validates envelopes against schema before converting to proposals
+- Invalid envelopes are archived, never silently applied
+- Accepted proposals enter the same verify-promote pipeline as direct runs
+
+### Unsupported paths
+- Gemini CLI OAuth reuse is explicitly unsupported and never recommended
+- Public/untrusted runners never default to account-backed execution
+- Arbitrary vendor OAuth session borrowing is forbidden
 
 ## Out of scope for this doc
 - Per-change rollout, file lists, and verification steps → `specs/<id>/plan.md`
