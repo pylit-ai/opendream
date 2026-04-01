@@ -91,6 +91,14 @@ opendream contract export --workspace "$WORKSPACE" --format json
 
 The payload validates against `opendream/schema/contract-export.schema.json`. **`cli_output_version`** is the same integer as command JSON (e.g. `status`) and matches the numeric meaning of **`output_version_map.cli_json`**. When the **export document** shape changes, bump **`output_version_map.contract_export`** and update consumers and golden fixtures together.
 
+## Direct-provider vs delegated execution
+
+- **Direct-provider**: Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, then run `opendream semantic bootstrap --workspace .`
+- **Codex account**: Install Codex CLI and sign in. Run `opendream semantic setup --prefer no-extra-key` on trusted infrastructure.
+- **Claude scheduled-task**: Run `opendream semantic adapters scaffold --workspace . --adapter claude-scheduled-task` to generate task templates.
+- **Cursor automation**: Run `opendream semantic adapters scaffold --workspace . --adapter cursor-automation` to generate automation prompts.
+- **Deterministic**: Always available. No model call, no API key needed.
+
 ## What not to hand-edit
 
 Prefer CLI and hooks over manual edits to paths under **`active_memory_root`**, for example:

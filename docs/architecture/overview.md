@@ -3,6 +3,9 @@
 ## Purpose
 Enduring technical structure of the system. Task-level implementation detail belongs in specs and plans.
 
+## Platform identity
+OpenDream is a **verified, bounded, relation-aware memory control plane** that accepts semantic work from multiple execution owners (direct-provider, Codex, Claude, Cursor, deterministic). It is not a note folder, a single-vendor wrapper, or a memory-agent monoculture. It exceeds note-oriented memory systems by offering typed canonical state, verify-before-assert patterns, contradiction/supersession relations, procedural memory, generated-only views, release scorecards, and cross-runtime execution support.
+
 ## High-level components
 - `opendream.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, dreaming, service lifecycle, retrieval, evaluation, contract export for agent integrations, and release-oriented verification hooks
 - `opendream.storage` — filesystem-backed memory store, lock handling, custom memory-root routing, markdown generation, and audit artifact emission
@@ -87,6 +90,18 @@ The setup wizard (`opendream semantic setup`) resolves a single recommended stra
 - Gemini CLI OAuth reuse is explicitly unsupported and never recommended
 - Public/untrusted runners never default to account-backed execution
 - Arbitrary vendor OAuth session borrowing is forbidden
+
+### Feature mining and radar integration
+- `automation scaffold-dream` generates adapter-specific job specs for feature-radar, bug-radar, fix-radar, and semantic-refresh
+- Layer A (durable capture) and Layer B (deterministic projection) are always local
+- Layer C (semantic refresh/reconciliation) can be delegated to vendor runtimes via adapter scaffolds
+- Projections from mining and radar remain non-canonical until promoted through the standard pipeline
+
+### Advanced runtime proof (ADR-016)
+- The advanced-runtime report (`advanced-runtime-report.schema.json`) combines memory-excellence scorecard results, execution-mode test coverage, and docs truthfulness checks
+- Generated during `make release-check` and archived alongside release artifacts
+- Release verdict (`pass`, `fail`, `partial`) gates the release — `fail` blocks shipping
+- Proves that memory-excellence guarantees hold across direct-provider and delegated execution modes
 
 ## Out of scope for this doc
 - Per-change rollout, file lists, and verification steps → `specs/<id>/plan.md`

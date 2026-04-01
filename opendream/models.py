@@ -512,3 +512,20 @@ class HarnessOptimizationReport:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class AdvancedRuntimeReport:
+    report_id: str
+    generated_at: str
+    modes: list[dict[str, Any]]
+    memory_excellence_summary: dict[str, Any]
+    docs_truthfulness: dict[str, Any]
+    release_verdict: str
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        if not self.notes:
+            payload.pop("notes")
+        return payload

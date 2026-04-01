@@ -90,6 +90,20 @@ def build_contract_export(_workspace: Path) -> dict[str, Any]:
         "unsupported": ["gemini-oauth-reuse"],
     }
 
+    execution_ownership = {
+        "description": "OpenDream is a cross-runtime memory control plane with explicit execution ownership",
+        "execution_owners": ["opendream-local", "vendor-runtime"],
+        "supported_strategies": auth_matrix["strategies"],
+        "unsupported_strategies": auth_matrix["unsupported"],
+        "trust_boundaries": {
+            "codex-account": "trusted-local-or-private-infrastructure-only",
+            "claude-scheduled-task": "vendor-owned-runtime",
+            "cursor-automation": "vendor-owned-runtime",
+            "direct-provider": "operator-managed-api-key",
+            "deterministic": "no-model-call",
+        },
+    }
+
     return {
         "opendream_version": __version__,
         "cli_output_version": CLI_JSON_VERSION,
@@ -114,4 +128,5 @@ def build_contract_export(_workspace: Path) -> dict[str, Any]:
         "example_payloads": examples,
         "semantic_adapter_inventory": adapter_inventory,
         "semantic_auth_matrix": auth_matrix,
+        "execution_ownership": execution_ownership,
     }

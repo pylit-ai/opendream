@@ -53,21 +53,9 @@ opendream eval performance --workspace .tmp/eval
 
 The scorecard covers write precision (20%), retrieval precision (20%), latency (15%), concurrency safety (15%), contradiction handling (10%), procedural reuse (10%), and gating accuracy (10%). Pass threshold: weighted total >= 80. See [docs/benchmarks/methodology.md](benchmarks/methodology.md) for full details.
 
-## Do I need extra API keys for semantic mode?
+**Q: Do I need extra API keys for semantic mode?**
 
-It depends on which **execution strategy** you choose:
-
-| Strategy | Extra API key? | How it works |
-|----------|---------------|-------------|
-| `deterministic` | No | No model call. Always available. |
-| `codex-account` | No | Uses your existing ChatGPT/Codex account via the Codex CLI. Trusted local infrastructure only. |
-| `claude-scheduled-task` | No | Claude runs the semantic refresh as a scheduled task under your existing plan. Results return via a delegated envelope. |
-| `cursor-automation` | No | A Cursor Automation runs the refresh under your account. Results return via a delegated envelope. |
-| `direct-provider` | Yes | OpenDream calls a model API directly. Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. |
-
-Run `opendream semantic setup --workspace "$PWD" --prefer no-extra-key` to see which no-extra-key strategies are available on your system. The setup wizard detects installed tools and recommends the best option.
-
-**Important**: OpenDream never borrows or reuses vendor OAuth sessions directly. Codex account-auth uses the Codex CLI subprocess (which manages its own auth cache). Claude and Cursor adapters are vendor-delegated: the vendor runtime owns the model call, and results return to OpenDream through a validated envelope. Gemini CLI OAuth reuse is **unsupported** and never recommended.
+A: Not always. If you have Codex, Claude, or Cursor installed, `opendream semantic setup --prefer no-extra-key` will recommend an account-backed or vendor-delegated path that requires no additional API key. If none are available, you can use `--prefer direct-provider` with an explicit Anthropic or OpenAI API key. Gemini CLI OAuth reuse is not supported.
 
 ## What is semantic sleep-time mode?
 

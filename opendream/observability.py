@@ -105,7 +105,9 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
             transcript_events += 1
         else:
             explicit_events += 1
-    return {
+    # Execution ownership (440 bundle)
+    semantic_config = store.load_semantic_config()
+    overview: dict[str, Any] = {
         "generated_at": timestamp,
         "store_health": {
             "initialized": store.is_initialized(),
@@ -147,7 +149,14 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
         "recent_runs": runs[:5],
         "last_consolidation_run": runs[0] if runs else None,
         "memory_excellence": _build_memory_excellence_overview(store, records),
+        "execution_ownership": {
+            "active_strategy": semantic_config.get("execution_strategy", "deterministic"),
+            "preferred_auth_mode": semantic_config.get("preferred_auth_mode", "no-extra-key"),
+            "active_adapter": semantic_config.get("active_adapter"),
+            "candidate_strategies": semantic_config.get("candidate_strategies", []),
+        },
     }
+    return overview
 
 
 def _build_memory_excellence_overview(store: MemoryStore, records: list[dict[str, Any]]) -> dict[str, Any]:

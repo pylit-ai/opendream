@@ -2,12 +2,12 @@
 
 ## Requirements
 
-### Requirement: runtime-superiority report
-OpenDream MUST generate a runtime-superiority report that combines execution-surface evidence with memory-excellence evidence.
+### Requirement: advanced-runtime report
+OpenDream MUST generate a advanced-runtime report that combines execution-surface evidence with memory-excellence evidence.
 
 #### Scenario: release-check
 - **WHEN** release-check runs
-- **THEN** it emits a schema-valid runtime-superiority report
+- **THEN** it emits a schema-valid advanced-runtime report
 
 ### Requirement: supported modes stay within excellence budgets
 Every supported execution mode MUST preserve the configured memory-excellence budgets.

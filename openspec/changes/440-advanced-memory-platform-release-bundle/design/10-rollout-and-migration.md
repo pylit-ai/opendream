@@ -14,7 +14,7 @@
 6. delegated envelope ingest
 7. feature-mining/radar scaffolds
 8. docs and release-note reconciliation
-9. runtime-superiority report and gates
+9. advanced-runtime report and gates
 
 ## Migration
 - existing direct-provider users continue to work

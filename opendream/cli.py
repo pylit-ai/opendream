@@ -37,6 +37,7 @@ from .bootstrap import bootstrap_index
 from .consolidator import consolidate
 from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
 from .evaluation import (
+    run_advanced_runtime_report,
     run_dream_fidelity_eval,
     run_memory_excellence_eval,
     run_memory_quality_eval,
@@ -88,6 +89,9 @@ TOP_LEVEL_EXAMPLES = """Examples:
   opendream deactivate --workspace "$PWD"
   opendream reconcile --workspace "$PWD"
   opendream eval memory-excellence --workspace "$PWD"
+  opendream eval advanced-runtime --workspace "$PWD"
+  opendream semantic setup --workspace "$PWD" --prefer no-extra-key
+  opendream automation scaffold-dream --workspace "$PWD" --adapter claude-scheduled-task --kind feature-radar
   opendream contract export --workspace "$PWD" --format json
 """
 
@@ -582,6 +586,11 @@ def command_automation_review(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def command_automation_scaffold_dream(args: argparse.Namespace) -> dict[str, Any]:
+    from .automation import scaffold_dream_job
+    return scaffold_dream_job(Path(args.workspace), adapter_id=args.adapter, kind=args.kind)
+
+
 def command_demo(args: argparse.Namespace) -> dict[str, Any]:
     workspace = Path(args.workspace)
     store = build_store(
@@ -835,6 +844,17 @@ def command_eval_memory_excellence(args: argparse.Namespace) -> dict[str, Any]:
             )
             print(hint, file=sys.stderr)
     return result
+
+
+def command_eval_advanced_runtime(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=getattr(args, "compat_mode", None))
+    return run_advanced_runtime_report(store, now=args.now)
 
 
 def command_reconcile(args: argparse.Namespace) -> dict[str, Any]:
@@ -1303,6 +1323,23 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(automation_review_parser)
     automation_review_parser.set_defaults(func=command_automation_review)
 
+    automation_scaffold_parser = automation_subparsers.add_parser(
+        "scaffold-dream",
+        help="Generate adapter-specific dream job scaffolds (feature-radar, bug-radar, fix-radar, semantic-refresh)",
+    )
+    automation_scaffold_parser.add_argument("--workspace", required=True)
+    automation_scaffold_parser.add_argument(
+        "--adapter", required=True,
+        choices=["codex-account", "claude-scheduled-task", "cursor-automation"],
+        help="Semantic adapter to scaffold for",
+    )
+    automation_scaffold_parser.add_argument(
+        "--kind", required=True,
+        choices=["feature-radar", "bug-radar", "fix-radar", "semantic-refresh"],
+        help="Kind of dream job to scaffold",
+    )
+    automation_scaffold_parser.set_defaults(func=command_automation_scaffold_dream)
+
     demo_parser = subparsers.add_parser("demo", help="Seed a deterministic demo workspace")
     demo_parser.add_argument("--workspace", required=True)
     demo_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
@@ -1495,6 +1532,15 @@ def build_parser() -> argparse.ArgumentParser:
     eval_excellence_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(eval_excellence_parser)
     eval_excellence_parser.set_defaults(func=command_eval_memory_excellence, result_failure_statuses=("failed",))
+
+    eval_runtime_parser = eval_subparsers.add_parser(
+        "advanced-runtime",
+        help="Generate advanced-runtime report with cross-mode excellence proof",
+    )
+    eval_runtime_parser.add_argument("--workspace", required=True)
+    eval_runtime_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_runtime_parser)
+    eval_runtime_parser.set_defaults(func=command_eval_advanced_runtime)
 
     # Reconciliation subcommand
     reconciliation_parser = subparsers.add_parser(

@@ -1,4 +1,4 @@
-# test-matrix.md — 440-memory-platform-superiority-release-bundle
+# test-matrix.md — 440-advanced-memory-platform-release-bundle
 
 | Area | Scenario | Type | Expected |
 |---|---|---|---|
@@ -19,5 +19,5 @@
 | status | semantic status matrix | integration | active/candidate strategies visible |
 | contract export | adapter inventory exported | integration | JSON includes strategy and owner fields |
 | docs | forbidden wording present | unit | wording gate fails |
-| superiority | generate runtime-superiority report | integration | report produced and schema-valid |
+| superiority | generate advanced-runtime report | integration | report produced and schema-valid |
 | release | full verify + release-check | e2e | all gates pass |

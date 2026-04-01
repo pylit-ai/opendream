@@ -47,6 +47,7 @@ REQUIRED_SCHEMA_FILES = (
     "transcript-probe-report.schema.json",
     "reconciliation-report.schema.json",
     "memory-excellence-scorecard.schema.json",
+    "advanced-runtime-report.schema.json",
 )
 
 

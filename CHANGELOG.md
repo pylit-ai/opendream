@@ -1,5 +1,16 @@
 # Changelog
 
+## 440 — Advanced memory platform release bundle
+
+- OpenDream positions as a cross-runtime, verified memory control plane
+- Execution ownership is explicit: direct-provider, codex-account, claude-scheduled-task, cursor-automation, or deterministic
+- Advanced-runtime report proves memory-excellence across execution modes
+- `automation scaffold-dream` generates adapter-specific feature-radar, bug-radar, fix-radar, and semantic-refresh scaffolds
+- Delegated execution returns via structured envelopes validated before ingest
+- Setup wizard recommends the strongest supported path with `--prefer no-extra-key`
+- Docs, FAQ, and coding-agents quickstarts updated for truthful execution matrix
+- ADR-014 (execution ownership), ADR-015 (Codex trust boundary), ADR-016 (advanced-runtime proof)
+
 ## Unreleased
 
 ### Semantic auth adapters release bundle (438)

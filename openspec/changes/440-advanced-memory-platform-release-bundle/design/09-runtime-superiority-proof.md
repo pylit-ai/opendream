@@ -1,4 +1,4 @@
-# 09-runtime-superiority-proof.md
+# 09-advanced-runtime-proof.md
 
 ## Goal
 Prove the release exceeds note-oriented systems and survives multiple execution surfaces.

@@ -237,6 +237,19 @@ opendream semantic ingest --workspace "$PWD" --scan-inbox
 
 Supported execution strategies: `deterministic` (always available), `direct-provider` (explicit API key), `codex-account` (ChatGPT account via Codex CLI, trusted local only), `claude-scheduled-task` (Claude-owned scheduled task, delegated envelope return), `cursor-automation` (Cursor-owned automation, delegated envelope return). Gemini OAuth reuse is **unsupported**.
 
+### Execution strategies
+
+| Strategy | Execution owner | Auth source | Extra key needed? |
+|---|---|---|---|
+| `deterministic` | OpenDream | none | No |
+| `direct-provider` | OpenDream | API key (Anthropic/OpenAI) | Yes |
+| `codex-account` | OpenDream (via Codex CLI) | ChatGPT account | No |
+| `claude-scheduled-task` | Claude (vendor runtime) | Claude account | No |
+| `cursor-automation` | Cursor (vendor runtime) | Cursor account | No |
+
+Run `opendream semantic setup --workspace .` to get a recommendation for your environment.
+Gemini CLI OAuth reuse is explicitly unsupported.
+
 **Feature / bug / fix radar** uses **`opendream automation`** (projection jobs), not `dream run`. Full walkthrough, file layouts, and how this differs from transcript dreaming: [`docs/automation/semantic-mode-and-feature-radar-setup.md`](./docs/automation/semantic-mode-and-feature-radar-setup.md).
 
 **Note:** The repo is stdlib-only; hybrid/semantic mode runs the full **pipeline and audits** with **in-process heuristic** synthesis/verification today. Provider registry + API keys gate **availability** and health checks; outbound LLM calls are not implemented in this package yet (see guide).

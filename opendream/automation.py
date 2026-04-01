@@ -495,3 +495,129 @@ def run_semantic_refresh(store: MemoryStore, *, now: str | None = None) -> dict[
         "total_learned_records": len(learned_records),
         "ran_at": timestamp,
     }
+
+
+def scaffold_dream_job(
+    workspace: Path,
+    adapter_id: str,
+    kind: str,
+) -> dict[str, Any]:
+    """Generate a scaffold job spec for feature-radar, bug-radar, fix-radar, or semantic-refresh.
+
+    Creates adapter-specific job spec files and delegated return path conventions.
+    """
+    valid_kinds = ("feature-radar", "bug-radar", "fix-radar", "semantic-refresh")
+    if kind not in valid_kinds:
+        raise ValueError(f"invalid kind: {kind!r}; use one of {valid_kinds}")
+
+    from .semantic_adapters import get_adapter_manifest
+
+    manifest = get_adapter_manifest(adapter_id)
+    if manifest is None:
+        raise ValueError(f"unknown adapter: {adapter_id}")
+
+    scaffold_dir = workspace / ".opendream" / "dream-jobs" / adapter_id
+    scaffold_dir.mkdir(parents=True, exist_ok=True)
+
+    ingest_mode = manifest.get("ingest_mode", "direct-report")
+    execution_owner = manifest.get("execution_owner", "opendream-local")
+
+    job_spec = {
+        "version": 1,
+        "job_id": f"{kind}-{adapter_id}",
+        "title": f"{kind} via {adapter_id}",
+        "description": f"Scaffolded {kind} job for {adapter_id} execution surface",
+        "skill_ref": "builtin://projection-engine",
+        "enabled": True,
+        "trigger": {
+            "type": "interval",
+            "interval_seconds": 3600 if kind == "semantic-refresh" else 86400,
+        },
+        "input_selectors": {
+            "memory_types_any": _kind_memory_types(kind),
+            "text_terms_any": [],
+            "statuses_any": ["active"],
+            "limit": 25,
+        },
+        "output": {
+            "record_type": kind,
+            "title_template": f"{kind} projection",
+            "summary_template": f"Automated {kind} projection from {{source_count}} source records",
+        },
+        "merge_policy": {"strategy": "replace_by_dedupe_key"},
+        "decay_policy": {"ttl_seconds": 604800},
+        "review_policy": {"auto_approve": False, "notify_on_create": True},
+        "security_policy": {"write_boundary": "memory-only", "network": False},
+        "adapter_context": {
+            "adapter_id": adapter_id,
+            "execution_owner": execution_owner,
+            "ingest_mode": ingest_mode,
+            "return_path": f".opendream/inbox/semantic/{adapter_id}/" if ingest_mode == "delegated-envelope" else None,
+        },
+    }
+
+    job_path = scaffold_dir / f"{kind}.json"
+    from .util import write_json
+    write_json(job_path, job_spec)
+
+    created_files = [str(job_path)]
+
+    # Create delegated prompt/instructions for vendor-runtime adapters
+    if ingest_mode == "delegated-envelope":
+        prompt_path = scaffold_dir / f"{kind}-prompt.md"
+        prompt_path.write_text(
+            f"# {kind} delegated task for OpenDream\n\n"
+            f"## Adapter: {adapter_id}\n"
+            f"## Kind: {kind}\n\n"
+            f"## Objective\n"
+            f"Run a {kind} cycle for the OpenDream memory workspace.\n\n"
+            f"## Steps\n"
+            f"1. Read the workspace memory store and recent episodes\n"
+            f"2. {_kind_objective(kind)}\n"
+            f"3. Synthesize proposals with provenance\n"
+            f"4. Write a delegated semantic envelope to:\n"
+            f"   `.opendream/inbox/semantic/{adapter_id}/<timestamp>-<run-id>.json`\n"
+            f"5. The envelope must validate against `delegated-semantic-envelope.schema.json`\n\n"
+            f"## Important\n"
+            f"- Do NOT modify durable memory directly\n"
+            f"- Write only to the designated inbox path\n"
+            f"- Include provenance metadata in the envelope\n"
+            f"- Projections are non-canonical until promoted through verification\n",
+            encoding="utf-8",
+        )
+        created_files.append(str(prompt_path))
+
+        # Ensure inbox exists
+        inbox = workspace / ".opendream" / "inbox" / "semantic" / adapter_id
+        inbox.mkdir(parents=True, exist_ok=True)
+
+    return {
+        "adapter_id": adapter_id,
+        "kind": kind,
+        "scaffold_dir": str(scaffold_dir),
+        "created_files": created_files,
+        "execution_owner": execution_owner,
+        "ingest_mode": ingest_mode,
+    }
+
+
+def _kind_memory_types(kind: str) -> list[str]:
+    """Return relevant memory types for a radar/refresh kind."""
+    mapping = {
+        "feature-radar": ["project_decision", "semantic_fact", "feature_request"],
+        "bug-radar": ["bug_report", "error_pattern", "semantic_fact"],
+        "fix-radar": ["bug_fix", "project_decision", "semantic_fact"],
+        "semantic-refresh": ["semantic_fact", "learned_context", "project_decision"],
+    }
+    return mapping.get(kind, ["semantic_fact"])
+
+
+def _kind_objective(kind: str) -> str:
+    """Return a human-readable objective description for a radar/refresh kind."""
+    mapping = {
+        "feature-radar": "Identify feature patterns and opportunities",
+        "bug-radar": "Identify bugs and issues from recent activity",
+        "fix-radar": "Identify fix patterns and resolutions",
+        "semantic-refresh": "Refresh learned context from recent activity",
+    }
+    return mapping.get(kind, "Analyze memory workspace")

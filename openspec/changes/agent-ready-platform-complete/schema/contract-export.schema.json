@@ -92,6 +92,27 @@
           "items": { "type": "string" }
         }
       }
+    },
+    "execution_ownership": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "execution_owners": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "supported_strategies": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "unsupported_strategies": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "trust_boundaries": {
+          "type": "object"
+        }
+      }
     }
   }
 }

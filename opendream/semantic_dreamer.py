@@ -366,6 +366,18 @@ def _extract_summary(content: str, family: dict[str, Any]) -> str:
     return summary[:500]
 
 
+def _strategy_trust_boundary(strategy: str) -> str:
+    """Map execution strategy to its trust boundary."""
+    mapping = {
+        "deterministic": "no-model-call",
+        "direct-provider": "operator-managed-api-key",
+        "codex-account": "trusted-local-or-private-infrastructure-only",
+        "claude-scheduled-task": "vendor-owned-runtime",
+        "cursor-automation": "vendor-owned-runtime",
+    }
+    return mapping.get(strategy, "unknown")
+
+
 def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
     """Get semantic dream status metadata."""
     config = store.load_semantic_config()
@@ -422,5 +434,6 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
             "active": sum(1 for f in families if f.get("status", "active") == "active"),
         },
         "last_semantic_run": dream_state.get("semantic_mode"),
+        "trust_boundary": _strategy_trust_boundary(config.get("execution_strategy", "deterministic")),
         "budgets": config.get("budgets", {}),
     }

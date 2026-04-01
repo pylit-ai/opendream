@@ -1,4 +1,4 @@
-# plan.md — 440-memory-platform-superiority-release-bundle
+# plan.md — 440-advanced-memory-platform-release-bundle
 
 ## Summary
 
@@ -47,7 +47,7 @@ This bundle makes those paths explicit, auditable, benchmarked, and correctly do
 - adapter manifests and status reports for Codex / Claude / Cursor
 - delegated semantic envelope and inbox/ingest pipeline
 - adapter-specific feature-mining and semantic-refresh scaffold generators
-- runtime-superiority report that merges execution-mode evidence with the memory-excellence scorecard
+- advanced-runtime report that merges execution-mode evidence with the memory-excellence scorecard
 
 ### Explicit dependencies
 This bundle assumes the memory-excellence bundle is present or lands first. Its guarantees are relied on, not redefined:
@@ -76,7 +76,7 @@ This bundle assumes the memory-excellence bundle is present or lands first. Its 
 - add semantic adapter manifest/status schemas
 - add delegated semantic envelope schema
 - add semantic setup report schema
-- add runtime-superiority report schema
+- add advanced-runtime report schema
 - extend contract export with execution ownership and adapter inventory
 
 ## Interfaces
@@ -119,7 +119,7 @@ This bundle assumes the memory-excellence bundle is present or lands first. Its 
 6. land delegated envelope ingest
 7. land feature-mining and semantic-refresh scaffolds
 8. land docs / release-note / benchmark truthfulness updates
-9. land runtime-superiority report and release gates
+9. land advanced-runtime report and release gates
 
 ## Rollback
 1. disable adapter-backed semantic execution
@@ -133,7 +133,7 @@ This bundle assumes the memory-excellence bundle is present or lands first. Its 
 - integration tests for delegated ingest and feature-mining scaffolds
 - contract export tests
 - docs and release-note wording checks
-- runtime-superiority report tests
+- advanced-runtime report tests
 - `make verify` and `make release-check` include cross-mode memory-excellence checks
 
 ## ADRs required
@@ -142,4 +142,4 @@ Yes. Promote enduring decisions on:
 - delegated ingest model
 - Codex account-backed trust boundary
 - unsupported-path policy
-- runtime-superiority proof contract
+- advanced-runtime proof contract

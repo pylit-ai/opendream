@@ -393,6 +393,21 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
                 timeout_seconds=timeout_seconds,
             )
         )
+        runtime_workspace = temp_path / "runtime-eval"
+        stages.append(
+            run_stage(
+                "eval-advanced-runtime",
+                [
+                    str(venv_dir / scripts_dir / "opendream"),
+                    "eval",
+                    "advanced-runtime",
+                    "--workspace",
+                    str(runtime_workspace),
+                ],
+                cwd=temp_path,
+                timeout_seconds=timeout_seconds,
+            )
+        )
 
         built_artifacts = sorted(dist_dir.glob("*"))
         artifact_hashes = {path.name: sha256_path(path) for path in built_artifacts}

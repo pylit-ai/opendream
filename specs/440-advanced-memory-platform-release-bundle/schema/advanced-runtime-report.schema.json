@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "advanced-runtime-report.schema.json",
+  "type": "object",
+  "required": [
+    "report_id",
+    "generated_at",
+    "modes",
+    "memory_excellence_summary",
+    "docs_truthfulness",
+    "release_verdict"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "modes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "mode",
+          "tested",
+          "scorecard_passed"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "tested": {
+            "type": "boolean"
+          },
+          "scorecard_passed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "memory_excellence_summary": {
+      "type": "object",
+      "required": [
+        "scorecard_passed",
+        "scores"
+      ],
+      "properties": {
+        "scorecard_passed": {
+          "type": "boolean"
+        },
+        "scores": {
+          "type": "object"
+        },
+        "thresholds": {
+          "type": "object"
+        }
+      }
+    },
+    "docs_truthfulness": {
+      "type": "object",
+      "required": [
+        "passed",
+        "checks"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "check",
+              "passed"
+            ],
+            "properties": {
+              "check": {
+                "type": "string"
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "detail": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "release_verdict": {
+      "enum": [
+        "pass",
+        "fail",
+        "partial"
+      ]
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

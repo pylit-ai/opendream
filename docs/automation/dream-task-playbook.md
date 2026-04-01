@@ -115,6 +115,28 @@ When using `claude-scheduled-task` or `cursor-automation`, the vendor runtime ow
 
 ---
 
+## Delegated execution (Layer C)
+
+For vendor-runtime adapters (Claude, Cursor), Layer C (semantic refresh, reconciliation) can be delegated:
+
+```sh
+# Generate scaffolds for a delegated semantic-refresh via Claude
+opendream automation scaffold-dream --workspace . --adapter claude-scheduled-task --kind semantic-refresh
+
+# Generate feature-radar scaffold for Cursor
+opendream automation scaffold-dream --workspace . --adapter cursor-automation --kind feature-radar
+```
+
+Delegated results return via `.opendream/inbox/semantic/<adapter>/` as structured envelopes. Ingest with:
+
+```sh
+opendream semantic ingest --workspace . --scan-inbox
+```
+
+Projections remain non-canonical until promoted through the standard verification pipeline.
+
+---
+
 ## 7. Verification
 
 ### In this repository

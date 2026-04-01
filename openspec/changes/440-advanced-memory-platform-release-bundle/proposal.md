@@ -1,4 +1,4 @@
-# 440-memory-platform-superiority-release-bundle
+# 440-advanced-memory-platform-release-bundle
 
 ## Why
 

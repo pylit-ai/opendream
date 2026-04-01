@@ -1,4 +1,4 @@
-# release-gates.md — 440-memory-platform-superiority-release-bundle
+# release-gates.md — 440-advanced-memory-platform-release-bundle
 
 A release candidate is blocked unless all gates below pass.
 
@@ -54,8 +54,8 @@ A release candidate is blocked unless all gates below pass.
 - docs no longer imply unsupported hidden auth, generic OAuth borrowing, or ambiguous semantic ownership
 - docs position OpenDream as a verified, bounded, relation-aware memory control plane
 
-## RG-10 Runtime-superiority proof
-- release evidence includes a runtime-superiority report that combines:
+## RG-10 Advanced runtime proof
+- release evidence includes a advanced-runtime report that combines:
   - memory-excellence scorecard
   - execution-mode matrix
   - repeated coding-task deltas
@@ -69,4 +69,4 @@ A release candidate is blocked unless all gates below pass.
   - setup-wizard tests
   - delegated-ingest tests
   - docs wording checks
-  - runtime-superiority report generation
+  - advanced-runtime report generation

@@ -684,3 +684,50 @@ specs:
       - docs distinguish direct-provider vs vendor-delegated execution
       - unsupported OAuth reuse is never recommended
       - make verify and make release-check pass with adapter coverage
+  - id: 440-advanced-memory-platform-release-bundle
+    title: advanced memory platform — cross-runtime execution surfaces, delegated ingest, runtime superiority proof
+    status: active
+    owner: platform
+    created: 2026-04-01
+    touched_surfaces:
+      - memory-runtime
+      - cli
+      - schemas
+      - adapters
+      - docs
+      - verification
+      - tests
+      - specs-lifecycle
+      - benchmarks
+      - automation-runtime
+    depends_on:
+      - 404-framework-adapter-pack
+      - 430-sota-dream-runtime-bundle
+      - 432-first-party-service-lifecycle
+      - 433-zero-touch-agent-activation
+      - 434-zero-touch-activation-and-command-surface-compression
+      - 435-opendream-automations
+      - 438-semantic-auth-adapters-release-bundle
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/semantic_setup.py
+      - opendream/semantic_adapters.py
+      - opendream/semantic_ingest.py
+      - opendream/automation.py
+      - opendream/evaluation.py
+      - opendream/contract_export.py
+      - opendream/observability.py
+      - opendream/schema/advanced-runtime-report.schema.json
+      - docs/architecture/overview.md
+      - docs/adr/ADR-014-execution-ownership-matrix.md
+      - docs/adr/ADR-015-codex-trust-boundary.md
+      - docs/adr/ADR-016-advanced-runtime-proof-contract.md
+    verification:
+      - setup wizard recommends strongest supported path with no-extra-key preference
+      - execution ownership is explicit in status, contract, and docs
+      - delegated envelopes validate before ingest and cannot bypass verification
+      - feature-mining and radar scaffolds work across supported execution surfaces
+      - advanced-runtime report proves memory-excellence across execution modes
+      - docs distinguish what OpenDream does vs what vendor runtimes do
+      - make verify and make release-check pass with cross-runtime coverage
