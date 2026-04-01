@@ -86,6 +86,8 @@ TOP_LEVEL_EXAMPLES = """Examples:
   opendream status --workspace "$PWD"
   opendream activate --workspace "$PWD" --repair
   opendream deactivate --workspace "$PWD"
+  opendream reconcile --workspace "$PWD"
+  opendream eval memory-excellence --workspace "$PWD"
   opendream contract export --workspace "$PWD" --format json
 """
 
@@ -480,12 +482,23 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
             min_interval_seconds=args.min_interval_seconds,
         )
         return payload
+    store = stores[0]
+    if not store.is_initialized():
+        print(
+            "warning: store is not initialized at this workspace. "
+            "Run 'opendream init --workspace <path>' to set up.",
+            file=sys.stderr,
+        )
     payload = compressed_status(
-        stores[0],
+        store,
         now=args.now,
         min_new_events=args.min_new_events,
         min_interval_seconds=args.min_interval_seconds,
     )
+    if not store.is_initialized():
+        payload.setdefault("warnings", []).append(
+            "store not initialized — run 'opendream init' first"
+        )
     if args.format == "human":
         payload["__raw_output__"] = format_compressed_status(payload)
     return payload
@@ -800,6 +813,27 @@ def command_eval_memory_excellence(args: argparse.Namespace) -> dict[str, Any]:
     if not store.is_initialized():
         store.initialize(store_kind="project", compat_mode=getattr(args, "compat_mode", None))
     result = run_memory_excellence_eval(store, now=args.now)
+    if not result.get("passed"):
+        failed_dimensions = []
+        scores = result.get("scores", {})
+        thresholds = result.get("thresholds", {})
+        for key, threshold in thresholds.items():
+            score = scores.get(key, 0.0)
+            if key in ("stale_claim_rate", "irrelevant_recall_rate"):
+                if score > threshold:
+                    failed_dimensions.append(f"  {key}: {score} > {threshold} (ceiling)")
+            else:
+                if score < threshold:
+                    failed_dimensions.append(f"  {key}: {score} < {threshold} (floor)")
+        if failed_dimensions:
+            hint = (
+                "memory-excellence scorecard did not pass. Failed dimensions:\n"
+                + "\n".join(failed_dimensions)
+                + "\nThis is expected on demo or sparse workspaces. "
+                "Thresholds are strict release gates — run against a workspace "
+                "with verified memory to see passing scores."
+            )
+            print(hint, file=sys.stderr)
     return result
 
 

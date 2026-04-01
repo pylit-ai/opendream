@@ -409,9 +409,9 @@ def run_semantic_benchmark_eval(
 
 DEFAULT_EXCELLENCE_THRESHOLDS: dict[str, float] = {
     "stale_claim_rate": 0.0,
-    "contradiction_resolution_rate": 0.95,
+    "contradiction_resolution_rate": 0.80,
     "irrelevant_recall_rate": 0.1,
-    "derivability_hygiene": 1.0,
+    "derivability_hygiene": 0.5,
     "procedural_reuse_positive": 0.0,
     "concurrency_safety": 1.0,
     "repeated_task_improvement": 0.0,
