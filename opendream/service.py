@@ -606,6 +606,10 @@ def _autowire_claude(workspace: Path, *, force: bool, uninstall: bool) -> dict[s
     _ensure_script(post_path, _hook_script("claude", "post"))
     changed_files.extend([str(pre_path), str(post_path)])
 
+    # Clean up old deprecated keys
+    hooks.pop("preTask", None)
+    hooks.pop("postTask", None)
+
     # Add to UserPromptSubmit event
     user_prompt_submit = hooks.setdefault("UserPromptSubmit", [])
     if not user_prompt_submit:

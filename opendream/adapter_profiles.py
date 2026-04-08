@@ -182,6 +182,10 @@ def _install_claude_code_hooks(store: MemoryStore, aid: str) -> dict[str, Any]:
     pre_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh'
     post_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
 
+    # Clean up old deprecated keys
+    hooks.pop("preTask", None)
+    hooks.pop("postTask", None)
+
     # Ensure UserPromptSubmit event exists and has the pre-task hook
     user_prompt_submit = hooks.setdefault("UserPromptSubmit", [])
     if not user_prompt_submit:
