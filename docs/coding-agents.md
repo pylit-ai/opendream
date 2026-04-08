@@ -17,6 +17,29 @@ Short reference for tools that drive the CLI (hooks, IDE agents, scripts).
 - **`opendream retrieve`** (and **`prepare-context`**): very short queries may return **`gated: true`** with a **`reason`** (token threshold) instead of ranked hits — intentional noise gate, not a parser error.
 - **Contract:** `opendream contract export --workspace "$WORKSPACE" --format json` — the first argument after **`contract`** must be **`export`**, not the workspace path.
 
+## Multi-workspace awareness (catalog)
+
+When an agent is coordinating across many repos, use the machine-local
+workspace catalog to enumerate workspaces instead of searching the
+filesystem:
+
+- **List:** `opendream workspace list` — JSON of every known workspace
+  on this machine (fields include `workspace_path`, `status_kind`,
+  `memory_dir`, `activation_state_summary`, `service_state_summary`).
+- **Inspect:** `opendream workspace inspect --workspace "$WORKSPACE"` —
+  one entry with full status.
+- **Refresh:** `opendream workspace doctor --workspace "$WORKSPACE"`
+  re-probes a known workspace; `--all` re-probes every entry.
+- **Discover:** `opendream workspace scan --root <path>` or
+  `--all-roots` (roots are managed via
+  `opendream workspace roots add --path <path>`). Scans are strictly
+  opt-in: OpenDream never crawls your home directory on its own.
+
+The catalog is a **derived convenience index** at
+`~/.opendream/catalog.json`; workspace-local `.opendream/` state remains
+canonical. The local web UI exposes `/workspaces` backed by the same
+index. See [ADR-017](./adr/ADR-017-machine-local-workspace-catalog.md).
+
 ## Typical hook sequence
 
 For **multi-layer automation** (durable capture, deterministic automation projections, optional scheduled reconciliation), see [Dream task playbook](automation/dream-task-playbook.md). Cursor agents can follow the on-demand skill at [`.cursor/skills/opendream-dream-automation/SKILL.md`](../.cursor/skills/opendream-dream-automation/SKILL.md).

@@ -81,6 +81,9 @@
     },
     {
       "name": "update-service"
+    },
+    {
+      "name": "workspace"
     }
   ],
   "contract_schema_version": "contract-export.schema.json",
@@ -254,6 +257,15 @@
     },
     {
       "name": "worker-health.schema.json"
+    },
+    {
+      "name": "workspace-catalog.schema.json"
+    },
+    {
+      "name": "workspace-roots.schema.json"
+    },
+    {
+      "name": "workspace-scan-report.schema.json"
     }
   ],
   "semantic_adapter_inventory": [

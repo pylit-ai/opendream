@@ -79,6 +79,27 @@ OpenDream's benchmark suite has three tiers:
 
 Run with `opendream eval semantic-benchmark --workspace .tmp/eval --mode hybrid`. See [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for provenance of benchmark concepts.
 
+## How do I see all my OpenDream workspaces?
+
+OpenDream keeps a **machine-local workspace catalog** at
+`~/.opendream/catalog.json`. It is a derived convenience index — the
+workspace itself (`<repo>/.opendream/`) remains canonical.
+
+```bash
+opendream workspace list                            # every known workspace
+opendream workspace roots add --path ~/src          # teach the catalog where to look
+opendream workspace scan --all-roots                # explicit, opt-in scan
+opendream workspace inspect --workspace ~/src/app
+opendream workspace doctor --workspace ~/src/app
+opendream workspace forget --workspace ~/src/gone   # removes only the index entry
+```
+
+The local web UI exposes the same index at `/workspaces`. There is no
+whole-home scan, no background crawl, and no remote sync — every
+discovery step is operator-initiated. See
+[ADR-017](adr/ADR-017-machine-local-workspace-catalog.md) for the
+derived-not-canonical rule.
+
 ## How do I get started?
 
 ```bash

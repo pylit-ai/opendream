@@ -110,6 +110,38 @@ Human-facing behavior is described in this README and in [`AGENTS.md`](./AGENTS.
 
 ---
 
+## Multi-workspace catalog and dashboard
+
+OpenDream keeps canonical state per workspace (under `.opendream/`). Once you
+use it across many repos, a first-party machine-local index makes it easy to
+see every known workspace in one place.
+
+```bash
+# List every known workspace on this machine (derived, not canonical).
+opendream workspace list
+
+# Teach the catalog where to look.
+opendream workspace roots add --path ~/src
+opendream workspace scan --all-roots
+
+# Inspect, refresh, or drop an entry (the workspace itself is never touched).
+opendream workspace inspect --workspace ~/src/project-a
+opendream workspace doctor   --workspace ~/src/project-a
+opendream workspace forget   --workspace ~/src/project-a
+```
+
+Catalog files live at `~/.opendream/catalog.json` and `~/.opendream/roots.json`
+(override with `OPENDREAM_CATALOG_HOME`). The catalog is a **convenience
+index** — workspace `.opendream/` state remains the source of truth, scans
+only run on explicitly configured roots, and no data ever leaves your machine.
+
+The local web UI exposes the same view at `/workspaces`, with per-workspace
+cards that link into the existing detail pages. See
+[ADR-017](./docs/adr/ADR-017-machine-local-workspace-catalog.md) for why the
+catalog is derived rather than canonical.
+
+---
+
 ## Observability UI
 
 Nothing starts a server unless you ask. The UI reads **one** workspace’s on-disk memory store (default relative path `.opendream/memory/` under the workspace).

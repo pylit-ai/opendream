@@ -48,6 +48,9 @@ REQUIRED_SCHEMA_FILES = (
     "reconciliation-report.schema.json",
     "memory-excellence-scorecard.schema.json",
     "advanced-runtime-report.schema.json",
+    "workspace-catalog.schema.json",
+    "workspace-roots.schema.json",
+    "workspace-scan-report.schema.json",
 )
 
 

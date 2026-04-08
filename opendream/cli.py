@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
-from . import __version__
+from . import __version__, workspace_catalog
 from .activation import (
     SUPPORTED_TARGETS,
     activate_agents,
@@ -302,6 +302,7 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
     }
     if args.activate_configured:
         result["activation"] = activate_agents(store, targets="configured", repair=False)
+    result["catalog_update"] = workspace_catalog.safe_update(store.workspace, discovered_by="init")
     return result
 
 
@@ -309,7 +310,10 @@ def command_activate(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
     if not store.is_initialized():
         store.initialize(store_kind="project", compat_mode=args.compat_mode)
-    return activate_agents(store, targets=args.targets, repair=args.repair)
+    result = activate_agents(store, targets=args.targets, repair=args.repair)
+    if isinstance(result, dict):
+        result["catalog_update"] = workspace_catalog.safe_update(store.workspace, discovered_by="activate")
+    return result
 
 
 def command_activation_plan(args: argparse.Namespace) -> dict[str, Any]:
@@ -911,7 +915,7 @@ def command_install_service(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
     if not store.is_initialized():
         store.initialize(store_kind="project", compat_mode=args.compat_mode)
-    return install_service(
+    result = install_service(
         store,
         interval_seconds=args.interval_seconds,
         backend_mode=args.backend,
@@ -919,6 +923,11 @@ def command_install_service(args: argparse.Namespace) -> dict[str, Any]:
         install_root=Path(args.install_root) if args.install_root else None,
         start=not args.no_start,
     )
+    if isinstance(result, dict):
+        result["catalog_update"] = workspace_catalog.safe_update(
+            store.workspace, discovered_by="install-service"
+        )
+    return result
 
 
 def command_uninstall_service(args: argparse.Namespace) -> dict[str, Any]:
@@ -939,6 +948,72 @@ def command_update_service(args: argparse.Namespace) -> dict[str, Any]:
         service_mode=args.service_mode,
         install_root=Path(args.install_root) if args.install_root else None,
         restart=not args.no_restart,
+    )
+
+
+def command_workspace_list(args: argparse.Namespace) -> dict[str, Any]:
+    entries = workspace_catalog.list_entries()
+    result: dict[str, Any] = {"entries": entries, "count": len(entries)}
+    if getattr(args, "format", "json") == "text":
+        lines = [f"{len(entries)} workspaces"]
+        for entry in entries:
+            lines.append(
+                f"  [{entry['status_kind']}] {entry['workspace_path']} "
+                f"(memory_dir={entry.get('memory_dir')}, "
+                f"activation={entry.get('activation_state_summary')}, "
+                f"service={entry.get('service_state_summary')})"
+            )
+        result["__raw_output__"] = "\n".join(lines)
+    return result
+
+
+def command_workspace_inspect(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.workspace:
+        raise ValueError("workspace inspect requires --workspace")
+    entry = workspace_catalog.inspect_entry(args.workspace)
+    if entry is None:
+        return {"status": "missing", "workspace": args.workspace}
+    return {"status": "ok", "entry": entry}
+
+
+def command_workspace_scan(args: argparse.Namespace) -> dict[str, Any]:
+    roots: list[Path | str] = list(args.root or [])
+    report = workspace_catalog.scan_roots(
+        roots if roots else None,
+        all_roots=args.all_roots,
+    )
+    status = "ok" if not report["errors"] else "partial"
+    return {"status": status, "report": report}
+
+
+def command_workspace_roots_list(args: argparse.Namespace) -> dict[str, Any]:  # noqa: ARG001
+    return {"roots": workspace_catalog.list_roots()}
+
+
+def command_workspace_roots_add(args: argparse.Namespace) -> dict[str, Any]:
+    added = workspace_catalog.add_root(args.path)
+    return {"status": "added" if added else "exists", "path": str(Path(args.path).expanduser().resolve())}
+
+
+def command_workspace_roots_remove(args: argparse.Namespace) -> dict[str, Any]:
+    removed = workspace_catalog.remove_root(args.path)
+    return {"status": "removed" if removed else "missing", "path": str(Path(args.path).expanduser().resolve())}
+
+
+def command_workspace_forget(args: argparse.Namespace) -> dict[str, Any]:
+    removed = workspace_catalog.forget_workspace(args.workspace)
+    return {
+        "status": "forgotten" if removed else "missing",
+        "workspace": str(Path(args.workspace).expanduser().resolve()),
+    }
+
+
+def command_workspace_doctor(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.workspace and not args.all_workspaces:
+        raise ValueError("workspace doctor requires --workspace or --all")
+    return workspace_catalog.doctor(
+        workspace=args.workspace,
+        all_workspaces=bool(args.all_workspaces),
     )
 
 
@@ -1748,6 +1823,61 @@ def build_parser() -> argparse.ArgumentParser:
     service_autowire_parser.add_argument("--uninstall", action="store_true")
     add_layout_arguments(service_autowire_parser)
     service_autowire_parser.set_defaults(func=command_service_autowire)
+
+    workspace_parser = subparsers.add_parser(
+        "workspace",
+        help="Primary: machine-local workspace catalog and dashboard",
+    )
+    workspace_subparsers = workspace_parser.add_subparsers(dest="workspace_command", required=True)
+
+    ws_list_parser = workspace_subparsers.add_parser(
+        "list", help="List all known OpenDream workspaces on this machine"
+    )
+    ws_list_parser.add_argument("--format", choices=["text", "json"], default="json")
+    ws_list_parser.set_defaults(func=command_workspace_list)
+
+    ws_inspect_parser = workspace_subparsers.add_parser(
+        "inspect", help="Inspect one catalog entry"
+    )
+    ws_inspect_parser.add_argument("--workspace", help="Workspace path")
+    ws_inspect_parser.add_argument("--entry-id", dest="entry_id", help="(reserved) stable entry id")
+    ws_inspect_parser.set_defaults(func=command_workspace_inspect)
+
+    ws_scan_parser = workspace_subparsers.add_parser(
+        "scan", help="Scan configured roots for .opendream workspaces"
+    )
+    ws_scan_parser.add_argument("--root", action="append", default=[], help="Explicit scan root (repeatable)")
+    ws_scan_parser.add_argument("--all-roots", action="store_true", help="Scan every configured root")
+    ws_scan_parser.set_defaults(func=command_workspace_scan)
+
+    ws_roots_parser = workspace_subparsers.add_parser(
+        "roots", help="Manage configured scan roots"
+    )
+    ws_roots_subparsers = ws_roots_parser.add_subparsers(dest="roots_command", required=True)
+
+    ws_roots_list_parser = ws_roots_subparsers.add_parser("list", help="List configured scan roots")
+    ws_roots_list_parser.set_defaults(func=command_workspace_roots_list)
+
+    ws_roots_add_parser = ws_roots_subparsers.add_parser("add", help="Add a scan root")
+    ws_roots_add_parser.add_argument("--path", required=True)
+    ws_roots_add_parser.set_defaults(func=command_workspace_roots_add)
+
+    ws_roots_remove_parser = ws_roots_subparsers.add_parser("remove", help="Remove a scan root")
+    ws_roots_remove_parser.add_argument("--path", required=True)
+    ws_roots_remove_parser.set_defaults(func=command_workspace_roots_remove)
+
+    ws_forget_parser = workspace_subparsers.add_parser(
+        "forget", help="Remove a catalog entry (does not touch workspace state)"
+    )
+    ws_forget_parser.add_argument("--workspace", required=True)
+    ws_forget_parser.set_defaults(func=command_workspace_forget)
+
+    ws_doctor_parser = workspace_subparsers.add_parser(
+        "doctor", help="Diagnose catalog entries"
+    )
+    ws_doctor_parser.add_argument("--workspace", help="Specific workspace to diagnose")
+    ws_doctor_parser.add_argument("--all", dest="all_workspaces", action="store_true")
+    ws_doctor_parser.set_defaults(func=command_workspace_doctor)
 
     return parser
 

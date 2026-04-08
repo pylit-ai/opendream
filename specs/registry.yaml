@@ -731,3 +731,33 @@ specs:
       - advanced-runtime report proves memory-excellence across execution modes
       - docs distinguish what OpenDream does vs what vendor runtimes do
       - make verify and make release-check pass with cross-runtime coverage
+  - id: 441-workspace-catalog-dashboard-bundle
+    title: machine-local workspace catalog and dashboard
+    status: active
+    owner: platform
+    created: 2026-04-08
+    touched_surfaces:
+      - workspace-catalog
+      - workspace-cli
+      - workspace-dashboard
+      - workspace-docs
+      - workspace-privacy
+    depends_on:
+      - 432-first-party-service-lifecycle
+      - 434-zero-touch-activation-and-command-surface-compression
+      - 436-agent-ready-platform-complete
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/workspace_catalog.py
+      - opendream/schema/workspace-catalog.schema.json
+      - opendream/schema/workspace-roots.schema.json
+      - opendream/schema/workspace-scan-report.schema.json
+      - docs/adr/ADR-017-machine-local-workspace-catalog.md
+    verification:
+      - catalog remains derived and machine-local; workspace .opendream/ state is canonical
+      - scans only run on explicitly configured roots
+      - workspace list/inspect/scan/roots/forget/doctor commands work and are tested
+      - /workspaces dashboard route renders from the local catalog
+      - docs explain both the workspace-scoped state model and the machine-local catalog
+      - make verify includes catalog/dashboard tests

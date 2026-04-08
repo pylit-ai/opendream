@@ -27,6 +27,14 @@ OpenDream is a **verified, bounded, relation-aware memory control plane** that a
 - prompt context may include both durable memory and active automation projections, but they remain separate stores
 - direct writes, dream runs, consolidation, retrieval, and release checks emit audit artifacts
 
+## Machine-local workspace catalog
+- `opendream.workspace_catalog` maintains a **derived, machine-local** index of OpenDream workspaces at `~/.opendream/catalog.json` plus explicit scan roots at `~/.opendream/roots.json` (override via `OPENDREAM_CATALOG_HOME`)
+- the catalog is **never canonical**: per-workspace `.opendream/` state remains the source of truth and the catalog can be rebuilt from it via `workspace scan`
+- updates are event-driven (successful `init`/`activate`/`install-service`) or explicit (`workspace scan --root <path>` / `--all-roots`) — there is no default whole-home crawl, background discovery, or remote sync
+- the CLI surfaces `workspace list/inspect/scan/roots/forget/doctor` and the local web UI exposes `/workspaces` backed by the same index; both must agree on naming and status kinds (`ok|stale|missing|broken`)
+- catalog failures are surfaced explicitly via the `catalog_update` block in primary-command results; they never corrupt workspace-local state
+- rationale: [`docs/adr/ADR-017-machine-local-workspace-catalog.md`](../adr/ADR-017-machine-local-workspace-catalog.md)
+
 ## Boundaries
 - no external database; **default deterministic** consolidation and automation paths do not open network connections from this package
 - optional semantic **provider** configuration is on-disk (`state/provider_registry.json`) for health checks and future vendor transports; current synthesis/verification paths remain in-process heuristics (see `opendream/semantic_dreamer.py`, `opendream/semantic_verifier.py`)

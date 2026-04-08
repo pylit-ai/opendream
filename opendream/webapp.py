@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from . import workspace_catalog
 from .observability import (
     build_graph,
     create_annotation,
@@ -62,6 +63,7 @@ INDEX_HTML = """<!doctype html>
       </div>
       <nav>
         <a href="/overview">Overview</a>
+        <a href="/workspaces">Workspaces</a>
         <a href="/memories">Memories</a>
         <a href="/runs">Runs</a>
         <a href="/retrievals">Retrievals</a>
@@ -216,7 +218,81 @@ INDEX_HTML = """<!doctype html>
       app.innerHTML = [panel('Context Viewer', `<div class="split"><div>${pretty({selected:data.selected_memory_ids, omitted:data.omission_reasons, startup:data.startup_index_snapshot})}</div><div><pre>${data.assembled_text}</pre></div></div>`, true)].join('');
     }
 
+    async function renderWorkspaces() {
+      const data = await fetchJson('/api/workspaces');
+      const summary = data.summary;
+      const entries = data.entries;
+      const searchParams = new URLSearchParams(location.search);
+      const q = (searchParams.get('q') || '').toLowerCase();
+      const statusFilter = searchParams.get('status') || '';
+      const filtered = entries.filter(e => {
+        if (statusFilter && e.status_kind !== statusFilter) return false;
+        if (q) {
+          const hay = (e.workspace_path + ' ' + (e.workspace_name || '')).toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+      const rows = filtered.map(e => {
+        const statusCls = e.status_kind === 'ok' ? 'active-badge' : (e.status_kind === 'stale' ? 'warning-badge' : 'error-badge');
+        return `<tr>
+          <td><a href="/workspaces/${encodeURIComponent(e.workspace_path)}">${e.workspace_name}</a><div class="muted" style="font-size:11px">${e.workspace_path}</div></td>
+          <td><span class="badge ${statusCls}">${e.status_kind}</span></td>
+          <td>${e.activation_state_summary || '<span class="muted">—</span>'}</td>
+          <td>${e.service_state_summary || '<span class="muted">—</span>'}</td>
+          <td>${e.memory_dir || '<span class="muted">—</span>'}</td>
+          <td>${e.semantic_state_summary || '<span class="muted">—</span>'}</td>
+          <td class="muted">${e.last_seen_at || ''}</td>
+        </tr>`;
+      }).join('');
+      app.innerHTML = [
+        panel('Workspaces Overview', `
+          <div class="metric"><div class="label">Total</div><div class="value">${summary.total}</div></div>
+          <div class="metric"><div class="label">Healthy</div><div class="value">${summary.ok}</div></div>
+          <div class="metric"><div class="label">With Service</div><div class="value">${summary.with_service}</div></div>
+          <div class="metric"><div class="label">Stale/Missing/Broken</div><div class="value">${summary.stale + summary.missing + summary.broken}</div></div>
+        `, true),
+        panel('Workspace Catalog', `
+          <form class="row" onsubmit="event.preventDefault(); location.search = '?' + qs({q:this.q.value, status:this.status.value});">
+            <input name="q" placeholder="search path/name" value="${q}">
+            <select name="status">
+              <option value="">any status</option>
+              <option value="ok" ${statusFilter==='ok'?'selected':''}>ok</option>
+              <option value="stale" ${statusFilter==='stale'?'selected':''}>stale</option>
+              <option value="missing" ${statusFilter==='missing'?'selected':''}>missing</option>
+              <option value="broken" ${statusFilter==='broken'?'selected':''}>broken</option>
+            </select>
+            <button type="submit">Filter</button>
+            <span class="muted">${filtered.length} of ${entries.length} entries</span>
+          </form>
+          <table>
+            <thead><tr><th>Workspace</th><th>Status</th><th>Activation</th><th>Service</th><th>Memory Dir</th><th>Semantic</th><th>Last Seen</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="7" class="muted">No workspaces in the local catalog. Run <code>opendream workspace scan --root &lt;path&gt;</code> or initialize a workspace.</td></tr>'}</tbody>
+          </table>
+        `, true),
+        panel('Privacy', `<p class="muted">This catalog is machine-local. Workspace <code>.opendream/</code> state remains canonical. Scans only run on explicitly configured roots.</p>`, true),
+      ].join('');
+    }
+
+    async function renderWorkspaceDetail(rawPath) {
+      const path = decodeURIComponent(rawPath);
+      const data = await fetchJson('/api/workspaces/' + encodeURIComponent(path));
+      if (data.status === 'missing') {
+        app.innerHTML = [panel('Workspace Detail', `<p class="muted">No catalog entry for <code>${path}</code>.</p>`, true)].join('');
+        return;
+      }
+      app.innerHTML = [
+        panel('Workspace Detail', `
+          <h3>${data.entry.workspace_name}</h3>
+          <p class="muted">${data.entry.workspace_path}</p>
+          ${pretty(data.entry)}
+        `, true),
+      ].join('');
+    }
+
     if (route === '/' || route === '/overview') renderOverview();
+    else if (route === '/workspaces') renderWorkspaces();
+    else if (route.startsWith('/workspaces/')) renderWorkspaceDetail(route.split('/').pop());
     else if (route === '/memories') renderMemories();
     else if (route.startsWith('/memories/')) renderMemories(route.split('/').pop());
     else if (route === '/runs') renderRuns();
@@ -292,6 +368,19 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         entities = index["entities"]
         if parsed.path == "/api/overview":
             self._write_json(index["overview"])
+            return
+        if parsed.path == "/api/workspaces":
+            self._write_json(_workspace_dashboard_payload())
+            return
+        if parsed.path.startswith("/api/workspaces/"):
+            from urllib.parse import unquote
+
+            workspace_arg = unquote(parsed.path[len("/api/workspaces/") :])
+            entry = workspace_catalog.inspect_entry(workspace_arg)
+            if entry is None:
+                self._write_json({"status": "missing", "workspace": workspace_arg})
+            else:
+                self._write_json({"status": "ok", "entry": entry})
             return
         if parsed.path == "/api/memories":
             result = query_memories(
@@ -405,6 +494,30 @@ def serve_observability(store: MemoryStore, *, host: str = "127.0.0.1", port: in
         return {"status": "serving", "host": actual_host, "port": actual_port, "url": f"http://{actual_host}:{actual_port}"}
     finally:
         server.server_close()
+
+
+def _workspace_dashboard_payload() -> dict[str, Any]:
+    """Build the read-model payload used by the /workspaces dashboard route.
+
+    Uses the machine-local catalog for fast initial render; the dashboard
+    can trigger re-probes via the CLI (``opendream workspace doctor``) rather
+    than performing synchronous disk work inside the HTTP handler.
+    """
+    entries = workspace_catalog.list_entries()
+    summary = {
+        "total": len(entries),
+        "ok": sum(1 for e in entries if e.get("status_kind") == "ok"),
+        "stale": sum(1 for e in entries if e.get("status_kind") == "stale"),
+        "missing": sum(1 for e in entries if e.get("status_kind") == "missing"),
+        "broken": sum(1 for e in entries if e.get("status_kind") == "broken"),
+        "with_service": sum(1 for e in entries if e.get("service_state_summary")),
+        "with_semantic": sum(1 for e in entries if e.get("semantic_state_summary")),
+    }
+    return {
+        "summary": summary,
+        "entries": entries,
+        "roots": workspace_catalog.list_roots(),
+    }
 
 
 def _find_by_id(rows: list[dict[str, Any]], key: str, value: str) -> dict[str, Any] | None:
