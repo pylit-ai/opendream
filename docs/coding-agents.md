@@ -23,9 +23,10 @@ When an agent is coordinating across many repos, use the machine-local
 workspace catalog to enumerate workspaces instead of searching the
 filesystem:
 
-- **List:** `opendream workspace list` — JSON of every known workspace
-  on this machine (fields include `workspace_path`, `status_kind`,
-  `memory_dir`, `activation_state_summary`, `service_state_summary`).
+- **List:** `opendream workspace list` prints a human-readable table by
+  default; agents should pass `--format json` to get machine-readable
+  output (fields include `workspace_path`, `status_kind`, `memory_dir`,
+  `activation_state_summary`, `service_state_summary`).
 - **Inspect:** `opendream workspace inspect --workspace "$WORKSPACE"` —
   one entry with full status.
 - **Refresh:** `opendream workspace doctor --workspace "$WORKSPACE"`
@@ -39,6 +40,25 @@ The catalog is a **derived convenience index** at
 `~/.opendream/catalog.json`; workspace-local `.opendream/` state remains
 canonical. The local web UI exposes `/workspaces` backed by the same
 index. See [ADR-017](./adr/ADR-017-machine-local-workspace-catalog.md).
+
+Event-driven catalog updates are **sandbox-aware**: they never write the
+real home catalog when running under a test runner or against a workspace
+under a tempdir unless `OPENDREAM_CATALOG_HOME` is explicitly set. The
+skipped status is surfaced on the command's `catalog_update` block
+(`status: skipped`, `reason: sandboxed-environment|tempdir-workspace`), so
+agents running inside CI or scratch sandboxes can still see that the
+write was intentionally declined. Set `OPENDREAM_CATALOG_DISABLE=1` to
+turn off catalog writes entirely.
+
+**Upgrading an existing workspace:** after `pip install -U opendream`,
+run `opendream status --workspace "$PWD"` (lazy schema migration) and
+then `opendream workspace doctor --workspace "$PWD"` to re-probe and
+refresh the catalog entry for the upgraded repo. Agents backfilling
+existing repos that pre-date the catalog should prefer
+`opendream workspace scan --all-roots` (after
+`opendream workspace roots add --path <dir>`) or explicit
+`opendream workspace doctor --workspace <path>` calls — never a
+filesystem crawl.
 
 ## Typical hook sequence
 

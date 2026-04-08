@@ -954,15 +954,29 @@ def command_update_service(args: argparse.Namespace) -> dict[str, Any]:
 def command_workspace_list(args: argparse.Namespace) -> dict[str, Any]:
     entries = workspace_catalog.list_entries()
     result: dict[str, Any] = {"entries": entries, "count": len(entries)}
-    if getattr(args, "format", "json") == "text":
-        lines = [f"{len(entries)} workspaces"]
-        for entry in entries:
-            lines.append(
-                f"  [{entry['status_kind']}] {entry['workspace_path']} "
-                f"(memory_dir={entry.get('memory_dir')}, "
-                f"activation={entry.get('activation_state_summary')}, "
-                f"service={entry.get('service_state_summary')})"
+    if getattr(args, "format", "text") == "text":
+        if not entries:
+            result["__raw_output__"] = (
+                "0 workspaces known on this machine.\n"
+                "  run `opendream init` in a repo, or "
+                "`opendream workspace scan --root <path>` to discover existing ones."
             )
+            return result
+        # Compact human-readable table: status, path, activation, service.
+        rows = [("STATUS", "WORKSPACE", "ACTIVATION", "SERVICE")]
+        for entry in entries:
+            rows.append(
+                (
+                    str(entry.get("status_kind") or "-"),
+                    str(entry.get("workspace_path") or "-"),
+                    str(entry.get("activation_state_summary") or "-"),
+                    str(entry.get("service_state_summary") or "-"),
+                )
+            )
+        widths = [max(len(r[i]) for r in rows) for i in range(4)]
+        lines = [f"{len(entries)} workspaces"]
+        for row in rows:
+            lines.append("  " + "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)))
         result["__raw_output__"] = "\n".join(lines)
     return result
 
@@ -1833,7 +1847,7 @@ def build_parser() -> argparse.ArgumentParser:
     ws_list_parser = workspace_subparsers.add_parser(
         "list", help="List all known OpenDream workspaces on this machine"
     )
-    ws_list_parser.add_argument("--format", choices=["text", "json"], default="json")
+    ws_list_parser.add_argument("--format", choices=["text", "json"], default="text")
     ws_list_parser.set_defaults(func=command_workspace_list)
 
     ws_inspect_parser = workspace_subparsers.add_parser(

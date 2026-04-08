@@ -11,7 +11,10 @@ proposal and ``docs/adr/ADR-017-machine-local-workspace-catalog.md``.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -498,6 +501,52 @@ def doctor(
     }
 
 
+def _tempdir_prefixes() -> tuple[str, ...]:
+    prefixes: set[str] = set()
+    with contextlib.suppress(OSError):
+        prefixes.add(str(Path(tempfile.gettempdir()).resolve()))
+    # macOS resolves /var -> /private/var; capture both so resolved workspace
+    # paths under /private/var/folders/... are recognized as temp.
+    prefixes.add("/tmp")
+    prefixes.add("/private/tmp")
+    prefixes.add("/private/var/folders")
+    prefixes.add("/var/folders")
+    return tuple(prefixes)
+
+
+def _workspace_is_under_tempdir(workspace: Path | str) -> bool:
+    try:
+        resolved = str(Path(workspace).expanduser().resolve())
+    except OSError:
+        return False
+    return any(resolved == p or resolved.startswith(p + os.sep) for p in _tempdir_prefixes())
+
+
+def _is_test_runner_active() -> bool:
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+    if "_pytest" in sys.modules or "pytest" in sys.modules:
+        return True
+    argv0 = (sys.argv[0] if sys.argv else "") or ""
+    return "unittest" in argv0 or "pytest" in argv0
+
+
+def _is_sandboxed_environment() -> bool:
+    """Return True when the current process should not touch the real home catalog.
+
+    Prevents event-driven hooks from silently polluting the operator's real
+    ``~/.opendream/catalog.json`` during test runs that do not isolate
+    ``OPENDREAM_CATALOG_HOME`` themselves. Honors an explicit
+    ``OPENDREAM_CATALOG_HOME`` override and an ``OPENDREAM_CATALOG_DISABLE``
+    kill switch.
+    """
+    if os.environ.get("OPENDREAM_CATALOG_DISABLE"):
+        return True
+    if os.environ.get("OPENDREAM_CATALOG_HOME"):
+        return False
+    return _is_test_runner_active()
+
+
 def safe_update(
     workspace: Path | str,
     *,
@@ -510,6 +559,27 @@ def safe_update(
     failure does not corrupt the primary command's return value. Failures are
     surfaced explicitly via the ``catalog_update`` block in the command result.
     """
+    if home is None and _is_sandboxed_environment():
+        return {
+            "status": "skipped",
+            "reason": "sandboxed-environment",
+            "workspace": _normalize_workspace_path(workspace),
+        }
+    if (
+        home is None
+        and not os.environ.get("OPENDREAM_CATALOG_HOME")
+        and _workspace_is_under_tempdir(workspace)
+    ):
+        # Refuse to write the real home catalog for transient tempdir
+        # workspaces. Tests, scripted fixtures, and one-off scratch runs should
+        # never accumulate entries in the operator's real catalog. Callers that
+        # genuinely want to track a tempdir workspace can pass an explicit
+        # ``home`` or set ``OPENDREAM_CATALOG_HOME``.
+        return {
+            "status": "skipped",
+            "reason": "tempdir-workspace",
+            "workspace": _normalize_workspace_path(workspace),
+        }
     try:
         entry = upsert_entry(workspace, discovered_by=discovered_by, home=home)
     except Exception as exc:  # noqa: BLE001 - event hooks must never crash the caller

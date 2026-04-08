@@ -94,11 +94,52 @@ opendream workspace doctor --workspace ~/src/app
 opendream workspace forget --workspace ~/src/gone   # removes only the index entry
 ```
 
-The local web UI exposes the same index at `/workspaces`. There is no
-whole-home scan, no background crawl, and no remote sync — every
-discovery step is operator-initiated. See
+`workspace list` defaults to a human-readable table; pass `--format json`
+for machine output. Override the catalog location with
+`OPENDREAM_CATALOG_HOME=<dir>`, or disable catalog writes entirely with
+`OPENDREAM_CATALOG_DISABLE=1`. The local web UI exposes the same index at
+`/workspaces`. There is no whole-home scan, no background crawl, and no
+remote sync — every discovery step is operator-initiated. See
 [ADR-017](adr/ADR-017-machine-local-workspace-catalog.md) for the
 derived-not-canonical rule.
+
+## I upgraded OpenDream in a workspace I was already running — what do I do?
+
+Your workspace-local `.opendream/` state is canonical and survives the
+upgrade. After installing the new version:
+
+```bash
+pip install -U opendream
+opendream status --workspace "$PWD"            # lazy schema migration
+opendream workspace doctor --workspace "$PWD"  # register + refresh catalog entry
+```
+
+`workspace doctor` re-probes the workspace and upserts its catalog entry so
+the upgraded repo shows up in `opendream workspace list` and the
+`/workspaces` dashboard. The workspace directory is never rewritten by
+catalog operations.
+
+## I have existing workspaces that aren't showing up in `workspace list` — how do I add them?
+
+The catalog only tracks workspaces it has been told about (via `init`,
+`activate`, `install-service`, explicit `workspace doctor`, or an opt-in
+scan). To backfill existing repos:
+
+```bash
+# Bulk: configure scan roots once, scan on demand.
+opendream workspace roots add --path ~/src
+opendream workspace scan --all-roots
+
+# Or: register one workspace explicitly.
+opendream workspace doctor --workspace ~/src/project-a
+
+# Refresh every known entry at once.
+opendream workspace doctor --all
+```
+
+Scans are depth-bounded and prune noisy directories. If an entry points at
+a repo you've since deleted, `workspace forget --workspace <path>` removes
+the index entry without touching anything else.
 
 ## How do I get started?
 

@@ -53,6 +53,19 @@ dashboard route in the local web UI consume the same catalog.
 Catalog update failures must be surfaced explicitly, never hidden, and
 must not corrupt the primary command's return value.
 
+### Sandbox guards on event-driven writes
+Event-driven catalog updates (from `init`, `activate`, `install-service`)
+**must not touch the real `~/.opendream/catalog.json`** when the caller
+is a test runner or the target workspace lives under a tempdir, unless
+the operator has set `OPENDREAM_CATALOG_HOME` to an explicit location.
+`safe_update` enforces this by returning a structured
+`{"status": "skipped", "reason": "sandboxed-environment" | "tempdir-workspace"}`
+block on the command result. An `OPENDREAM_CATALOG_DISABLE=1` kill switch
+turns off catalog writes entirely. This is a direct consequence of the
+Constitution's operator-control and no-silent-side-effect rules:
+transient or scripted workspaces must never silently accumulate in the
+operator's real home catalog, but the skip must still be visible.
+
 ## Consequences
 ### Easier
 - `opendream workspace list` answers "which workspaces do I have?" in

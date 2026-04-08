@@ -134,11 +134,51 @@ Catalog files live at `~/.opendream/catalog.json` and `~/.opendream/roots.json`
 (override with `OPENDREAM_CATALOG_HOME`). The catalog is a **convenience
 index** — workspace `.opendream/` state remains the source of truth, scans
 only run on explicitly configured roots, and no data ever leaves your machine.
+By default `workspace list` prints a human-readable table; add `--format json`
+for machine output.
 
 The local web UI exposes the same view at `/workspaces`, with per-workspace
 cards that link into the existing detail pages. See
 [ADR-017](./docs/adr/ADR-017-machine-local-workspace-catalog.md) for why the
 catalog is derived rather than canonical.
+
+### Upgrading an existing workspace
+
+When you upgrade OpenDream in a repo that already has `.opendream/` state:
+
+```bash
+pip install -U opendream         # or pipx upgrade opendream
+opendream status --workspace "$PWD"    # workspace-local state migrates lazily
+opendream workspace doctor --workspace "$PWD"   # register + refresh catalog entry
+```
+
+Your workspace `.opendream/` directory is canonical and is never rewritten by
+catalog operations. `workspace doctor` re-probes activation, service, and
+semantic state and upserts the catalog entry so the upgraded workspace appears
+in `opendream workspace list` and the `/workspaces` dashboard. If the CLI
+complains about stale schemas, run `opendream repair --workspace "$PWD"` first.
+
+### Backfilling existing workspaces into the index
+
+The catalog only indexes workspaces it has been told about. To register repos
+that existed before you upgraded:
+
+```bash
+# Option A: bulk discovery via configured scan roots (recommended).
+opendream workspace roots add --path ~/src
+opendream workspace roots add --path ~/work
+opendream workspace scan --all-roots
+
+# Option B: register a specific workspace explicitly.
+opendream workspace doctor --workspace ~/src/project-a
+
+# Refresh every known entry after a batch of upgrades.
+opendream workspace doctor --all
+```
+
+Scans are strictly opt-in to configured roots, bounded in depth, and prune
+noisy directories (`.git`, `node_modules`, `.venv`, …). Transient tempdir
+workspaces are never written to the real `~/.opendream/catalog.json`.
 
 ---
 
