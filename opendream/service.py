@@ -570,14 +570,29 @@ def _autowire_claude(workspace: Path, *, force: bool, uninstall: bool) -> dict[s
     warnings: list[str] = []
     payload = _load_json_file(settings_path)
     hooks = payload.setdefault("hooks", {})
-    pre_task = hooks.setdefault("preTask", [])
-    post_task = hooks.setdefault("postTask", [])
-    pre_cmd = 'sh .opendream/hooks/claude-pre-task.sh "$CLAUDE_TASK"'
-    post_cmd = 'sh .opendream/hooks/claude-post-task.sh "$CLAUDE_SUMMARY"'
+
+    pre_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh'
+    post_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
 
     if uninstall:
-        pre_task[:] = [item for item in pre_task if item != pre_cmd]
-        post_task[:] = [item for item in post_task if item != post_cmd]
+        # Remove from UserPromptSubmit event
+        if "UserPromptSubmit" in hooks:
+            user_prompt_submit = hooks["UserPromptSubmit"]
+            for matcher in user_prompt_submit:
+                if isinstance(matcher, dict) and "hooks" in matcher:
+                    matcher["hooks"] = [
+                        h for h in matcher["hooks"]
+                        if not (isinstance(h, dict) and h.get("command") == pre_command)
+                    ]
+        # Remove from Stop event
+        if "Stop" in hooks:
+            stop = hooks["Stop"]
+            for matcher in stop:
+                if isinstance(matcher, dict) and "hooks" in matcher:
+                    matcher["hooks"] = [
+                        h for h in matcher["hooks"]
+                        if not (isinstance(h, dict) and h.get("command") == post_command)
+                    ]
         if settings_path.exists():
             atomic_write_text(settings_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
             changed_files.append(str(settings_path))
@@ -590,17 +605,79 @@ def _autowire_claude(workspace: Path, *, force: bool, uninstall: bool) -> dict[s
     _ensure_script(pre_path, _hook_script("claude", "pre"))
     _ensure_script(post_path, _hook_script("claude", "post"))
     changed_files.extend([str(pre_path), str(post_path)])
-    if pre_cmd not in pre_task:
-        pre_task.append(pre_cmd)
-    if post_cmd not in post_task:
-        post_task.append(post_cmd)
+
+    # Add to UserPromptSubmit event
+    user_prompt_submit = hooks.setdefault("UserPromptSubmit", [])
+    if not user_prompt_submit:
+        user_prompt_submit.append({
+            "hooks": [
+                {"type": "command", "command": pre_command}
+            ]
+        })
+    else:
+        found = False
+        for matcher in user_prompt_submit:
+            if isinstance(matcher, dict) and "hooks" in matcher:
+                hooks_list = matcher["hooks"]
+                if not any(h.get("command") == pre_command for h in hooks_list if isinstance(h, dict)):
+                    hooks_list.append({"type": "command", "command": pre_command})
+                found = True
+                break
+        if not found:
+            user_prompt_submit.append({
+                "hooks": [
+                    {"type": "command", "command": pre_command}
+                ]
+            })
+
+    # Add to Stop event
+    stop = hooks.setdefault("Stop", [])
+    if not stop:
+        stop.append({
+            "hooks": [
+                {"type": "command", "command": post_command}
+            ]
+        })
+    else:
+        found = False
+        for matcher in stop:
+            if isinstance(matcher, dict) and "hooks" in matcher:
+                hooks_list = matcher["hooks"]
+                if not any(h.get("command") == post_command for h in hooks_list if isinstance(h, dict)):
+                    hooks_list.append({"type": "command", "command": post_command})
+                found = True
+                break
+        if not found:
+            stop.append({
+                "hooks": [
+                    {"type": "command", "command": post_command}
+                ]
+            })
+
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(settings_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     changed_files.append(str(settings_path))
-    if not force and any(item for item in pre_task if item != pre_cmd):
-        warnings.append("preserved existing Claude preTask hooks")
-    if not force and any(item for item in post_task if item != post_cmd):
-        warnings.append("preserved existing Claude postTask hooks")
+    if not force:
+        # Check for other hooks we might be preserving
+        has_other_pre = False
+        has_other_post = False
+        for event in hooks:
+            if event == "UserPromptSubmit":
+                for matcher in hooks.get("UserPromptSubmit", []):
+                    if isinstance(matcher, dict) and "hooks" in matcher:
+                        for h in matcher["hooks"]:
+                            if isinstance(h, dict) and h.get("command") != pre_command:
+                                has_other_pre = True
+            if event == "Stop":
+                for matcher in hooks.get("Stop", []):
+                    if isinstance(matcher, dict) and "hooks" in matcher:
+                        for h in matcher["hooks"]:
+                            if isinstance(h, dict) and h.get("command") != post_command:
+                                has_other_post = True
+        if has_other_pre:
+            warnings.append("preserved existing Claude hooks in UserPromptSubmit")
+        if has_other_post:
+            warnings.append("preserved existing Claude hooks in Stop")
     return {"target": "claude-code", "changed_files": changed_files, "warnings": warnings}
 
 

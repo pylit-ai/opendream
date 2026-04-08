@@ -59,6 +59,19 @@ Manual equivalent: `python3 -m venv .venv && .venv/bin/pip install -e .` from th
 
 If `python3` is missing, install from [python.org](https://www.python.org/downloads/) or your OS package manager.
 
+**System dependencies** — OpenDream uses `jq` to parse JSON in hook scripts (for Claude Code integration). Install via your OS package manager:
+
+```bash
+# macOS
+brew install jq
+
+# Ubuntu / Debian
+sudo apt-get install jq
+
+# Other systems
+# See: https://jqlang.github.io/jq/download/
+```
+
 </details>
 
 ---

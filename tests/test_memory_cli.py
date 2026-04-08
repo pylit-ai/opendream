@@ -1362,7 +1362,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         claude_settings = self.workspace / ".claude" / "settings.json"
         claude_settings.parent.mkdir(parents=True, exist_ok=True)
         claude_settings.write_text(
-            json.dumps({"hooks": {"preTask": ["echo keep-me"], "postTask": ["echo keep-me-too"]}}, indent=2) + "\n",
+            json.dumps({"hooks": {"OtherEvent": [{"hooks": [{"type": "command", "command": "echo keep-me"}]}]}}, indent=2) + "\n",
             encoding="utf-8",
         )
         agents_path = self.workspace / "AGENTS.md"
@@ -1377,14 +1377,26 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(second["status"], "configured")
 
         settings_payload = json.loads(claude_settings.read_text(encoding="utf-8"))
-        self.assertEqual(
-            settings_payload["hooks"]["preTask"].count('sh .opendream/hooks/claude-pre-task.sh "$CLAUDE_TASK"'),
-            1,
+        # Check that the new event-based hooks are present
+        self.assertIn("UserPromptSubmit", settings_payload["hooks"])
+        self.assertIn("Stop", settings_payload["hooks"])
+        # Verify the commands are only added once (idempotent)
+        user_prompt_submit_hooks = settings_payload["hooks"]["UserPromptSubmit"]
+        pre_cmd_count = sum(
+            1 for matcher in user_prompt_submit_hooks
+            if isinstance(matcher, dict) and "hooks" in matcher
+            for h in matcher["hooks"]
+            if isinstance(h, dict) and "claude-pre-task.sh" in h.get("command", "")
         )
-        self.assertEqual(
-            settings_payload["hooks"]["postTask"].count('sh .opendream/hooks/claude-post-task.sh "$CLAUDE_SUMMARY"'),
-            1,
+        self.assertEqual(pre_cmd_count, 1)
+        stop_hooks = settings_payload["hooks"]["Stop"]
+        post_cmd_count = sum(
+            1 for matcher in stop_hooks
+            if isinstance(matcher, dict) and "hooks" in matcher
+            for h in matcher["hooks"]
+            if isinstance(h, dict) and "claude-post-task.sh" in h.get("command", "")
         )
+        self.assertEqual(post_cmd_count, 1)
 
         agents_text = agents_path.read_text(encoding="utf-8")
         self.assertEqual(agents_text.count("<!-- BEGIN OPENDREAM MANAGED BLOCK: codex -->"), 1)
@@ -1408,7 +1420,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         claude_settings = self.workspace / ".claude" / "settings.json"
         claude_settings.parent.mkdir(parents=True, exist_ok=True)
         claude_settings.write_text(
-            json.dumps({"hooks": {"preTask": ["echo keep-me"]}}, indent=2) + "\n",
+            json.dumps({"hooks": {"OtherEvent": [{"hooks": [{"type": "command", "command": "echo keep-me"}]}]}}, indent=2) + "\n",
             encoding="utf-8",
         )
         codex_config = self.workspace / ".codex" / "config.toml"

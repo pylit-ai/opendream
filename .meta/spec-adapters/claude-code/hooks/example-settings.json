@@ -1,10 +1,24 @@
 {
   "hooks": {
-    "preTask": [
-      "sh .meta/spec-adapters/claude-code/scripts/opendream-pre-task.sh \"$CLAUDE_TASK\""
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env OPENDREAM_WORKSPACE=\"$CLAUDE_PROJECT_DIR\" sh \"$CLAUDE_PROJECT_DIR\"/.meta/spec-adapters/claude-code/scripts/opendream-pre-task.sh"
+          }
+        ]
+      }
     ],
-    "postTask": [
-      "sh .meta/spec-adapters/claude-code/scripts/opendream-post-task.sh \"$CLAUDE_SUMMARY\""
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env OPENDREAM_WORKSPACE=\"$CLAUDE_PROJECT_DIR\" sh \"$CLAUDE_PROJECT_DIR\"/.meta/spec-adapters/claude-code/scripts/opendream-post-task.sh"
+          }
+        ]
+      }
     ]
   }
 }

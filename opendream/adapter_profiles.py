@@ -62,8 +62,30 @@ def expected_surfaces(store: MemoryStore, manifest: dict[str, Any]) -> list[dict
     aid = manifest["id"]
     profile = manifest["install_profile"]
     if profile == "claude_code_hooks":
-        pre_cmd = 'sh .opendream/hooks/claude-pre-task.sh "$CLAUDE_TASK"'
-        post_cmd = 'sh .opendream/hooks/claude-post-task.sh "$CLAUDE_SUMMARY"'
+        pre_hook = {
+            "UserPromptSubmit": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh',
+                        }
+                    ]
+                }
+            ]
+        }
+        post_hook = {
+            "Stop": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh',
+                        }
+                    ]
+                }
+            ]
+        }
         return [
             P.file_surface(aid, P.HOOKS_DIR / "claude-pre-task.sh", "hook-script", P.pre_task_script(store, "claude")),
             P.file_surface(
@@ -73,7 +95,7 @@ def expected_surfaces(store: MemoryStore, manifest: dict[str, Any]) -> list[dict
                 aid,
                 P.CLAUDE_SETTINGS_PATH,
                 "native-hooks",
-                {"hooks": {"preTask": [pre_cmd], "postTask": [post_cmd]}},
+                {"hooks": {**pre_hook, **post_hook}},
             ),
         ]
     if profile == "codex_bundle":
@@ -155,14 +177,61 @@ def _install_claude_code_hooks(store: MemoryStore, aid: str) -> dict[str, Any]:
     settings_path = workspace / P.CLAUDE_SETTINGS_PATH
     payload = P.load_json_object(settings_path)
     hooks = payload.setdefault("hooks", {})
-    pre_task = hooks.setdefault("preTask", [])
-    post_task = hooks.setdefault("postTask", [])
-    pre_cmd = 'sh .opendream/hooks/claude-pre-task.sh "$CLAUDE_TASK"'
-    post_cmd = 'sh .opendream/hooks/claude-post-task.sh "$CLAUDE_SUMMARY"'
-    if pre_cmd not in pre_task:
-        pre_task.append(pre_cmd)
-    if post_cmd not in post_task:
-        post_task.append(post_cmd)
+
+    # New event-based schema
+    pre_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh'
+    post_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
+
+    # Ensure UserPromptSubmit event exists and has the pre-task hook
+    user_prompt_submit = hooks.setdefault("UserPromptSubmit", [])
+    if not user_prompt_submit:
+        user_prompt_submit.append({
+            "hooks": [
+                {"type": "command", "command": pre_command}
+            ]
+        })
+    else:
+        # Merge with existing matchers if any
+        found = False
+        for matcher in user_prompt_submit:
+            if isinstance(matcher, dict) and "hooks" in matcher:
+                hooks_list = matcher["hooks"]
+                if not any(h.get("command") == pre_command for h in hooks_list if isinstance(h, dict)):
+                    hooks_list.append({"type": "command", "command": pre_command})
+                found = True
+                break
+        if not found:
+            user_prompt_submit.append({
+                "hooks": [
+                    {"type": "command", "command": pre_command}
+                ]
+            })
+
+    # Ensure Stop event exists and has the post-task hook
+    stop = hooks.setdefault("Stop", [])
+    if not stop:
+        stop.append({
+            "hooks": [
+                {"type": "command", "command": post_command}
+            ]
+        })
+    else:
+        # Merge with existing matchers if any
+        found = False
+        for matcher in stop:
+            if isinstance(matcher, dict) and "hooks" in matcher:
+                hooks_list = matcher["hooks"]
+                if not any(h.get("command") == post_command for h in hooks_list if isinstance(h, dict)):
+                    hooks_list.append({"type": "command", "command": post_command})
+                found = True
+                break
+        if not found:
+            stop.append({
+                "hooks": [
+                    {"type": "command", "command": post_command}
+                ]
+            })
+
     changed_files.extend(P.write_if_changed(settings_path, json.dumps(payload, indent=2, sort_keys=True) + "\n"))
     return {"changed_files": changed_files, "warnings": []}
 
@@ -172,10 +241,30 @@ def _remove_claude_code_hooks(workspace: Path, aid: str) -> dict[str, Any]:
     settings_path = workspace / P.CLAUDE_SETTINGS_PATH
     payload = P.load_json_object(settings_path)
     hooks = payload.setdefault("hooks", {})
-    pre_cmd = 'sh .opendream/hooks/claude-pre-task.sh "$CLAUDE_TASK"'
-    post_cmd = 'sh .opendream/hooks/claude-post-task.sh "$CLAUDE_SUMMARY"'
-    hooks["preTask"] = [item for item in hooks.get("preTask", []) if item != pre_cmd]
-    hooks["postTask"] = [item for item in hooks.get("postTask", []) if item != post_cmd]
+
+    pre_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh'
+    post_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
+
+    # Remove from UserPromptSubmit event
+    if "UserPromptSubmit" in hooks:
+        user_prompt_submit = hooks["UserPromptSubmit"]
+        for matcher in user_prompt_submit:
+            if isinstance(matcher, dict) and "hooks" in matcher:
+                matcher["hooks"] = [
+                    h for h in matcher["hooks"]
+                    if not (isinstance(h, dict) and h.get("command") == pre_command)
+                ]
+
+    # Remove from Stop event
+    if "Stop" in hooks:
+        stop = hooks["Stop"]
+        for matcher in stop:
+            if isinstance(matcher, dict) and "hooks" in matcher:
+                matcher["hooks"] = [
+                    h for h in matcher["hooks"]
+                    if not (isinstance(h, dict) and h.get("command") == post_command)
+                ]
+
     changed_files = (
         P.write_if_changed(settings_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
         if settings_path.exists()
