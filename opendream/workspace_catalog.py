@@ -153,7 +153,9 @@ def probe_workspace(workspace: Path | str) -> ProbeResult:
         )
 
     state_dir = memory_root / "state"
-    activation_state = state_dir / "activation-state.json"
+    # activation-state.json is workspace-relative at .opendream/activation-state.json,
+    # not under memory/state/. See opendream.activation.ACTIVATION_STATE_PATH.
+    activation_state = ws / ".opendream" / "activation-state.json"
     service_manifest = state_dir / "service_manifest.json"
     service_runtime = state_dir / "service_runtime.json"
     semantic_config = state_dir / "semantic_config.json"
@@ -171,9 +173,12 @@ def probe_workspace(workspace: Path | str) -> ProbeResult:
         payload = read_json(activation_state, {})
         targets = payload.get("targets") if isinstance(payload, dict) else None
         if isinstance(targets, list) and targets:
-            activation_summary = f"activated:{len(targets)} targets"
-        else:
+            active = sum(1 for t in targets if isinstance(t, dict) and t.get("activated"))
+            activation_summary = f"activated:{active}/{len(targets)} targets"
+        elif isinstance(payload, dict) and payload:
             activation_summary = "activated"
+        else:
+            activation_summary = "not activated"
     else:
         activation_summary = "not activated"
 

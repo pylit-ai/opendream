@@ -78,6 +78,32 @@ class CatalogStorageTests(_CatalogTestCase):
         # Still present in the catalog — diagnostic, not silently deleted.
         self.assertEqual(len(workspace_catalog.list_entries()), 1)
 
+    def test_probe_reads_workspace_relative_activation_state(self) -> None:
+        # activation-state.json lives at .opendream/activation-state.json,
+        # NOT under .opendream/memory/state/. Regression test for the probe
+        # reporting "not activated" for a workspace with live targets.
+        import json as _json
+
+        ws = self._make_workspace("activated-ws")
+        activation_path = ws / ".opendream" / "activation-state.json"
+        activation_path.parent.mkdir(parents=True, exist_ok=True)
+        activation_path.write_text(
+            _json.dumps(
+                {
+                    "status": "noop",
+                    "targets": [
+                        {"target_kind": "claude-code", "activated": True},
+                        {"target_kind": "cursor", "activated": True},
+                        {"target_kind": "codex", "activated": False},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = workspace_catalog.probe_workspace(ws)
+        self.assertEqual(result.status_kind, "ok")
+        self.assertEqual(result.activation_summary, "activated:2/3 targets")
+
     def test_broken_workspace_detected(self) -> None:
         ws = self.ws_root / "delta"
         ws.mkdir()
