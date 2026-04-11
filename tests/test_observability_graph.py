@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from opendream.observability import _layered_positions, build_graph
+from opendream.observability import _layered_positions, _select_subgraph, build_graph
 from tests.fixtures.graph_fixture import (
     chain_fixture,
     cycle_fixture,
@@ -45,3 +45,31 @@ class LayeredPositionsTests(unittest.TestCase):
         graph = isolated_fixture()
         positions = _layered_positions(graph["nodes"], graph["edges"])
         self.assertEqual(positions["X"], (0.0, 0.0))
+
+
+class SelectSubgraphTests(unittest.TestCase):
+    def test_no_focus_returns_first_limit_nodes(self) -> None:
+        graph = chain_fixture()
+        nodes, edges = _select_subgraph(graph, focus=None, limit=2, depth=1)
+        self.assertEqual(len(nodes), 2)
+        # Edges trimmed to those between selected nodes.
+        for edge in edges:
+            self.assertIn(edge["source"], {n["id"] for n in nodes})
+            self.assertIn(edge["target"], {n["id"] for n in nodes})
+
+    def test_focus_depth_1_returns_focus_plus_one_hop(self) -> None:
+        graph = hub_fixture()
+        nodes, _edges = _select_subgraph(graph, focus="H", limit=24, depth=1)
+        ids = {n["id"] for n in nodes}
+        self.assertEqual(ids, {"H", "L1", "L2", "L3"})
+
+    def test_focus_depth_0_returns_only_focus(self) -> None:
+        graph = hub_fixture()
+        nodes, _edges = _select_subgraph(graph, focus="H", limit=24, depth=0)
+        self.assertEqual([n["id"] for n in nodes], ["H"])
+
+    def test_focus_with_unknown_id_returns_empty(self) -> None:
+        graph = hub_fixture()
+        nodes, edges = _select_subgraph(graph, focus="ZZZ", limit=24, depth=1)
+        self.assertEqual(nodes, [])
+        self.assertEqual(edges, [])

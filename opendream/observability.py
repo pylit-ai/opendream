@@ -64,6 +64,57 @@ def query_memories(
     return {"total": total, "items": rows[offset : offset + limit]}
 
 
+def _select_subgraph(
+    graph: dict[str, Any],
+    *,
+    focus: str | None,
+    limit: int,
+    depth: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """BFS up to ``depth`` hops from ``focus``, capped at ``limit`` nodes.
+
+    If ``focus`` is None, returns the first ``limit`` nodes from the graph.
+    If ``focus`` is unknown, returns ``([], [])``.
+    """
+    all_nodes = graph.get("nodes", [])
+    all_edges = graph.get("edges", [])
+    by_id = {n["id"]: n for n in all_nodes}
+
+    if focus is None:
+        selected = all_nodes[:limit]
+        ids = {n["id"] for n in selected}
+        edges = [e for e in all_edges if e["source"] in ids and e["target"] in ids]
+        return list(selected), edges
+
+    if focus not in by_id:
+        return [], []
+
+    adjacency: dict[str, set[str]] = {nid: set() for nid in by_id}
+    for edge in all_edges:
+        if edge["source"] in by_id and edge["target"] in by_id:
+            adjacency[edge["source"]].add(edge["target"])
+            adjacency[edge["target"]].add(edge["source"])
+
+    visited = {focus}
+    frontier = {focus}
+    for _ in range(max(depth, 0)):
+        next_frontier: set[str] = set()
+        for nid in frontier:
+            next_frontier.update(adjacency[nid] - visited)
+        if not next_frontier:
+            break
+        visited.update(next_frontier)
+        frontier = next_frontier
+        if len(visited) >= limit:
+            break
+
+    selected_ids = list(visited)[:limit]
+    selected_set = set(selected_ids)
+    nodes = [by_id[nid] for nid in selected_ids]
+    edges = [e for e in all_edges if e["source"] in selected_set and e["target"] in selected_set]
+    return nodes, edges
+
+
 _LAYOUT_RANK_EDGE_KINDS = frozenset({"supersedes", "derived_from"})
 
 
