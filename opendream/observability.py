@@ -64,6 +64,65 @@ def query_memories(
     return {"total": total, "items": rows[offset : offset + limit]}
 
 
+_LAYOUT_RANK_EDGE_KINDS = frozenset({"supersedes", "derived_from"})
+
+
+def _layered_positions(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> dict[str, tuple[float, float]]:
+    """Topologically rank nodes by supersedes/derived_from edges.
+
+    Y is the rank (top-down: rank 0 is the oldest ancestor). X orders siblings
+    within a rank by ``created_at`` (or ``id`` as fallback). Cycles short-circuit
+    to a stable fallback rank rather than raising.
+    """
+    node_ids = [node["id"] for node in nodes]
+    id_set = set(node_ids)
+    parents: dict[str, set[str]] = {nid: set() for nid in node_ids}
+    children: dict[str, set[str]] = {nid: set() for nid in node_ids}
+    for edge in edges:
+        if edge.get("type") not in _LAYOUT_RANK_EDGE_KINDS:
+            continue
+        src = edge["source"]
+        tgt = edge["target"]
+        if src not in id_set or tgt not in id_set:
+            continue
+        # ``B supersedes A`` means B is deeper than A => parent edge A -> B.
+        parents[src].add(tgt)
+        children[tgt].add(src)
+
+    rank: dict[str, int] = {}
+    queue = [nid for nid in node_ids if not parents[nid]]
+    while queue:
+        next_queue: list[str] = []
+        for nid in queue:
+            ancestor_ranks = [rank[p] for p in parents[nid] if p in rank]
+            rank[nid] = max(ancestor_ranks) + 1 if ancestor_ranks else 0
+            for child in children[nid]:
+                if all(p in rank for p in parents[child]):
+                    next_queue.append(child)
+        queue = next_queue
+
+    # Cycle break: any node not yet ranked goes to max_rank + 1.
+    if any(nid not in rank for nid in node_ids):
+        fallback = max(rank.values(), default=-1) + 1
+        for nid in node_ids:
+            rank.setdefault(nid, fallback)
+
+    by_rank: dict[int, list[dict[str, Any]]] = {}
+    for node in nodes:
+        by_rank.setdefault(rank[node["id"]], []).append(node)
+
+    positions: dict[str, tuple[float, float]] = {}
+    for r, group in by_rank.items():
+        group.sort(key=lambda n: (str(n.get("created_at") or ""), n["id"]))
+        for i, node in enumerate(group):
+            x = float(i) - (len(group) - 1) / 2.0
+            positions[node["id"]] = (x, float(r))
+    return positions
+
+
 def build_graph(index: dict[str, Any], *, focus: str | None = None, limit: int = 24) -> dict[str, Any]:
     graph = index["entities"]["graph"]
     if not focus:
