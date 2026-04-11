@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from . import workspace_catalog
 from .observability import (
@@ -17,6 +18,15 @@ from .observability import (
     query_memories,
 )
 from .storage import MemoryStore
+
+
+_STATIC_ROOT = (Path(__file__).parent / "static").resolve()
+_STATIC_MIME_TYPES = {
+    ".js": "application/javascript",
+    ".css": "text/css",
+    ".md": "text/markdown",
+    ".html": "text/html; charset=utf-8",
+}
 
 
 INDEX_HTML = """<!doctype html>
@@ -178,11 +188,36 @@ INDEX_HTML = """<!doctype html>
       ].join('');
     }
 
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        if (document.querySelector('script[src="' + src + '"]')) return resolve();
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('failed to load ' + src));
+        document.head.appendChild(s);
+      });
+    }
+
     async function renderGraph() {
-      const data = await fetchJson('/api/graph');
-      app.innerHTML = [
-        panel('Provenance Graph', `<div class="split"><div>${pretty(data.nodes)}</div><div>${pretty(data.edges)}</div></div>`, true),
-      ].join('');
+      app.innerHTML = '<section class="panel full" style="padding:0;"><div id="graph-root"></div></section>';
+      try {
+        if (!window.__opendreamGraph) {
+          const scripts = [
+            '/static/vendor/graphology.umd.min.js',
+            '/static/vendor/graphology-layout-forceatlas2.min.js',
+            '/static/vendor/sigma.min.js',
+            '/static/graph.js',
+          ];
+          for (const src of scripts) await loadScript(src);
+        }
+        window.__opendreamGraph.mount(document.getElementById('graph-root'));
+      } catch (err) {
+        const data = await fetchJson('/api/graph');
+        app.innerHTML = [
+          panel('Provenance Graph (fallback view \u2014 interactive renderer failed: ' + err.message + ')', `<div class="split"><div>${pretty(data.nodes)}</div><div>${pretty(data.edges)}</div></div>`, true),
+        ].join('');
+      }
     }
 
     async function renderEvals() {
@@ -321,6 +356,9 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/stream"):
             self._write_event_stream()
             return
+        if parsed.path.startswith("/static/"):
+            self._serve_static(parsed.path)
+            return
         if parsed.path.startswith("/api/"):
             self._handle_api_get(parsed)
             return
@@ -434,7 +472,15 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             self._write_json(_find_by_id(entities["contexts"], "context_id", context_id) or {})
             return
         if parsed.path == "/api/graph":
-            self._write_json(build_graph(index, focus=query.get("focus"), limit=int(query.get("limit", "24"))))
+            self._write_json(
+                build_graph(
+                    index,
+                    focus=query.get("focus"),
+                    limit=int(query.get("limit", "24")),
+                    depth=int(query.get("depth", "1")),
+                    layout=query.get("layout", "hierarchical"),
+                )
+            )
             return
         if parsed.path == "/api/reviews":
             self._write_json({"items": entities["reviews"], "decisions": self.store.load_review_decisions()})
@@ -462,6 +508,29 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    def _serve_static(self, request_path: str) -> None:
+        relative = unquote(request_path[len("/static/"):])
+        if not relative or ".." in relative.split("/"):
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        candidate = (_STATIC_ROOT / relative).resolve()
+        try:
+            candidate.relative_to(_STATIC_ROOT)
+        except ValueError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if not candidate.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        mime = _STATIC_MIME_TYPES.get(candidate.suffix, "application/octet-stream")
+        body = candidate.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _write_event_stream(self) -> None:
         snapshot = {

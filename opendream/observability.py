@@ -64,24 +64,154 @@ def query_memories(
     return {"total": total, "items": rows[offset : offset + limit]}
 
 
-def build_graph(index: dict[str, Any], *, focus: str | None = None, limit: int = 24) -> dict[str, Any]:
-    graph = index["entities"]["graph"]
-    if not focus:
-        return {
-            "nodes": graph["nodes"][:limit],
-            "edges": graph["edges"][: limit * 2],
-            "focus": None,
-        }
-    node_ids = {focus}
-    for edge in graph["edges"]:
-        if edge["source"] == focus or edge["target"] == focus:
-            node_ids.add(edge["source"])
-            node_ids.add(edge["target"])
-        if len(node_ids) >= limit:
+def _select_subgraph(
+    graph: dict[str, Any],
+    *,
+    focus: str | None,
+    limit: int,
+    depth: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """BFS up to ``depth`` hops from ``focus``, capped at ``limit`` nodes.
+
+    Adjacency is undirected so neighborhood expansion crosses edge direction
+    (a node is reachable from both its ancestors and its descendants).
+
+    If ``focus`` is None, returns the first ``limit`` nodes from the graph.
+    If ``focus`` is unknown, returns ``([], [])``. When ``limit`` would truncate
+    the visited set, the focus node is always retained at position 0.
+    """
+    all_nodes = graph.get("nodes", [])
+    all_edges = graph.get("edges", [])
+    by_id = {n["id"]: n for n in all_nodes}
+
+    if focus is None:
+        selected = all_nodes[:limit]
+        ids = {n["id"] for n in selected}
+        edges = [e for e in all_edges if e["source"] in ids and e["target"] in ids]
+        return list(selected), edges
+
+    if focus not in by_id:
+        return [], []
+
+    adjacency: dict[str, set[str]] = {nid: set() for nid in by_id}
+    for edge in all_edges:
+        if edge["source"] in by_id and edge["target"] in by_id:
+            adjacency[edge["source"]].add(edge["target"])
+            adjacency[edge["target"]].add(edge["source"])
+
+    visited = {focus}
+    frontier = {focus}
+    for _ in range(max(depth, 0)):
+        next_frontier: set[str] = set()
+        for nid in frontier:
+            next_frontier.update(adjacency[nid] - visited)
+        if not next_frontier:
             break
-    nodes = [node for node in graph["nodes"] if node["id"] in node_ids]
-    edges = [edge for edge in graph["edges"] if edge["source"] in node_ids and edge["target"] in node_ids]
-    return {"nodes": nodes[:limit], "edges": edges[: limit * 2], "focus": focus}
+        visited.update(next_frontier)
+        frontier = next_frontier
+        if len(visited) >= limit:
+            break
+
+    # Always retain the focus node at position 0, then fill remaining slots
+    # from the rest of ``visited``. Without this pin, a ``limit``-triggered
+    # early break could drop the focus during set-iteration slicing.
+    selected_ids = [focus] + [nid for nid in visited if nid != focus]
+    selected_ids = selected_ids[:limit]
+    selected_set = set(selected_ids)
+    nodes = [by_id[nid] for nid in selected_ids]
+    edges = [e for e in all_edges if e["source"] in selected_set and e["target"] in selected_set]
+    return nodes, edges
+
+
+_LAYOUT_RANK_EDGE_KINDS = frozenset({"supersedes", "derived_from"})
+
+
+def _layered_positions(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> dict[str, tuple[float, float]]:
+    """Topologically rank nodes by supersedes/derived_from edges.
+
+    Y is the rank (top-down: rank 0 is the oldest ancestor). X orders siblings
+    within a rank by ``created_at`` (or ``id`` as fallback). Cycles short-circuit
+    to a stable fallback rank rather than raising.
+    """
+    node_ids = [node["id"] for node in nodes]
+    id_set = set(node_ids)
+    parents: dict[str, set[str]] = {nid: set() for nid in node_ids}
+    children: dict[str, set[str]] = {nid: set() for nid in node_ids}
+    for edge in edges:
+        if edge.get("type") not in _LAYOUT_RANK_EDGE_KINDS:
+            continue
+        src = edge["source"]
+        tgt = edge["target"]
+        if src not in id_set or tgt not in id_set:
+            continue
+        # ``B supersedes A`` means B is deeper than A => parent edge A -> B.
+        parents[src].add(tgt)
+        children[tgt].add(src)
+
+    rank: dict[str, int] = {}
+    queue = [nid for nid in node_ids if not parents[nid]]
+    while queue:
+        next_queue: list[str] = []
+        for nid in queue:
+            ancestor_ranks = [rank[p] for p in parents[nid] if p in rank]
+            rank[nid] = max(ancestor_ranks) + 1 if ancestor_ranks else 0
+            for child in children[nid]:
+                if all(p in rank for p in parents[child]):
+                    next_queue.append(child)
+        queue = next_queue
+
+    # Cycle break: any node not yet ranked goes to max_rank + 1.
+    if any(nid not in rank for nid in node_ids):
+        fallback = max(rank.values(), default=-1) + 1
+        for nid in node_ids:
+            rank.setdefault(nid, fallback)
+
+    by_rank: dict[int, list[dict[str, Any]]] = {}
+    for node in nodes:
+        by_rank.setdefault(rank[node["id"]], []).append(node)
+
+    positions: dict[str, tuple[float, float]] = {}
+    for r, group in by_rank.items():
+        group.sort(key=lambda n: (str(n.get("created_at") or ""), n["id"]))
+        for i, node in enumerate(group):
+            x = float(i) - (len(group) - 1) / 2.0
+            positions[node["id"]] = (x, float(r))
+    return positions
+
+
+_VALID_LAYOUTS = frozenset({"hierarchical", "forceatlas2"})
+
+
+def build_graph(
+    index: dict[str, Any],
+    *,
+    focus: str | None = None,
+    limit: int = 24,
+    depth: int = 1,
+    layout: str = "hierarchical",
+) -> dict[str, Any]:
+    graph = index["entities"]["graph"]
+    if layout not in _VALID_LAYOUTS:
+        layout = "hierarchical"
+    nodes, edges = _select_subgraph(graph, focus=focus, limit=limit, depth=depth)
+    # Copy nodes so we don't mutate the underlying index when assigning x/y.
+    nodes = [dict(node) for node in nodes]
+    if layout == "hierarchical":
+        positions = _layered_positions(nodes, edges)
+        for node in nodes:
+            x, y = positions[node["id"]]
+            node["x"] = x
+            node["y"] = y
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "focus": focus,
+        "depth": depth,
+        "layout": layout,
+    }
 
 
 def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
