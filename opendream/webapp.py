@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from . import workspace_catalog
 from .observability import (
@@ -17,6 +18,15 @@ from .observability import (
     query_memories,
 )
 from .storage import MemoryStore
+
+
+_STATIC_ROOT = (Path(__file__).parent / "static").resolve()
+_STATIC_MIME_TYPES = {
+    ".js": "application/javascript",
+    ".css": "text/css",
+    ".md": "text/markdown",
+    ".html": "text/html; charset=utf-8",
+}
 
 
 INDEX_HTML = """<!doctype html>
@@ -321,6 +331,9 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/stream"):
             self._write_event_stream()
             return
+        if parsed.path.startswith("/static/"):
+            self._serve_static(parsed.path)
+            return
         if parsed.path.startswith("/api/"):
             self._handle_api_get(parsed)
             return
@@ -462,6 +475,29 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    def _serve_static(self, request_path: str) -> None:
+        relative = unquote(request_path[len("/static/"):])
+        if not relative or ".." in relative.split("/"):
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        candidate = (_STATIC_ROOT / relative).resolve()
+        try:
+            candidate.relative_to(_STATIC_ROOT)
+        except ValueError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if not candidate.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        mime = _STATIC_MIME_TYPES.get(candidate.suffix, "application/octet-stream")
+        body = candidate.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _write_event_stream(self) -> None:
         snapshot = {
