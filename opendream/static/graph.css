@@ -1,0 +1,67 @@
+/* opendream/static/graph.css */
+#graph-root {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  height: calc(100vh - 140px);
+  min-height: 480px;
+}
+#graph-sidepanel {
+  background: rgba(18, 25, 53, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 16px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+#graph-sidepanel h3 { margin: 16px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #94a3b8; }
+#graph-canvas-wrap {
+  position: relative;
+  background: rgba(18, 25, 53, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
+}
+#graph-canvas { position: absolute; inset: 0; }
+#graph-minimap {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 160px;
+  height: 100px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(11, 16, 32, 0.7);
+  border-radius: 8px;
+}
+#graph-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: #0f1630;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  display: none;
+  z-index: 5;
+  max-width: 260px;
+}
+.graph-chip {
+  display: inline-block;
+  padding: 3px 8px;
+  margin: 3px 4px 3px 0;
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  user-select: none;
+}
+.graph-chip.disabled { opacity: 0.35; }
+.graph-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #94a3b8; font-size: 14px; text-align: center; padding: 24px; }
+.graph-error { background: rgba(248, 113, 113, 0.18); color: #f87171; padding: 10px; border-radius: 8px; margin-bottom: 12px; }
+.graph-segmented { display: inline-flex; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; overflow: hidden; }
+.graph-segmented button { background: transparent; color: #e2e8f0; border: 0; padding: 6px 12px; cursor: pointer; }
+.graph-segmented button.active { background: #67e8f9; color: #0b1020; }
+@media (max-width: 900px) {
+  #graph-root { grid-template-columns: 1fr; height: auto; }
+  #graph-canvas-wrap { height: 60vh; }
+}
