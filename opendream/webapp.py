@@ -447,7 +447,15 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             self._write_json(_find_by_id(entities["contexts"], "context_id", context_id) or {})
             return
         if parsed.path == "/api/graph":
-            self._write_json(build_graph(index, focus=query.get("focus"), limit=int(query.get("limit", "24"))))
+            self._write_json(
+                build_graph(
+                    index,
+                    focus=query.get("focus"),
+                    limit=int(query.get("limit", "24")),
+                    depth=int(query.get("depth", "1")),
+                    layout=query.get("layout", "hierarchical"),
+                )
+            )
             return
         if parsed.path == "/api/reviews":
             self._write_json({"items": entities["reviews"], "decisions": self.store.load_review_decisions()})
