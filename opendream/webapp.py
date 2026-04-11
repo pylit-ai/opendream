@@ -188,11 +188,36 @@ INDEX_HTML = """<!doctype html>
       ].join('');
     }
 
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        if (document.querySelector('script[src="' + src + '"]')) return resolve();
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('failed to load ' + src));
+        document.head.appendChild(s);
+      });
+    }
+
     async function renderGraph() {
-      const data = await fetchJson('/api/graph');
-      app.innerHTML = [
-        panel('Provenance Graph', `<div class="split"><div>${pretty(data.nodes)}</div><div>${pretty(data.edges)}</div></div>`, true),
-      ].join('');
+      app.innerHTML = '<section class="panel full" style="padding:0;"><div id="graph-root"></div></section>';
+      try {
+        if (!window.__opendreamGraph) {
+          const scripts = [
+            '/static/vendor/graphology.umd.min.js',
+            '/static/vendor/graphology-layout-forceatlas2.min.js',
+            '/static/vendor/sigma.min.js',
+            '/static/graph.js',
+          ];
+          for (const src of scripts) await loadScript(src);
+        }
+        window.__opendreamGraph.mount(document.getElementById('graph-root'));
+      } catch (err) {
+        const data = await fetchJson('/api/graph');
+        app.innerHTML = [
+          panel('Provenance Graph (fallback view \u2014 interactive renderer failed: ' + err.message + ')', `<div class="split"><div>${pretty(data.nodes)}</div><div>${pretty(data.edges)}</div></div>`, true),
+        ].join('');
+      }
     }
 
     async function renderEvals() {

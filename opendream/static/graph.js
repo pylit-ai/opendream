@@ -427,8 +427,30 @@
     });
   }
 
-  function parseUrlState() { /* filled in Task 16 */ }
-  function pushUrlState() { /* filled in Task 16 */ }
+  function parseUrlState() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('focus')) state.focus = params.get('focus');
+    if (params.has('depth')) state.depth = Math.max(0, Math.min(3, Number(params.get('depth')) || 1));
+    if (params.has('layout')) state.layout = params.get('layout');
+    if (params.has('types')) {
+      state.filters.nodeTypes = new Set(params.get('types').split(',').filter(Boolean));
+    }
+    if (params.has('edges')) {
+      state.filters.edgeKinds = new Set(params.get('edges').split(',').filter(Boolean));
+    }
+  }
+
+  function pushUrlState() {
+    const params = new URLSearchParams();
+    if (state.focus) params.set('focus', state.focus);
+    if (state.depth !== 1) params.set('depth', String(state.depth));
+    if (state.layout !== 'hierarchical') params.set('layout', state.layout);
+    if (state.filters.nodeTypes.size) params.set('types', Array.from(state.filters.nodeTypes).join(','));
+    if (state.filters.edgeKinds.size) params.set('edges', Array.from(state.filters.edgeKinds).join(','));
+    const qs = params.toString();
+    const newUrl = '/graph' + (qs ? '?' + qs : '');
+    window.history.replaceState({}, '', newUrl);
+  }
 
   function mount(rootEl) {
     state.rootEl = rootEl;

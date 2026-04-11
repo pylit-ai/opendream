@@ -66,3 +66,14 @@ class GraphRouteTests(unittest.TestCase):
     def test_depth_query_param_accepted(self) -> None:
         payload = self.get_json("/api/graph?depth=3")
         self.assertEqual(payload["depth"], 3)
+
+    def test_graph_html_links_static_assets(self) -> None:
+        # Sanity check: the SPA HTML must reference the loader scripts so that
+        # /graph actually triggers Sigma loading. If someone deletes the loader
+        # this test catches it before manual verification.
+        for path in [
+            '/static/graph.js',
+            '/static/vendor/sigma.min.js',
+            '/static/vendor/graphology.umd.min.js',
+        ]:
+            self.assertIn(path, INDEX_HTML)
