@@ -73,8 +73,12 @@ def _select_subgraph(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """BFS up to ``depth`` hops from ``focus``, capped at ``limit`` nodes.
 
+    Adjacency is undirected so neighborhood expansion crosses edge direction
+    (a node is reachable from both its ancestors and its descendants).
+
     If ``focus`` is None, returns the first ``limit`` nodes from the graph.
-    If ``focus`` is unknown, returns ``([], [])``.
+    If ``focus`` is unknown, returns ``([], [])``. When ``limit`` would truncate
+    the visited set, the focus node is always retained at position 0.
     """
     all_nodes = graph.get("nodes", [])
     all_edges = graph.get("edges", [])
@@ -108,7 +112,11 @@ def _select_subgraph(
         if len(visited) >= limit:
             break
 
-    selected_ids = list(visited)[:limit]
+    # Always retain the focus node at position 0, then fill remaining slots
+    # from the rest of ``visited``. Without this pin, a ``limit``-triggered
+    # early break could drop the focus during set-iteration slicing.
+    selected_ids = [focus] + [nid for nid in visited if nid != focus]
+    selected_ids = selected_ids[:limit]
     selected_set = set(selected_ids)
     nodes = [by_id[nid] for nid in selected_ids]
     edges = [e for e in all_edges if e["source"] in selected_set and e["target"] in selected_set]

@@ -61,6 +61,29 @@ def isolated_fixture() -> dict:
     }
 
 
+def diamond_fixture() -> dict:
+    """Diamond DAG: D supersedes both B and C, which both supersede A.
+
+    Exercises the ``max(ancestor_ranks) + 1`` branch where a node has
+    multiple parents at the same rank and must take one above them.
+    Expected ranks: A=0, B=C=1, D=2.
+    """
+    return {
+        "nodes": [
+            {"id": "A", "type": "memory", "title": "A", "created_at": "2026-01-01"},
+            {"id": "B", "type": "memory", "title": "B", "created_at": "2026-01-02"},
+            {"id": "C", "type": "memory", "title": "C", "created_at": "2026-01-03"},
+            {"id": "D", "type": "memory", "title": "D", "created_at": "2026-01-04"},
+        ],
+        "edges": [
+            {"source": "B", "target": "A", "type": "supersedes"},
+            {"source": "C", "target": "A", "type": "supersedes"},
+            {"source": "D", "target": "B", "type": "supersedes"},
+            {"source": "D", "target": "C", "type": "supersedes"},
+        ],
+    }
+
+
 def index_with(graph: dict) -> dict:
     """Wrap a graph dict in an ``index`` shape that ``build_graph`` accepts."""
     return {"entities": {"graph": graph}}

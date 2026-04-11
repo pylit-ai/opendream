@@ -6,6 +6,7 @@ from opendream.observability import _layered_positions, _select_subgraph, build_
 from tests.fixtures.graph_fixture import (
     chain_fixture,
     cycle_fixture,
+    diamond_fixture,
     hub_fixture,
     index_with,
     isolated_fixture,
@@ -46,6 +47,16 @@ class LayeredPositionsTests(unittest.TestCase):
         positions = _layered_positions(graph["nodes"], graph["edges"])
         self.assertEqual(positions["X"], (0.0, 0.0))
 
+    def test_diamond_rank_takes_max_of_parent_ranks(self) -> None:
+        # D has two parents B and C (both at rank 1). D must go to rank 2,
+        # not rank 1. Exercises the ``max(ancestor_ranks) + 1`` branch.
+        graph = diamond_fixture()
+        positions = _layered_positions(graph["nodes"], graph["edges"])
+        self.assertEqual(positions["A"][1], 0.0)
+        self.assertEqual(positions["B"][1], 1.0)
+        self.assertEqual(positions["C"][1], 1.0)
+        self.assertEqual(positions["D"][1], 2.0)
+
 
 class SelectSubgraphTests(unittest.TestCase):
     def test_no_focus_returns_first_limit_nodes(self) -> None:
@@ -73,6 +84,14 @@ class SelectSubgraphTests(unittest.TestCase):
         nodes, edges = _select_subgraph(graph, focus="ZZZ", limit=24, depth=1)
         self.assertEqual(nodes, [])
         self.assertEqual(edges, [])
+
+    def test_focus_is_pinned_at_position_zero_when_limit_truncates(self) -> None:
+        # Hub has 4 nodes; limit=2 forces truncation. Focus (H) must be
+        # retained at index 0 regardless of set iteration order.
+        graph = hub_fixture()
+        nodes, _edges = _select_subgraph(graph, focus="H", limit=2, depth=1)
+        self.assertEqual(nodes[0]["id"], "H")
+        self.assertEqual(len(nodes), 2)
 
 
 class BuildGraphIntegrationTests(unittest.TestCase):

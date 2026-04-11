@@ -378,6 +378,16 @@
     const menu = document.createElement('div');
     menu.id = 'graph-ctx-menu';
     menu.style.cssText = `position:fixed;left:${clientX}px;top:${clientY}px;background:#0f1630;border:1px solid rgba(255,255,255,0.18);border-radius:8px;padding:4px 0;z-index:1000;font-size:12px;`;
+    // Unified close path — item clicks AND outside clicks both route through
+    // here so the document-level dismiss listener is always removed exactly
+    // once (previously an item click removed the menu but leaked the listener
+    // until the next stray outside click).
+    let dismiss;
+    const closeMenu = () => {
+      menu.remove();
+      if (dismiss) document.removeEventListener('click', dismiss);
+    };
+    dismiss = (e) => { if (!menu.contains(e.target)) closeMenu(); };
     const items = [
       { label: 'Focus here', action: () => { state.focus = nodeId; pushUrlState(); refresh(); } },
       { label: 'Open detail', action: () => {
@@ -396,14 +406,11 @@
       btn.style.cssText = 'padding:6px 14px;cursor:pointer;color:#e2e8f0;';
       btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(103,232,249,0.12)');
       btn.addEventListener('mouseleave', () => btn.style.background = '');
-      btn.addEventListener('click', () => { item.action(); menu.remove(); });
+      btn.addEventListener('click', () => { item.action(); closeMenu(); });
       menu.appendChild(btn);
     }
     document.body.appendChild(menu);
-    setTimeout(() => {
-      const dismiss = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', dismiss); } };
-      document.addEventListener('click', dismiss);
-    }, 0);
+    setTimeout(() => document.addEventListener('click', dismiss), 0);
   }
 
   function updateMinimap() {
