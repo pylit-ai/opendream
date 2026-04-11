@@ -17,3 +17,6 @@ htmlcov/
 # Repomix: ignore generated pack outputs; keep bundle config tracked
 .repomix/*
 !.repomix/bundles.json
+
+# Git worktrees (isolated feature workspaces)
+.worktrees/
