@@ -73,3 +73,39 @@ class SelectSubgraphTests(unittest.TestCase):
         nodes, edges = _select_subgraph(graph, focus="ZZZ", limit=24, depth=1)
         self.assertEqual(nodes, [])
         self.assertEqual(edges, [])
+
+
+class BuildGraphIntegrationTests(unittest.TestCase):
+    def test_default_layout_is_hierarchical_with_positions(self) -> None:
+        index = index_with(chain_fixture())
+        result = build_graph(index)
+        self.assertEqual(result["layout"], "hierarchical")
+        self.assertEqual(result["depth"], 1)
+        for node in result["nodes"]:
+            self.assertIn("x", node)
+            self.assertIn("y", node)
+
+    def test_force_layout_omits_positions(self) -> None:
+        index = index_with(chain_fixture())
+        result = build_graph(index, layout="forceatlas2")
+        for node in result["nodes"]:
+            self.assertNotIn("x", node)
+            self.assertNotIn("y", node)
+
+    def test_unknown_layout_falls_back_to_hierarchical(self) -> None:
+        index = index_with(chain_fixture())
+        result = build_graph(index, layout="totally-fake")
+        self.assertEqual(result["layout"], "hierarchical")
+        for node in result["nodes"]:
+            self.assertIn("x", node)
+
+    def test_depth_param_passed_to_select_subgraph(self) -> None:
+        index = index_with(hub_fixture())
+        result = build_graph(index, focus="H", depth=0, limit=24)
+        self.assertEqual([n["id"] for n in result["nodes"]], ["H"])
+
+    def test_focus_with_no_neighbors_returns_just_focus(self) -> None:
+        index = index_with(isolated_fixture())
+        result = build_graph(index, focus="X", depth=2)
+        self.assertEqual(len(result["nodes"]), 1)
+        self.assertEqual(result["edges"], [])

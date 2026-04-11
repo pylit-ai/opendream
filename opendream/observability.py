@@ -174,24 +174,36 @@ def _layered_positions(
     return positions
 
 
-def build_graph(index: dict[str, Any], *, focus: str | None = None, limit: int = 24) -> dict[str, Any]:
+_VALID_LAYOUTS = frozenset({"hierarchical", "forceatlas2"})
+
+
+def build_graph(
+    index: dict[str, Any],
+    *,
+    focus: str | None = None,
+    limit: int = 24,
+    depth: int = 1,
+    layout: str = "hierarchical",
+) -> dict[str, Any]:
     graph = index["entities"]["graph"]
-    if not focus:
-        return {
-            "nodes": graph["nodes"][:limit],
-            "edges": graph["edges"][: limit * 2],
-            "focus": None,
-        }
-    node_ids = {focus}
-    for edge in graph["edges"]:
-        if edge["source"] == focus or edge["target"] == focus:
-            node_ids.add(edge["source"])
-            node_ids.add(edge["target"])
-        if len(node_ids) >= limit:
-            break
-    nodes = [node for node in graph["nodes"] if node["id"] in node_ids]
-    edges = [edge for edge in graph["edges"] if edge["source"] in node_ids and edge["target"] in node_ids]
-    return {"nodes": nodes[:limit], "edges": edges[: limit * 2], "focus": focus}
+    if layout not in _VALID_LAYOUTS:
+        layout = "hierarchical"
+    nodes, edges = _select_subgraph(graph, focus=focus, limit=limit, depth=depth)
+    # Copy nodes so we don't mutate the underlying index when assigning x/y.
+    nodes = [dict(node) for node in nodes]
+    if layout == "hierarchical":
+        positions = _layered_positions(nodes, edges)
+        for node in nodes:
+            x, y = positions[node["id"]]
+            node["x"] = x
+            node["y"] = y
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "focus": focus,
+        "depth": depth,
+        "layout": layout,
+    }
 
 
 def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
