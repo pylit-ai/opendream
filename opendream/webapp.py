@@ -17,6 +17,7 @@ from .observability import (
     load_or_build_index,
     query_memories,
     query_retrievals,
+    query_runs,
 )
 from .storage import MemoryStore
 
@@ -31,6 +32,7 @@ _STATIC_MIME_TYPES = {
 
 _MEMORY_LIST_LIMIT_CAP = 500
 _RETRIEVAL_LIST_LIMIT_CAP = 500
+_RUN_LIST_LIMIT_CAP = 500
 
 
 def _parse_query_float(raw: str | None) -> float | None:
@@ -704,6 +706,16 @@ INDEX_HTML = """<!doctype html>
       });
       location.search = p.toString() ? '?' + p.toString() : '';
     }
+    function applyRunTimePreset(hours) {
+      const now = new Date();
+      const from = new Date(now.getTime() - hours * 3600 * 1000);
+      const p = memoryExplorerParams({
+        ended_after: from.toISOString(),
+        ended_before: now.toISOString(),
+        offset: '0',
+      });
+      location.search = p.toString() ? '?' + p.toString() : '';
+    }
     const memoryHref = (id) => '/memories/' + encodeURIComponent(id) + (location.search || '');
     /** URL/API use UTC ISO strings; datetime-local uses the browser's local timezone. */
     const isoUtcToDatetimeLocal = (iso) => {
@@ -870,6 +882,75 @@ INDEX_HTML = """<!doctype html>
         </div>`);
       }
       return parts.join('') || '<p class="muted">No retrievals match.</p>';
+    };
+    const runEffectiveInstant = (item) => {
+      const e = item && item.ended_at != null ? String(item.ended_at).trim() : '';
+      if (e) return e;
+      const s = item && item.started_at != null ? String(item.started_at).trim() : '';
+      return s;
+    };
+    const buildRunTimelineHtml = (items, searchQuery) => {
+      const sorted = [...items].sort((a, b) => {
+        const ta = new Date(runEffectiveInstant(a) || 0).getTime();
+        const tb = new Date(runEffectiveInstant(b) || 0).getTime();
+        return tb - ta;
+      });
+      let lastDay = '';
+      const parts = [];
+      const needle = (searchQuery || '').trim().toLowerCase();
+      for (const item of sorted) {
+        const rawTs = runEffectiveInstant(item);
+        const d = new Date(rawTs || '');
+        const hasTime = !Number.isNaN(d.getTime());
+        const dayKey = hasTime
+          ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+          : '_nodate';
+        if (dayKey !== lastDay) {
+          lastDay = dayKey;
+          const dayLabel = hasTime
+            ? d.toLocaleDateString(undefined, {
+                weekday: 'short',
+                month: 'numeric',
+                day: 'numeric',
+                year: 'numeric',
+              })
+            : 'No date';
+          parts.push(`<div class="mem-timeline-day">${escapeHtml(dayLabel)}</div>`);
+        }
+        const timeStr = hasTime
+          ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+          : '—';
+        const hue = memoryTypeHue(item.type || item.run_id || 'x');
+        const barH = Math.max(32, 36 + String(item.diff_text || '').length > 200 ? 48 : 36);
+        const barColor = `hsl(${hue} 55% 42%)`;
+        const rid = String(item.run_id || '');
+        const hay = `${rid} ${item.type || ''} ${item.status || ''}`.toLowerCase();
+        const hit = needle && hay.includes(needle);
+        const titleRaw = `${item.type || 'run'} · ${item.status || ''}`;
+        const titleHtml = hit
+          ? memoryTimelineHighlight(titleRaw, searchQuery)
+          : escapeHtml(titleRaw);
+        parts.push(`<div class="mem-timeline-item">
+          <div class="mem-timeline-time"><p>${escapeHtml(timeStr)}</p></div>
+          <div class="mem-timeline-rail">
+            <div class="mem-timeline-dot"></div>
+            <div class="mem-timeline-bar" style="height:${barH}px;background:${barColor};"></div>
+          </div>
+          <div class="mem-timeline-body">
+            <div class="t-meta">${badge(String(item.status || 'unknown'))}
+              <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em">${escapeHtml(
+                String(item.type || '')
+              )}</span>
+            </div>
+            <div class="t-title"><a href="${runHref(rid)}" title="${escapeHtml(rid)}">${titleHtml}</a></div>
+            <div class="t-sum"><span class="muted" style="font-size:12px">Started</span> ${escapeHtml(
+              formatInstantLocal(item.started_at) || '—'
+            )} · <span class="muted" style="font-size:12px">Ended</span> ${escapeHtml(formatInstantLocal(item.ended_at) || '—')}</div>
+            <div class="t-id"><a href="${runHref(rid)}" title="Run id">${escapeHtml(rid)}</a></div>
+          </div>
+        </div>`);
+      }
+      return parts.join('') || '<p class="muted">No runs match.</p>';
     };
     window.odCopyApiUrl = function (btn) {
       var path = btn.getAttribute('data-api-path') || '';
@@ -1073,6 +1154,9 @@ INDEX_HTML = """<!doctype html>
     }
 
     const retrievalHref = (id) => '/retrievals/' + encodeURIComponent(id) + (location.search || '');
+    const runHref = (id) => '/runs/' + encodeURIComponent(id) + (location.search || '');
+    const sessionHref = (id) => '/sessions/' + encodeURIComponent(id) + (location.search || '');
+    const contextHref = (id) => '/context/' + encodeURIComponent(id) + (location.search || '');
     const labelTip = (label, tip) =>
       tip
         ? `<span class="mem-detail-label" title="${escapeHtml(tip)}">${escapeHtml(label)}</span>`
@@ -1293,6 +1377,238 @@ INDEX_HTML = """<!doctype html>
       const re = document.getElementById('ret-detail-raw');
       const bf = document.getElementById('ret-detail-btn-formatted');
       const br = document.getElementById('ret-detail-btn-raw');
+      if (!fe || !re) return;
+      if (which === 'formatted') {
+        fe.style.display = '';
+        re.style.display = 'none';
+        if (bf) bf.classList.add('mem-view-active');
+        if (br) br.classList.remove('mem-view-active');
+      } else {
+        fe.style.display = 'none';
+        re.style.display = '';
+        if (br) br.classList.add('mem-view-active');
+        if (bf) bf.classList.remove('mem-view-active');
+      }
+    }
+
+    const formatRunDetailReadable = (d) => {
+      const line = (label, val) => {
+        if (val === undefined || val === null || val === '') return '';
+        return `<div class="mem-detail-field"><span class="mem-detail-label">${escapeHtml(label)}</span><span class="mem-detail-val">${escapeHtml(
+          String(val)
+        )}</span></div>`;
+      };
+      const lineDate = (label, val) => {
+        if (val === undefined || val === null || val === '') return '';
+        const formatted = formatInstantLocal(val);
+        if (!formatted) return '';
+        return `<div class="mem-detail-field"><span class="mem-detail-label">${escapeHtml(label)}</span><span class="mem-detail-val">${escapeHtml(
+          formatted
+        )}</span></div>`;
+      };
+      let meta = '';
+      meta += line('Run ID', d.run_id);
+      meta += line('Type', d.type);
+      meta += `<div class="mem-detail-field"><span class="mem-detail-label">Status</span><span class="mem-detail-val">${badge(
+        String(d.status || 'unknown')
+      )}</span></div>`;
+      meta += lineDate('Started', d.started_at);
+      meta += lineDate('Ended', d.ended_at);
+      meta = `<div class="mem-detail-meta">${meta}</div>`;
+
+      const warns = Array.isArray(d.warnings) ? d.warnings : [];
+      let whtml = '';
+      if (warns.length) {
+        whtml = `<div class="mem-detail-section"><h4 class="mem-detail-h">Warnings</h4><ul class="mem-detail-list">${warns
+          .map((w) => `<li>${escapeHtml(String(w))}</li>`)
+          .join('')}</ul></div>`;
+      }
+
+      const phases = Array.isArray(d.phase_traces) ? d.phase_traces : [];
+      let phaseHtml = '';
+      if (phases.length) {
+        phaseHtml = `<details class="mem-detail-details"><summary>Phase timeline (${phases.length})</summary><ol style="margin:8px 0 0 1.1rem;font-size:13px;line-height:1.55">`;
+        for (const p of phases) {
+          const one =
+            typeof p === 'object' && p !== null ? jsonStringifyWithLocalDates(p) : String(p);
+          const clipped = one.length > 1200 ? one.slice(0, 1200) + '\\n…' : one;
+          phaseHtml += `<li><pre class="mem-detail-inline-pre" style="margin:6px 0">${escapeHtml(clipped)}</pre></li>`;
+        }
+        phaseHtml += '</ol></details>';
+      }
+
+      const ops = Array.isArray(d.operations) ? d.operations : [];
+      const opsHtml = `<details class="mem-detail-details"><summary>Op log (${ops.length}) — structured operations</summary><pre class="mem-detail-inline-pre" style="margin-top:8px">${escapeHtml(
+        jsonStringifyWithLocalDates(ops)
+      )}</pre></details>`;
+
+      const diff = d.diff_text != null ? String(d.diff_text) : '';
+      const diffHtml = `<details class="mem-detail-details"><summary>Diff</summary><pre style="margin-top:8px;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.45">${escapeHtml(
+        diff || 'No diff artifact.'
+      )}</pre></details>`;
+
+      return `${meta}${whtml}${phaseHtml}${opsHtml}${diffHtml}`;
+    };
+
+    function runDetailToggle(which) {
+      const fe = document.getElementById('run-detail-formatted');
+      const re = document.getElementById('run-detail-raw');
+      const bf = document.getElementById('run-detail-btn-formatted');
+      const br = document.getElementById('run-detail-btn-raw');
+      if (!fe || !re) return;
+      if (which === 'formatted') {
+        fe.style.display = '';
+        re.style.display = 'none';
+        if (bf) bf.classList.add('mem-view-active');
+        if (br) br.classList.remove('mem-view-active');
+      } else {
+        fe.style.display = 'none';
+        re.style.display = '';
+        if (br) br.classList.add('mem-view-active');
+        if (bf) bf.classList.remove('mem-view-active');
+      }
+    }
+
+    const sessionLastInstant = (item) => {
+      let best = '';
+      for (const ev of item.timeline || []) {
+        const t = ev && ev.timestamp != null ? String(ev.timestamp) : '';
+        if (t && (!best || t > best)) best = t;
+      }
+      return best;
+    };
+
+    const buildSessionTimelineFromDetail = (detail) => {
+      const timeline = Array.isArray(detail.timeline) ? detail.timeline : [];
+      const sorted = [...timeline].sort((a, b) => {
+        const ta = new Date(a.timestamp || 0).getTime();
+        const tb = new Date(b.timestamp || 0).getTime();
+        return ta - tb;
+      });
+      let lastDay = '';
+      const parts = [];
+      const sid = detail.session_id != null ? String(detail.session_id) : '';
+      parts.push(
+        `<p class="muted" style="margin:0 0 10px 0">Session <code>${escapeHtml(sid)}</code> · ${sorted.length} event(s), chronological.</p>`
+      );
+      for (const ev of sorted) {
+        const rawTs = ev.timestamp != null ? String(ev.timestamp) : '';
+        const d = new Date(rawTs || '');
+        const hasTime = !Number.isNaN(d.getTime());
+        const dayKey = hasTime
+          ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+          : '_nodate';
+        if (dayKey !== lastDay) {
+          lastDay = dayKey;
+          const dayLabel = hasTime
+            ? d.toLocaleDateString(undefined, {
+                weekday: 'short',
+                month: 'numeric',
+                day: 'numeric',
+                year: 'numeric',
+              })
+            : 'No date';
+          parts.push(`<div class="mem-timeline-day">${escapeHtml(dayLabel)}</div>`);
+        }
+        const timeStr = hasTime
+          ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          : '—';
+        const kind = ev.kind != null ? String(ev.kind) : '';
+        const label = ev.label != null ? String(ev.label) : '';
+        let linkExtra = '';
+        if (kind === 'memory.context.assembled' && ev.object_id) {
+          linkExtra = ` · <a href="${contextHref(String(ev.object_id))}">Open context</a>`;
+        }
+        const payload =
+          ev.payload !== undefined && ev.payload !== null
+            ? jsonStringifyWithLocalDates(ev.payload)
+            : '{}';
+        const clipped = payload.length > 8000 ? payload.slice(0, 8000) + '\\n…' : payload;
+        parts.push(`<div class="mem-timeline-item">
+          <div class="mem-timeline-time"><p>${escapeHtml(timeStr)}</p></div>
+          <div class="mem-timeline-rail">
+            <div class="mem-timeline-dot"></div>
+            <div class="mem-timeline-bar" style="height:44px;background:hsl(${memoryTypeHue(kind)} 45% 40%);"></div>
+          </div>
+          <div class="mem-timeline-body">
+            <div class="t-meta"><span class="muted" style="font-size:11px">${escapeHtml(kind)}</span>${linkExtra}</div>
+            <div class="t-title">${escapeHtml(label)}${
+              ev.object_id
+                ? ` <span class="muted" style="font-size:11px"><code>${escapeHtml(String(ev.object_id))}</code></span>`
+                : ''
+            }</div>
+            <details class="mem-detail-details" style="margin-top:6px"><summary>Payload</summary><pre class="mem-detail-inline-pre" style="margin-top:6px">${escapeHtml(
+              clipped
+            )}</pre></details>
+          </div>
+        </div>`);
+      }
+      return (
+        `<div class="table-scroll"><div class="mem-timeline">` +
+        (parts.join('') || '<p class="muted">No timeline events.</p>') +
+        `</div></div>`
+      );
+    };
+
+    const formatContextDetailReadable = (data) => {
+      let meta = '';
+      meta += `<div class="mem-detail-field"><span class="mem-detail-label">Context ID</span><span class="mem-detail-val"><code>${escapeHtml(
+        String(data.context_id || '')
+      )}</code></span></div>`;
+      meta = `<div class="mem-detail-meta">${meta}</div>`;
+
+      const sel = data.selected_memory_ids || [];
+      let selHtml = '<div class="mem-detail-section"><h4 class="mem-detail-h">Selected memories</h4>';
+      if (!sel.length) selHtml += '<p class="muted">None listed.</p>';
+      else {
+        selHtml += '<ol style="margin:0;padding-left:1.2rem;line-height:1.6;font-size:13px">';
+        for (const mid of sel.slice(0, 200)) {
+          selHtml += `<li><a href="${memoryHref(String(mid))}"><code>${escapeHtml(String(mid))}</code></a></li>`;
+        }
+        selHtml += '</ol>';
+        if (sel.length > 200) selHtml += `<p class="muted">… and ${sel.length - 200} more</p>`;
+      }
+      selHtml += '</div>';
+
+      const om = data.omission_reasons;
+      let omitHtml = '<div class="mem-detail-section"><h4 class="mem-detail-h">Omission reasons</h4>';
+      if (om && typeof om === 'object' && !Array.isArray(om) && Object.keys(om).length) {
+        omitHtml += `<pre class="mem-detail-inline-pre">${escapeHtml(jsonStringifyWithLocalDates(om))}</pre>`;
+      } else if (Array.isArray(om) && om.length) {
+        omitHtml +=
+          '<ul class="mem-detail-list">' +
+          om
+            .map((x) => {
+              const s =
+                typeof x === 'object' && x !== null ? jsonStringifyWithLocalDates(x) : String(x);
+              return `<li><pre class="mem-detail-inline-pre">${escapeHtml(s)}</pre></li>`;
+            })
+            .join('') +
+          '</ul>';
+      } else {
+        omitHtml += '<p class="muted">None recorded.</p>';
+      }
+      omitHtml += '</div>';
+
+      const snap = data.startup_index_snapshot;
+      let snapHtml = '<div class="mem-detail-section"><h4 class="mem-detail-h">Startup snapshot</h4>';
+      if (snap && typeof snap === 'object' && Object.keys(snap).length) {
+        snapHtml += `<details class="mem-detail-details"><summary>JSON (dates localized)</summary><pre class="mem-detail-inline-pre" style="margin-top:8px">${escapeHtml(
+          jsonStringifyWithLocalDates(snap)
+        )}</pre></details>`;
+      } else {
+        snapHtml += '<p class="muted">Not captured.</p>';
+      }
+      snapHtml += '</div>';
+
+      return `${meta}${selHtml}${omitHtml}${snapHtml}`;
+    };
+
+    function contextDetailToggle(which) {
+      const fe = document.getElementById('ctx-detail-formatted');
+      const re = document.getElementById('ctx-detail-raw');
+      const bf = document.getElementById('ctx-detail-btn-formatted');
+      const br = document.getElementById('ctx-detail-btn-raw');
       if (!fe || !re) return;
       if (which === 'formatted') {
         fe.style.display = '';
@@ -1587,19 +1903,182 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
     }
 
     async function renderRuns(runId=null) {
-      const data = await fetchJson('/api/runs');
+      const params = new URLSearchParams(location.search);
+      const q = (k, d='') => params.get(k) || d;
+      const search = q('search');
+      const sort = q('sort', 'ended_at');
+      const sortDir = q('sort_dir');
+      const offset = q('offset', '0');
+      const limit = q('limit', '50');
+      const endedAfter = q('ended_after');
+      const endedBefore = q('ended_before');
+      const view = q('view', '');
+      const isTimeline = view !== 'table';
+      const apiParams = {};
+      if (search) apiParams.search = search;
+      apiParams.sort = sort;
+      if (sortDir) apiParams.sort_dir = sortDir;
+      apiParams.offset = offset;
+      apiParams.limit = limit;
+      if (endedAfter) apiParams.ended_after = endedAfter;
+      if (endedBefore) apiParams.ended_before = endedBefore;
+      const data = await fetchJson('/api/runs?' + qs(apiParams));
+      const total = data.total;
+      const off = parseInt(offset, 10) || 0;
+      const lim = parseInt(limit, 10) || 50;
+      const startIdx = total === 0 ? 0 : off + 1;
+      const endIdx = off + data.items.length;
+      const prevOff = Math.max(0, off - lim);
+      const nextOff = off + lim;
+      const hasPrev = off > 0;
+      const hasNext = nextOff < total;
+      const optSel = (val, cur) => (val === cur ? 'selected' : '');
+      const sortFields = [
+        ['ended_at', 'Ended'],
+        ['started_at', 'Started'],
+        ['run_id', 'Run ID'],
+        ['type', 'Type'],
+        ['status', 'Status'],
+      ];
+      const sortOpts = sortFields.map(([v, lab]) => `<option value="${v}" ${optSel(v, sort)}>${lab}</option>`).join('');
+      const dirAsc = sortDir === 'asc' ? 'selected' : '';
+      const dirDesc = sortDir === 'desc' ? 'selected' : '';
+      const dirDefault = !sortDir ? 'selected' : '';
+      const lim25 = optSel('25', String(lim));
+      const lim50 = optSel('50', String(lim));
+      const lim100 = optSel('100', String(lim));
       let detailHtml = '<p class="muted">Select a run.</p>';
       if (runId) {
-        const detail = await fetchJson('/api/runs/' + runId);
+        const detail = await fetchJson('/api/runs/' + encodeURIComponent(runId));
+        const readable = formatRunDetailReadable(detail);
         detailHtml = `
-          <div class="row"><strong>${detail.run_id}</strong><span>${detail.type}</span><span>${detail.status}</span></div>
-          <h3>Phase Timeline</h3>${pretty(detail.phase_traces)}
-          <h3>Op Log</h3>${pretty(detail.operations)}
-          <h3>Diff</h3><pre>${detail.diff_text || 'No diff artifact.'}</pre>`;
+          <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center">
+            <strong title="Run id">${escapeHtml(String(detail.run_id || ''))}</strong>
+            <span class="muted">${escapeHtml(String(detail.type || ''))}</span>
+            ${badge(String(detail.status || 'unknown'))}
+          </div>
+          <div class="mem-view-toggle mem-detail-toggle icon-toolbar" role="group" aria-label="Run detail format">
+            <button type="button" id="run-detail-btn-formatted" class="icon-btn mem-view-active" onclick="runDetailToggle('formatted')" aria-label="Formatted detail" title="Formatted">
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+            <button type="button" id="run-detail-btn-raw" class="icon-btn" onclick="runDetailToggle('raw')" aria-label="Raw JSON" title="Raw JSON">
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </button>
+          </div>
+          <div id="run-detail-formatted" class="mem-detail-body">${readable}</div>
+          <div id="run-detail-raw" class="mem-detail-body" style="display:none">${pretty(detail)}</div>`;
       }
+      const rows = data.items
+        .map((run) => {
+          const t = formatInstantLocal(runEffectiveInstant(run));
+          const rid = String(run.run_id || '');
+          return `<tr>
+          <td title="Effective sort time (ended_at, else started_at)">${escapeHtml(t || '—')}</td>
+          <td title="${escapeHtml(rid)}">${escapeHtml(String(run.type || ''))}</td>
+          <td>${badge(String(run.status || 'unknown'))}</td>
+          <td class="muted" style="font-size:12px"><a href="${runHref(rid)}" title="${escapeHtml(rid)}">${escapeHtml(rid)}</a></td>
+        </tr>`;
+        })
+        .join('');
       app.innerHTML = [
-        panel('Runs', `<table><caption class="sr-only">Consolidation runs</caption><thead><tr><th scope="col">ID</th><th scope="col">Type</th><th scope="col">Status</th></tr></thead><tbody>${data.items.map(run => `<tr><td><a href="/runs/${run.run_id}">${run.run_id}</a></td><td>${run.type}</td><td>${run.status}</td></tr>`).join('')}</tbody></table>`),
-        panel('Consolidation Inspector', detailHtml),
+        panel(
+          'Runs',
+          `
+          <form class="memories-toolbar" id="runs-filter-form" onsubmit="event.preventDefault(); const f=this; const p = memoryExplorerParams({
+            search: f.search.value,
+            sort: f.sort.value,
+            sort_dir: f.sort_dir.value,
+            limit: f.limit.value,
+            ended_after: datetimeLocalToIsoUtc(f.ended_after.value),
+            ended_before: datetimeLocalToIsoUtc(f.ended_before.value),
+            offset: '0',
+            view: f.list_view ? f.list_view.value : ''
+          }); location.search = p.toString() ? '?' + p.toString() : '';">
+            <input type="hidden" name="list_view" value="${view === 'table' ? 'table' : ''}">
+            <div class="row" style="align-items:flex-end">
+              <label style="display:flex;flex-direction:column;gap:4px;min-width:180px;flex:1"><span class="muted" style="font-size:11px">Search</span>
+                <input name="search" type="search" placeholder="run id, type, status" value="${escapeHtml(search)}"></label>
+              <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Sort</span>
+                <select name="sort">${sortOpts}</select></label>
+              <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Dir</span>
+                <select name="sort_dir">
+                  <option value="" ${dirDefault}>default</option>
+                  <option value="asc" ${dirAsc}>asc</option>
+                  <option value="desc" ${dirDesc}>desc</option>
+                </select></label>
+              <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Page size</span>
+                <select name="limit">
+                  <option value="25" ${lim25}>25</option>
+                  <option value="50" ${lim50}>50</option>
+                  <option value="100" ${lim100}>100</option>
+                </select></label>
+              <button type="submit" class="icon-btn" aria-label="Apply filters" title="Apply filters">
+                <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
+            </div>
+            <div class="row" style="align-items:center;margin-top:4px">
+              <span class="muted" style="font-size:11px">Run time window (ended_at, else started_at):</span>
+              <button type="button" class="icon-btn" onclick="applyRunTimePreset(24)" aria-label="Last 24 hours" title="Last 24 hours">
+                <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span class="sr-only">24h</span>
+              </button>
+              <button type="button" class="icon-btn" onclick="applyRunTimePreset(168)" aria-label="Last 7 days" title="Last 7 days">
+                <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span class="sr-only">7d</span>
+              </button>
+            </div>
+            <details>
+              <summary>Advanced filters (time bounds)</summary>
+              <p class="muted" style="font-size:12px;margin:8px 0 0 0">Pickers use <strong>your local timezone</strong>; the URL stores UTC instants. Bounds apply to <code>ended_at</code> when set, otherwise <code>started_at</code>.</p>
+              <div class="row" style="margin-top:10px">
+                <label style="display:flex;flex-direction:column;gap:4px;min-width:200px;flex:1"><span class="muted" style="font-size:11px">Ended / effective on or after</span>
+                  <input name="ended_after" type="datetime-local" step="60" title="Local time; filter is UTC instant" value="${escapeHtml(isoUtcToDatetimeLocal(endedAfter))}"></label>
+                <label style="display:flex;flex-direction:column;gap:4px;min-width:200px;flex:1"><span class="muted" style="font-size:11px">Ended / effective on or before</span>
+                  <input name="ended_before" type="datetime-local" step="60" title="Local time; filter is UTC instant" value="${escapeHtml(isoUtcToDatetimeLocal(endedBefore))}"></label>
+              </div>
+            </details>
+          </form>
+          ${total === 0 ? '<div class="od-empty-nextsteps glossary-hint" role="status">No runs indexed yet, or none match your filters. Run <code>opendream observe index --workspace "$PWD"</code> and refresh.</div>' : ''}
+          <div class="row" style="align-items:center;justify-content:space-between;flex-wrap:wrap;margin:10px 0 8px 0;gap:10px">
+            <p class="muted" style="margin:0">Showing <strong>${startIdx}</strong>–<strong>${endIdx}</strong> of <strong>${total}</strong></p>
+            <div class="mem-view-toggle icon-toolbar" role="group" aria-label="Run list layout">
+              <button type="button" class="icon-btn ${view === 'table' ? 'mem-view-active' : ''}" title="Table layout" aria-label="Table layout"
+                onclick="(() => { const p = memoryExplorerParams({ view: 'table' }); location.search = '?' + p.toString(); })()">
+                <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+              </button>
+              <button type="button" class="icon-btn ${isTimeline ? 'mem-view-active' : ''}" title="Timeline layout" aria-label="Timeline layout"
+                onclick="(() => { const p = memoryExplorerParams({ view: '' }); const s = p.toString(); location.search = s ? ('?' + s) : ''; })()">
+                <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </button>
+            </div>
+          </div>
+          ${isTimeline ? `<p class="muted" style="font-size:12px;margin:0 0 10px 0">Timeline matches filters and pagination. <strong>Newest first</strong>, grouped by local day (effective end/start time).</p>` : ''}
+          ${isTimeline
+            ? `<div class="table-scroll"><div class="mem-timeline">${buildRunTimelineHtml(data.items, search)}</div></div>`
+            : `<div class="table-scroll">
+            <table class="memories-table"><caption class="sr-only">Runs matching current filters</caption><thead><tr>
+              <th scope="col" title="ended_at when present, otherwise started_at (local)">Time</th>
+              <th scope="col" title="consolidation, dream, …">Type</th>
+              <th scope="col">Status</th>
+              <th scope="col" title="Stable run id">ID</th>
+            </tr></thead><tbody>
+              ${rows || '<tr><td colspan="4" class="muted">No runs match.</td></tr>'}
+            </tbody></table>
+          </div>`}
+          <div class="pager">
+            <button type="button" class="icon-btn" ${hasPrev ? '' : 'disabled'} aria-label="Previous page" title="Previous"
+              onclick="(() => { const p = memoryExplorerParams({ offset: String(${prevOff}) }); const s = p.toString(); location.search = s ? ('?' + s) : ''; })()">
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button type="button" class="icon-btn" ${hasNext ? '' : 'disabled'} aria-label="Next page" title="Next"
+              onclick="(() => { const p = memoryExplorerParams({ offset: String(${nextOff}) }); const s = p.toString(); location.search = s ? ('?' + s) : ''; })()">
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <span class="muted">offset ${off}, limit ${lim}</span>
+          </div>
+        `,
+          false,
+          'runs-explorer',
+        ),
+        panel('Consolidation Inspector', detailHtml, false, 'runs-detail'),
       ].join('');
     }
 
@@ -1794,8 +2273,29 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
 
     async function renderReviews() {
       const data = await fetchJson('/api/reviews');
+      const rows = (data.items || [])
+        .map(
+          (item) => `<tr>
+          <td title="Queue category for routing actions">${escapeHtml(String(item.queue_item_type || ''))}</td>
+          <td title="Target object id (memory, run, retrieval, …)">${escapeHtml(String(item.queue_item_id || ''))}</td>
+          <td title="Why this item was queued">${escapeHtml(String(item.reason || ''))}</td>
+        </tr>`
+        )
+        .join('');
       app.innerHTML = [
-        panel('Review Queue', `<table><caption class="sr-only">Items awaiting operator review</caption><thead><tr><th scope="col">Type</th><th scope="col">Item</th><th scope="col">Reason</th></tr></thead><tbody>${data.items.map(item => `<tr><td>${item.queue_item_type}</td><td>${item.queue_item_id}</td><td>${item.reason}</td></tr>`).join('')}</tbody></table>`, true),
+        panel(
+          'Review Queue',
+          `<details class="mem-detail-details" style="margin-bottom:12px">
+            <summary>About this queue</summary>
+            <p class="glossary-hint" style="margin-top:8px;margin-bottom:0">Items are derived from the observability index (contested memories, low confidence, suspicious retrievals, runs with warnings or diffs). Approve or annotate via the API from your workflows.</p>
+          </details>
+          <table class="memories-table"><caption class="sr-only">Items awaiting operator review</caption><thead><tr>
+            <th scope="col" title="Queue category (memory vs run vs retrieval)">Type</th>
+            <th scope="col" title="Stable id of the queued object">Item</th>
+            <th scope="col" title="Human-readable reason this row appears">Reason</th>
+          </tr></thead><tbody>${rows || '<tr><td colspan="3" class="muted">Queue is empty.</td></tr>'}</tbody></table>`,
+          true,
+        ),
       ].join('');
     }
 
@@ -1833,12 +2333,24 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
 
     async function renderEvals() {
       const data = await fetchJson('/api/evals');
-      app.innerHTML = [panel('Health / Evals', pretty(data), true)].join('');
+      app.innerHTML = [
+        panel(
+          'Health / Evals',
+          `<details class="mem-detail-details"><summary>Raw JSON</summary><div style="margin-top:10px">${pretty(data)}</div></details>`,
+          true,
+        ),
+      ].join('');
     }
 
     async function renderExports() {
       const data = await fetchJson('/api/exports');
-      app.innerHTML = [panel('Exports', pretty(data), true)].join('');
+      app.innerHTML = [
+        panel(
+          'Exports',
+          `<details class="mem-detail-details"><summary>Raw JSON</summary><div style="margin-top:10px">${pretty(data)}</div></details>`,
+          true,
+        ),
+      ].join('');
     }
 
     async function renderSettings() {
@@ -1847,8 +2359,19 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
         panel(
           'Store metadata (read-only)',
           `<p class="muted" style="margin-top:0;line-height:1.55">This page is the <strong>raw store snapshot</strong>: lock state, memory root, startup index, and activation diagnostics as returned by the server. Use <a href="/overview">Overview</a> for counts, recent runs/sessions, and contested memory at a glance.</p>
-          <h3 class="mem-detail-h" style="margin-top:16px">Payload</h3>
-          ${pretty({ store_health: data.store_health, startup_index: data.startup_index, activation_diagnostics: data.activation_diagnostics })}`,
+          <h3 class="mem-detail-h" style="margin-top:16px">Structured fields</h3>
+          <div class="mem-detail-meta">
+            <div class="mem-detail-field"><span class="mem-detail-label">Memory root</span><span class="mem-detail-val">${escapeHtml(
+              String((data.store_health && data.store_health.memory_root) || '')
+            )}</span></div>
+          </div>
+          <details class="mem-detail-details" style="margin-top:14px"><summary>Raw JSON (store_health, startup_index, activation_diagnostics)</summary>
+            <div style="margin-top:10px">${pretty({
+              store_health: data.store_health,
+              startup_index: data.startup_index,
+              activation_diagnostics: data.activation_diagnostics,
+            })}</div>
+          </details>`,
           true,
         ),
       ].join('');
@@ -1858,12 +2381,35 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const data = await fetchJson('/api/sessions');
       let detailHtml = '<p class="muted">Select a session.</p>';
       if (sessionId) {
-        const detail = await fetchJson('/api/sessions/' + sessionId + '/timeline');
-        detailHtml = pretty(detail);
+        const detail = await fetchJson('/api/sessions/' + encodeURIComponent(sessionId) + '/timeline');
+        detailHtml = `${buildSessionTimelineFromDetail(detail)}
+          <details class="mem-detail-details" style="margin-top:14px"><summary>Raw timeline JSON</summary>${pretty(detail)}</details>`;
       }
+      const sessionRows = data.items
+        .map((item) => {
+          const sid = String(item.session_id || '');
+          const last = sessionLastInstant(item);
+          const lastDisp = last ? formatInstantLocal(last) : '—';
+          return `<tr>
+          <td><a href="${sessionHref(sid)}">${escapeHtml(sid)}</a></td>
+          <td class="num">${item.event_count != null ? escapeHtml(String(item.event_count)) : '—'}</td>
+          <td class="num">${item.context_count != null ? escapeHtml(String(item.context_count)) : '—'}</td>
+          <td title="Latest timestamp from embedded timeline">${escapeHtml(lastDisp)}</td>
+        </tr>`;
+        })
+        .join('');
       app.innerHTML = [
-        panel('Sessions', `<p class="muted" style="margin:0 0 10px 0">Context assemblies use opaque IDs. Use <a href="/context">Context</a> with an ID from your tooling, or <code>GET /api/context/&lt;id&gt;</code>.</p><table><caption class="sr-only">Capture sessions</caption><thead><tr><th scope="col">ID</th><th scope="col">Events</th><th scope="col">Contexts</th></tr></thead><tbody>${data.items.map(item => `<tr><td><a href="/sessions/${item.session_id}">${item.session_id}</a></td><td>${item.event_count}</td><td>${item.context_count}</td></tr>`).join('')}</tbody></table>`),
-        panel('Session Timeline', detailHtml),
+        panel(
+          'Sessions',
+          `<p class="muted" style="margin:0 0 10px 0">Context assemblies use opaque IDs. Use <a href="/context">Context</a> with an ID from your tooling, or <code>GET /api/context/&lt;id&gt;</code>.</p>
+          <table class="memories-table"><caption class="sr-only">Capture sessions</caption><thead><tr>
+            <th scope="col">ID</th>
+            <th class="num" scope="col" title="Events captured in this session">Events</th>
+            <th class="num" scope="col" title="Context assemblies linked to this session">Contexts</th>
+            <th scope="col" title="Max timestamp from the session timeline embedded in the index (client-derived)">Last activity</th>
+          </tr></thead><tbody>${sessionRows || '<tr><td colspan="4" class="muted">No sessions.</td></tr>'}</tbody></table>`,
+        ),
+        panel('Session Timeline', detailHtml, false, 'session-timeline'),
       ].join('');
     }
 
@@ -1879,8 +2425,29 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
         ].join('');
         return;
       }
-      const data = await fetchJson('/api/context/' + contextId);
-      app.innerHTML = [panel('Context Viewer', `<div class="split"><div>${pretty({selected:data.selected_memory_ids, omitted:data.omission_reasons, startup:data.startup_index_snapshot})}</div><div><pre>${data.assembled_text}</pre></div></div>`, true)].join('');
+      const data = await fetchJson('/api/context/' + encodeURIComponent(contextId));
+      const readable = formatContextDetailReadable(data);
+      const asm = (data.assembled_text || '').trim();
+      const asmBlock = asm
+        ? `<div class="mem-detail-section"><h4 class="mem-detail-h">Assembled text</h4><div class="mem-detail-body-text">${escapeHtml(asm)}</div></div>`
+        : '<p class="muted">No assembled text.</p>';
+      app.innerHTML = [
+        panel(
+          'Context Viewer',
+          `<div class="mem-view-toggle mem-detail-toggle icon-toolbar" role="group" aria-label="Context detail format">
+            <button type="button" id="ctx-detail-btn-formatted" class="icon-btn mem-view-active" onclick="contextDetailToggle('formatted')" aria-label="Formatted" title="Formatted">
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+            <button type="button" id="ctx-detail-btn-raw" class="icon-btn" onclick="contextDetailToggle('raw')" aria-label="Raw JSON" title="Raw JSON">
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </button>
+          </div>
+          <div id="ctx-detail-formatted" class="mem-detail-body"><div class="split"><div>${readable}</div><div>${asmBlock}</div></div></div>
+          <div id="ctx-detail-raw" class="mem-detail-body" style="display:none">${pretty(data)}</div>`,
+          true,
+          'ctx-viewer',
+        ),
+      ].join('');
     }
 
     async function renderWorkspaces() {
@@ -2099,7 +2666,26 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             self._write_json(session or {})
             return
         if parsed.path == "/api/runs":
-            self._write_json({"items": entities["runs"]})
+            sort_dir_raw = (query.get("sort_dir") or "").strip().lower()
+            sort_dir = sort_dir_raw if sort_dir_raw in ("asc", "desc") else None
+            limit = _parse_query_int(
+                query.get("limit"),
+                50,
+                minimum=1,
+                maximum=_RUN_LIST_LIMIT_CAP,
+            )
+            offset = _parse_query_int(query.get("offset"), 0, minimum=0, maximum=10_000_000)
+            result = query_runs(
+                index,
+                search=query.get("search", ""),
+                sort=query.get("sort", "ended_at"),
+                sort_dir=sort_dir,
+                offset=offset,
+                limit=limit,
+                ended_after=(query.get("ended_after") or "").strip() or None,
+                ended_before=(query.get("ended_before") or "").strip() or None,
+            )
+            self._write_json(result)
             return
         if parsed.path.startswith("/api/runs/") and parsed.path.endswith("/diff"):
             run_id = parsed.path.split("/")[-2]

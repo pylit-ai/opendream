@@ -347,6 +347,93 @@ def query_retrievals(
     return {"total": total, "items": rows[offset : offset + limit]}
 
 
+_VALID_RUN_SORTS = frozenset({"ended_at", "started_at", "run_id", "type", "status"})
+
+
+def _run_effective_time(row: dict[str, Any]) -> str | None:
+    """Prefer ``ended_at`` for ordering/filtering; fall back to ``started_at``."""
+    for key in ("ended_at", "started_at"):
+        raw = row.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw
+    return None
+
+
+def _run_sort_key(
+    row: dict[str, Any],
+    sort: str,
+    *,
+    reverse: bool,
+) -> tuple[Any, str]:
+    rid = str(row.get("run_id", row.get("id", "")))
+    if sort == "run_id":
+        primary = str(row.get("run_id", "") or "").casefold()
+    elif sort == "type":
+        primary = str(row.get("type", "") or "").casefold()
+    elif sort == "status":
+        primary = str(row.get("status", "") or "").casefold()
+    elif sort == "started_at":
+        primary = str(row.get("started_at", "") or "")
+    else:
+        primary = str(row.get("ended_at", "") or "")
+
+    if reverse:
+        if sort in {"ended_at", "started_at"}:
+            primary = _MemorySortStrDesc(primary) if primary else _MemorySortStrDesc("")
+        elif sort in {"run_id", "type", "status"}:
+            primary = _MemorySortStrDesc(primary)
+    return (primary, rid)
+
+
+def query_runs(
+    index: dict[str, Any],
+    *,
+    search: str = "",
+    sort: str = "ended_at",
+    sort_dir: str | None = None,
+    offset: int = 0,
+    limit: int = 50,
+    ended_after: str | None = None,
+    ended_before: str | None = None,
+) -> dict[str, Any]:
+    """Filter/sort/paginate consolidation and dream run summaries from the index."""
+    sort_field = sort if sort in _VALID_RUN_SORTS else "ended_at"
+    if sort_dir == "asc":
+        reverse = False
+    elif sort_dir == "desc":
+        reverse = True
+    else:
+        reverse = sort_field in {"ended_at", "started_at"}
+
+    rows = list(index["entities"]["runs"])
+    lowered_search = search.strip().lower()
+    if lowered_search:
+        rows = [
+            row
+            for row in rows
+            if lowered_search
+            in " ".join(
+                [
+                    str(row.get("run_id", "")),
+                    str(row.get("id", "")),
+                    str(row.get("type", "")),
+                    str(row.get("status", "")),
+                ]
+            ).lower()
+        ]
+
+    if ended_after or ended_before:
+        rows = [
+            row
+            for row in rows
+            if _memory_passes_time_bound(_run_effective_time(row), ended_after, ended_before)
+        ]
+
+    rows.sort(key=lambda row: _run_sort_key(row, sort_field, reverse=reverse))
+    total = len(rows)
+    return {"total": total, "items": rows[offset : offset + limit]}
+
+
 def _select_subgraph(
     graph: dict[str, Any],
     *,

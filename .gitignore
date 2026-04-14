@@ -20,3 +20,4 @@ htmlcov/
 
 # Git worktrees (isolated feature workspaces)
 .worktrees/
+.omc/

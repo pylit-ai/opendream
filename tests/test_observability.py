@@ -120,6 +120,8 @@ class ObservabilityIntegrationTests(unittest.TestCase):
 
     def test_runs_sessions_and_graph_endpoints(self) -> None:
         runs = self.get_json("/api/runs")
+        self.assertIn("total", runs)
+        self.assertGreaterEqual(runs["total"], 1)
         self.assertGreaterEqual(len(runs["items"]), 1)
         run_id = runs["items"][0]["run_id"]
         run = self.get_json(f"/api/runs/{run_id}")
@@ -135,6 +137,14 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         graph = self.get_json("/api/graph")
         self.assertIn("nodes", graph)
         self.assertIn("edges", graph)
+
+    def test_runs_api_pagination_and_limit_cap(self) -> None:
+        page0 = self.get_json("/api/runs?limit=1&offset=0&sort=run_id&sort_dir=asc")
+        self.assertIn("total", page0)
+        self.assertGreaterEqual(page0["total"], 1)
+        self.assertEqual(len(page0["items"]), 1)
+        capped = self.get_json("/api/runs?limit=9999&offset=0")
+        self.assertLessEqual(len(capped["items"]), 500)
 
     def test_review_annotation_export_and_sse_work(self) -> None:
         reviews = self.get_json("/api/reviews")
