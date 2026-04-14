@@ -6,6 +6,23 @@
   min-height: min(720px, calc(100dvh - 5rem));
   height: calc(100dvh - 5rem);
 }
+.od-graph-a11y-banner {
+  grid-column: 1 / -1;
+  background: var(--accent-soft, rgba(59, 130, 246, 0.12));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+.od-graph-a11y-banner__p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.od-graph-a11y-banner a {
+  color: var(--accent);
+  font-weight: 600;
+}
 #graph-sidepanel {
   background: var(--panel);
   border: 1px solid var(--border);

@@ -11,7 +11,7 @@ from pathlib import Path
 from opendream.integration import emit_event, maintain, prepare_context
 from opendream.observability import index_observability
 from opendream.storage import MemoryStore
-from opendream.webapp import build_server
+from opendream.webapp import INDEX_HTML, build_server
 
 FIXED_NOW = "2026-03-27T12:00:00Z"
 
@@ -205,6 +205,29 @@ class ObservabilityIntegrationTests(unittest.TestCase):
             with urllib.request.urlopen(f"{self.base_url}{path}") as response:
                 html = response.read().decode("utf-8")
             self.assertIn("OpenDream Observability", html)
+
+    def test_index_html_includes_ux_ax_markers(self) -> None:
+        for needle in (
+            "od-skip-link",
+            "od-route-announce",
+            "od-command-palette",
+            "od-skeleton-wrap",
+            "odCopyApiCurl",
+            "odCopyApiFetch",
+            "od-first-steps",
+            "odDismissFirstSteps",
+            "opendream-first-steps-dismissed",
+            "focus_search=1",
+            "odCommandPalette",
+            "routeToPageId",
+        ):
+            self.assertIn(needle, INDEX_HTML)
+
+    def test_graph_js_includes_a11y_banner(self) -> None:
+        graph_js = Path(__file__).resolve().parents[1] / "opendream" / "static" / "graph.js"
+        text = graph_js.read_text(encoding="utf-8")
+        self.assertIn("od-graph-a11y-banner", text)
+        self.assertIn("od-graph-open-data", text)
 
 
 if __name__ == "__main__":

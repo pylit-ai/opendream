@@ -624,6 +624,14 @@
     state.rootEl = rootEl;
     rootEl.innerHTML = `
       <link rel="stylesheet" href="/static/graph.css">
+      <div class="od-graph-a11y-banner" role="region" aria-label="Graph view accessibility">
+        <p class="od-graph-a11y-banner__p">
+          The canvas is a <strong>visual</strong> view. For keyboard navigation and screen readers, use
+          <strong>Graph data</strong> in the side panel, or
+          <a href="#" id="od-graph-open-data">switch to tables now</a>
+          (same as <code>?view=data</code> in the URL).
+        </p>
+      </div>
       <div id="graph-sidepanel"><div class="graph-empty">Loading…</div></div>
       <div id="graph-main-stage" class="graph-main-stage">
         <div id="graph-canvas-wrap">
@@ -641,6 +649,17 @@
     state.dataPanelEl = rootEl.querySelector('#graph-data-panel');
     state.dataTablesHostEl = rootEl.querySelector('#graph-data-tables-host');
     state.tooltipEl = rootEl.querySelector('#graph-tooltip');
+    var openData = rootEl.querySelector('#od-graph-open-data');
+    if (openData) {
+      openData.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var p = new URLSearchParams(window.location.search);
+        p.set('view', 'data');
+        window.history.replaceState({}, '', '/graph?' + p.toString());
+        parseUrlState();
+        void refresh();
+      });
+    }
     parseUrlState();
     void refresh();
   }

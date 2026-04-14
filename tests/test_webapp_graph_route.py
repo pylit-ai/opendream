@@ -50,6 +50,15 @@ class GraphRouteTests(unittest.TestCase):
         with urllib.request.urlopen(f"{self.base_url}{path}") as resp:
             return json.loads(resp.read().decode("utf-8"))
 
+    def test_api_ui_context_matches_store_workspace(self) -> None:
+        payload = self.get_json("/api/ui-context")
+        self.assertEqual(payload.get("kind"), "observe_serve")
+        self.assertEqual(
+            payload.get("workspace_path"),
+            str(self.store.workspace.resolve()),
+        )
+        self.assertIn("workspace_path", payload)
+
     def test_default_layout_includes_positions(self) -> None:
         payload = self.get_json("/api/graph")
         self.assertEqual(payload["layout"], "hierarchical")
@@ -94,7 +103,12 @@ class GraphRouteTests(unittest.TestCase):
             "odCopyApiUrl",
             "od-copy-err-btn",
             "err.status",
-            "sidebar-sec-workspace",
+            "sidebar-sec-catalog",
+            "sidebar-sec-this-ws",
+            "od-scope-bar",
+            "od-scope-add-bookmark",
+            "od-scope-bookmark-list",
+            "opendream-dashboard-bookmarks",
             "od-empty-nextsteps",
             "sidebar-mobile-open",
             "data-mobile-nav",

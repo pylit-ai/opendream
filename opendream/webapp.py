@@ -205,11 +205,21 @@ INDEX_HTML = """<!doctype html>
     .sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
     .sidebar-nav ul, .sidebar-nav .sidebar-nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
     .sidebar-nav a {
-      display: flex; align-items: center; padding: 0.5rem 0.75rem; border-radius: 0.375rem;
+      display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-radius: 0.375rem;
       font-size: 0.875rem; font-weight: 400; letter-spacing: 0.04em;
       color: var(--muted); text-decoration: none; border-left: 3px solid transparent;
       transition: background 0.15s, color 0.15s;
       position: relative;
+    }
+    .sidebar-nav a .nav-icon {
+      width: 1.15rem;
+      height: 1.15rem;
+      flex-shrink: 0;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
     .sidebar-nav a:hover { background: var(--interactive); color: var(--text); }
     .sidebar-nav a.active {
@@ -219,9 +229,15 @@ INDEX_HTML = """<!doctype html>
       border-left-color: var(--accent);
     }
     html[data-sidebar="narrow"] .sidebar-nav a {
+      flex-direction: column;
       justify-content: center;
-      padding: 0.5rem 0.2rem;
+      gap: 0.2rem;
+      padding: 0.4rem 0.2rem;
       border-left: none;
+    }
+    html[data-sidebar="narrow"] .sidebar-nav a .nav-icon {
+      width: 1.1rem;
+      height: 1.1rem;
     }
     html[data-sidebar="narrow"] .sidebar-nav a.active {
       border-left: none;
@@ -234,7 +250,13 @@ INDEX_HTML = """<!doctype html>
     }
     html[data-sidebar="narrow"] .sidebar-nav a::after {
       content: attr(data-short);
-      font-size: 0.62rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      min-width: auto;
+      min-height: auto;
+      font-size: 0.55rem;
       font-weight: 700;
       letter-spacing: 0.02em;
       line-height: 1.2;
@@ -419,6 +441,65 @@ INDEX_HTML = """<!doctype html>
       white-space: nowrap;
       border: 0;
     }
+    .od-scope-bar {
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      padding: 0.55rem 1.25rem 0.65rem;
+    }
+    .od-scope-bar-inner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem 1.25rem;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+    .od-scope-main { flex: 1 1 14rem; min-width: 0; }
+    .od-scope-title {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      margin: 0 0 4px 0;
+    }
+    .od-scope-path {
+      font-size: 13px;
+      line-height: 1.4;
+      word-break: break-word;
+      margin: 0;
+    }
+    .od-scope-path.od-scope-error { color: var(--bad); }
+    .od-scope-origin { font-size: 12px; margin: 4px 0 0 0; }
+    .od-scope-hint { font-size: 11px; margin: 8px 0 0 0; max-width: 48rem; line-height: 1.45; }
+    .od-scope-actions { flex: 0 0 auto; }
+    .od-scope-bookmarks { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: var(--interactive); }
+    .od-scope-summary {
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      list-style: none;
+    }
+    .od-scope-summary::-webkit-details-marker { display: none; }
+    .od-scope-bookmarks-body { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); max-width: 20rem; }
+    .od-scope-add-btn { font-size: 12px; padding: 6px 10px; margin-top: 6px; }
+    .od-scope-bookmark-list { list-style: none; margin: 8px 0 0; padding: 0; }
+    .od-scope-bookmark-list li {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 8px;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+    .od-scope-bookmark-list .od-scope-bm-open { font-size: 12px; padding: 4px 8px; }
+    .od-scope-bookmark-list .od-scope-bm-remove {
+      font-size: 11px;
+      padding: 2px 6px;
+      min-height: auto;
+      color: var(--muted);
+    }
+    .od-scope-bm-current { font-size: 11px; color: var(--muted); }
     .od-data-freshness {
       font-size: 12px;
       padding: 0 1.25rem 6px 1.25rem;
@@ -436,6 +517,108 @@ INDEX_HTML = """<!doctype html>
       word-break: break-all;
     }
     .od-api-copy-btn { min-width: 44px; min-height: 44px; }
+    .od-skip-link {
+      position: absolute;
+      left: -9999px;
+      top: auto;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      z-index: 100;
+      padding: 0.5rem 1rem;
+      background: var(--accent);
+      color: var(--on-accent);
+      font-weight: 600;
+      text-decoration: none;
+      border-radius: 0.375rem;
+    }
+    .od-skip-link:focus {
+      left: 10px;
+      top: 10px;
+      width: auto;
+      height: auto;
+      overflow: visible;
+    }
+    .od-skeleton-wrap { min-height: 40vh; }
+    .od-skeleton-wrap h2.od-skeleton-h { margin: 0 0 1rem 0; font-size: 1rem; color: var(--muted); }
+    .od-skeleton-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: 1.2fr 1fr;
+    }
+    @media (max-width: 900px) {
+      .od-skeleton-grid { grid-template-columns: 1fr; }
+    }
+    .od-skel-line {
+      height: 0.75rem;
+      border-radius: 0.25rem;
+      background: linear-gradient(90deg, var(--interactive) 0%, var(--border) 50%, var(--interactive) 100%);
+      background-size: 200% 100%;
+      animation: od-skel-shimmer 1.1s ease-in-out infinite;
+    }
+    .od-skel-line--short { width: 55%; }
+    .od-skel-line--med { width: 80%; }
+    .od-skel-metric {
+      height: 3.25rem;
+      border-radius: 0.5rem;
+      background: var(--interactive);
+      border: 1px solid var(--border);
+      animation: od-skel-shimmer 1.1s ease-in-out infinite;
+    }
+    @keyframes od-skel-shimmer {
+      0% { opacity: 0.55; }
+      50% { opacity: 1; }
+      100% { opacity: 0.55; }
+    }
+    .od-api-clip-row { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; vertical-align: middle; }
+    dialog.od-command-palette {
+      max-width: 32rem;
+      width: calc(100vw - 2rem);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 0;
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: 0 16px 48px var(--shadow);
+    }
+    dialog.od-command-palette::backdrop { background: rgba(0,0,0,0.4); }
+    .od-palette-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .od-palette-title { margin: 0; font-size: 1rem; font-weight: 600; }
+    .od-palette-input {
+      width: calc(100% - 2rem);
+      margin: 0.75rem 1rem;
+      box-sizing: border-box;
+    }
+    .od-palette-list {
+      list-style: none;
+      margin: 0;
+      padding: 0 0 0.5rem 0;
+      max-height: min(50vh, 22rem);
+      overflow-y: auto;
+    }
+    .od-palette-list button {
+      width: 100%;
+      text-align: left;
+      border: none;
+      border-radius: 0;
+      border-bottom: 1px solid var(--border);
+      padding: 0.65rem 1rem;
+      background: transparent;
+      color: var(--text);
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .od-palette-list button:hover, .od-palette-list button.od-palette-active {
+      background: var(--interactive);
+    }
+    .od-palette-hint { margin: 0; padding: 0.5rem 1rem 0.75rem; font-size: 11px; }
     @media (max-width: 900px) {
       .app-shell { flex-direction: row; position: relative; }
       .sidebar {
@@ -474,8 +657,9 @@ INDEX_HTML = """<!doctype html>
       .main-wrap { margin-left: 0; padding-top: 3.25rem; }
       html[data-sidebar="narrow"] .sidebar { width: min(18rem, 88vw); }
       html[data-sidebar="narrow"] .sidebar-brand-text { display: block; }
-      html[data-sidebar="narrow"] .nav-label { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; }
-      html[data-sidebar="narrow"] .sidebar-nav a::after { display: none; content: none; }
+      /* Keep html[data-sidebar="narrow"] nav-label + ::after rules from the base stylesheet so
+         short labels (data-short) still show in the drawer; viewport ≤900px is common for
+         embedded panels and split windows, where users still expect narrow-rail abbreviations. */
       .sidebar-nav-list { flex-direction: column; flex-wrap: nowrap; }
       .sidebar-nav a { border-left: 3px solid transparent; border-bottom: none; }
       .sidebar-nav a.active { border-left-color: var(--accent); border-bottom-color: transparent; }
@@ -490,6 +674,7 @@ INDEX_HTML = """<!doctype html>
   </style>
 </head>
 <body>
+  <a class="od-skip-link" href="#app">Skip to main content</a>
   <div class="app-shell">
     <button type="button" class="icon-btn sidebar-toggle sidebar-toggle--mobile" id="sidebar-mobile-open" aria-controls="sidebar-nav" aria-expanded="false" title="Open menu">
       <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
@@ -508,26 +693,29 @@ INDEX_HTML = """<!doctype html>
         </div>
       </div>
       <nav class="sidebar-nav" id="sidebar-nav" aria-label="Primary">
-        <p class="sidebar-nav-section" id="sidebar-sec-workspace">Workspace</p>
-        <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-workspace">
-          <li><a href="/overview" data-short="Ov"><span class="nav-label">Overview</span></a></li>
-          <li><a href="/workspaces" data-short="Ws"><span class="nav-label">Workspaces</span></a></li>
-          <li><a href="/memories" data-short="Mem"><span class="nav-label">Memories</span></a></li>
+        <p class="sidebar-nav-section" id="sidebar-sec-catalog">Catalog</p>
+        <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-catalog">
+          <li><a href="/workspaces" data-short="Ws" title="Workspaces"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span class="nav-label">Workspaces</span></a></li>
+        </ul>
+        <p class="sidebar-nav-section" id="sidebar-sec-this-ws">This workspace</p>
+        <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-this-ws">
+          <li><a href="/overview" data-short="Ov" title="Overview"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg><span class="nav-label">Overview</span></a></li>
+          <li><a href="/memories" data-short="Mem" title="Memories"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span class="nav-label">Memories</span></a></li>
         </ul>
         <p class="sidebar-nav-section" id="sidebar-sec-trace">Trace</p>
         <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-trace">
-          <li><a href="/runs" data-short="Rn"><span class="nav-label">Runs</span></a></li>
-          <li><a href="/retrievals" data-short="Ret"><span class="nav-label">Retrievals</span></a></li>
-          <li><a href="/sessions" data-short="Ses"><span class="nav-label">Sessions</span></a></li>
-          <li><a href="/context" data-short="Ctx"><span class="nav-label">Context</span></a></li>
+          <li><a href="/runs" data-short="Rn" title="Runs"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span class="nav-label">Runs</span></a></li>
+          <li><a href="/retrievals" data-short="Ret" title="Retrievals"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="nav-label">Retrievals</span></a></li>
+          <li><a href="/sessions" data-short="Ses" title="Sessions"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span class="nav-label">Sessions</span></a></li>
+          <li><a href="/context" data-short="Ctx" title="Context"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span class="nav-label">Context</span></a></li>
         </ul>
         <p class="sidebar-nav-section" id="sidebar-sec-audit">Audit and tools</p>
         <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-audit">
-          <li><a href="/reviews" data-short="Rev"><span class="nav-label">Reviews</span></a></li>
-          <li><a href="/graph" data-short="Gr"><span class="nav-label">Graph</span></a></li>
-          <li><a href="/evals" data-short="Ev"><span class="nav-label">Evals</span></a></li>
-          <li><a href="/exports" data-short="Ex"><span class="nav-label">Exports</span></a></li>
-          <li><a href="/settings" data-short="St"><span class="nav-label">Settings</span></a></li>
+          <li><a href="/reviews" data-short="Rev" title="Reviews"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 12 2 2 4-4"/></svg><span class="nav-label">Reviews</span></a></li>
+          <li><a href="/graph" data-short="Gr" title="Graph"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span class="nav-label">Graph</span></a></li>
+          <li><a href="/evals" data-short="Ev" title="Evals"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg><span class="nav-label">Evals</span></a></li>
+          <li><a href="/exports" data-short="Ex" title="Exports"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span class="nav-label">Exports</span></a></li>
+          <li><a href="/settings" data-short="St" title="Settings"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><span class="nav-label">Settings</span></a></li>
         </ul>
       </nav>
       <div class="sidebar-footer">
@@ -542,8 +730,29 @@ INDEX_HTML = """<!doctype html>
       </div>
     </aside>
     <div class="main-wrap">
+      <div id="od-scope-bar" class="od-scope-bar" role="region" aria-label="Observability scope">
+        <div class="od-scope-bar-inner">
+          <div class="od-scope-main">
+            <p class="od-scope-title">Observability scope</p>
+            <p id="od-scope-path" class="od-scope-path" title="">Loading workspace…</p>
+            <p id="od-scope-origin" class="od-scope-origin muted"></p>
+            <p id="od-scope-hint" class="od-scope-hint muted">The Workspaces page lists every catalog entry on this machine. Overview, Memories, Trace, and Audit tabs show data for the workspace bound to this <code>observe serve</code> process only.</p>
+          </div>
+          <div class="od-scope-actions">
+            <details class="od-scope-bookmarks" aria-label="Other saved observe serve dashboards">
+              <summary class="od-scope-summary">Other dashboards</summary>
+              <div class="od-scope-bookmarks-body">
+                <p class="muted" style="font-size:11px;margin:0 0 6px;line-height:1.45">Bookmark each running server (different port = different workspace). Open jumps to that origin.</p>
+                <button type="button" class="od-scope-add-btn" id="od-scope-add-bookmark">Bookmark this</button>
+                <ul id="od-scope-bookmark-list" class="od-scope-bookmark-list" aria-label="Saved dashboard URLs"></ul>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
       <div id="od-data-freshness" class="od-data-freshness muted" aria-live="polite"></div>
-      <main id="app" class="main-content" aria-live="polite"></main>
+      <div id="od-route-announce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+      <main id="app" class="main-content" aria-live="polite" tabindex="-1"></main>
     </div>
   </div>
   <dialog id="od-fs-dialog" class="od-fs-dialog" aria-labelledby="od-fs-title" aria-modal="true">
@@ -554,6 +763,17 @@ INDEX_HTML = """<!doctype html>
       </button>
     </div>
     <div class="od-fs-scroll" id="od-fs-host"></div>
+  </dialog>
+  <dialog id="od-command-palette" class="od-command-palette" aria-labelledby="od-palette-title">
+    <div class="od-palette-head">
+      <h2 id="od-palette-title" class="od-palette-title">Go to…</h2>
+      <button type="button" class="icon-btn" id="od-palette-close" aria-label="Close command palette" title="Close">
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <input type="search" id="od-palette-input" class="od-palette-input" autocomplete="off" placeholder="Filter pages…" />
+    <ul id="od-palette-list" class="od-palette-list"></ul>
+    <p class="muted od-palette-hint">⌘K / Ctrl+K · Enter opens first match · Esc closes</p>
   </dialog>
   <script>
     const app = document.getElementById('app');
@@ -952,10 +1172,37 @@ INDEX_HTML = """<!doctype html>
       }
       return parts.join('') || '<p class="muted">No runs match.</p>';
     };
+    window.odDismissFirstSteps = function () {
+      try {
+        localStorage.setItem('opendream-first-steps-dismissed', '1');
+      } catch (_d0) {}
+      var inner = document.getElementById('od-first-steps-panel');
+      var sec = inner && inner.closest('section.panel');
+      if (sec) sec.remove();
+    };
     window.odCopyApiUrl = function (btn) {
       var path = btn.getAttribute('data-api-path') || '';
       var method = btn.getAttribute('data-api-method') || 'GET';
       var line = method + ' ' + location.origin + path;
+      void navigator.clipboard.writeText(line).catch(function () {});
+    };
+    window.odCopyApiCurl = function (btn) {
+      var path = btn.getAttribute('data-api-path') || '';
+      var method = String(btn.getAttribute('data-api-method') || 'GET').toUpperCase();
+      var url = location.origin + path;
+      var line = method === 'GET' ? 'curl -sS ' + JSON.stringify(url) : 'curl -sS -X ' + method + ' ' + JSON.stringify(url);
+      void navigator.clipboard.writeText(line).catch(function () {});
+    };
+    window.odCopyApiFetch = function (btn) {
+      var path = btn.getAttribute('data-api-path') || '';
+      var method = String(btn.getAttribute('data-api-method') || 'GET').toUpperCase();
+      var url = location.origin + path;
+      var line =
+        'await fetch(' +
+        JSON.stringify(url) +
+        ', { method: ' +
+        JSON.stringify(method) +
+        ' }).then(function (r) { return r.json(); });';
       void navigator.clipboard.writeText(line).catch(function () {});
     };
     const fetchJson = async (path, options={}) => {
@@ -974,6 +1221,123 @@ INDEX_HTML = """<!doctype html>
       if (!bodyText.trim()) return {};
       return JSON.parse(bodyText);
     };
+    (function odScopeBarBookmarks() {
+      var KEY = 'opendream-dashboard-bookmarks';
+      var ctxCache = null;
+      function readBookmarks() {
+        try {
+          var raw = localStorage.getItem(KEY);
+          if (!raw) return [];
+          var arr = JSON.parse(raw);
+          return Array.isArray(arr) ? arr : [];
+        } catch (e1) {
+          return [];
+        }
+      }
+      function writeBookmarks(arr) {
+        try {
+          localStorage.setItem(KEY, JSON.stringify(arr));
+        } catch (e2) {}
+      }
+      function defaultLabel(ctx) {
+        if (ctx && ctx.workspace_name) return ctx.workspace_name;
+        var p = (ctx && ctx.workspace_path) || '';
+        var parts = String(p).replace(/\\\\/g, '/').split('/').filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : p || 'dashboard';
+      }
+      function renderList() {
+        var ul = document.getElementById('od-scope-bookmark-list');
+        if (!ul) return;
+        var bm = readBookmarks();
+        var origin = location.origin;
+        if (!bm.length) {
+          ul.innerHTML = '<li class="muted" style="font-size:11px">No bookmarks yet.</li>';
+          return;
+        }
+        ul.innerHTML = bm
+          .map(function (b) {
+            var lab = escapeHtml(b.label || b.origin);
+            var o = String(b.origin || '');
+            var oEsc = escapeHtml(o);
+            if (o === origin) {
+              return (
+                '<li><span class="od-scope-bm-current">This tab · ' +
+                lab +
+                '</span> <button type="button" class="od-scope-bm-remove" data-remove-origin="' +
+                oEsc +
+                '" aria-label="Remove bookmark">Remove</button></li>'
+              );
+            }
+            return (
+              '<li><button type="button" class="od-scope-bm-open" data-open-origin="' +
+              oEsc +
+              '">Open ' +
+              lab +
+              '</button> <button type="button" class="od-scope-bm-remove" data-remove-origin="' +
+              oEsc +
+              '" aria-label="Remove bookmark">Remove</button></li>'
+            );
+          })
+          .join('');
+      }
+      function bindBookmarkList() {
+        var ul = document.getElementById('od-scope-bookmark-list');
+        if (!ul || ul.getAttribute('data-od-bm-bound') === '1') return;
+        ul.setAttribute('data-od-bm-bound', '1');
+        ul.addEventListener('click', function (ev) {
+          var openBtn = ev.target.closest('.od-scope-bm-open');
+          if (openBtn) {
+            var target = openBtn.getAttribute('data-open-origin') || '';
+            if (target) window.location.href = target + '/overview';
+            return;
+          }
+          var remBtn = ev.target.closest('.od-scope-bm-remove');
+          if (remBtn) {
+            var rem = remBtn.getAttribute('data-remove-origin') || '';
+            writeBookmarks(readBookmarks().filter(function (x) { return x.origin !== rem; }));
+            renderList();
+          }
+        });
+      }
+      async function boot() {
+        var pathEl = document.getElementById('od-scope-path');
+        var originEl = document.getElementById('od-scope-origin');
+        if (!pathEl || !originEl) return;
+        originEl.textContent = 'This UI: ' + location.origin;
+        bindBookmarkList();
+        try {
+          ctxCache = await fetchJson('/api/ui-context');
+        } catch (e3) {
+          pathEl.textContent = 'Could not load workspace context.';
+          pathEl.classList.add('od-scope-error');
+          pathEl.removeAttribute('title');
+          return;
+        }
+        var path = ctxCache.workspace_path || '';
+        var line = path;
+        var title = path;
+        if (ctxCache.workspace_name) {
+          line = ctxCache.workspace_name + ' — ' + path;
+          title = ctxCache.workspace_name + '\\n' + path;
+        }
+        pathEl.textContent = line;
+        pathEl.setAttribute('title', title);
+        var addBtn = document.getElementById('od-scope-add-bookmark');
+        if (addBtn) {
+          addBtn.setAttribute('aria-label', 'Bookmark this dashboard at ' + location.origin);
+          addBtn.addEventListener('click', function () {
+            var o = location.origin;
+            var label = defaultLabel(ctxCache);
+            var next = readBookmarks().filter(function (x) { return x.origin !== o; });
+            next.push({ origin: o, label: label });
+            writeBookmarks(next);
+            renderList();
+          });
+        }
+        renderList();
+      }
+      void boot();
+    })();
     const fsExpandSvg = '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
     const panel = (title, body, full=false, panelKey=null) => {
       if (!panelKey) {
@@ -983,16 +1347,94 @@ INDEX_HTML = """<!doctype html>
       return '<section class="panel panel-fs ' + (full ? 'full' : '') + '"><div class="panel-head"><h2 class="panel-title">' + safe + '</h2><button type="button" class="icon-btn panel-fs-open" data-fs-panel="' + panelKey + '" aria-label="Open ' + safe + ' in fullscreen" title="Fullscreen">' + fsExpandSvg + '</button></div><div class="panel-body-od" data-panel-body="' + panelKey + '" data-panel-title="' + safe + '">' + body + '</div></section>';
     };
     const pretty = (obj) => `<pre>${JSON.stringify(obj, null, 2)}</pre>`;
+    function routeToPageId(path) {
+      var p = path || '';
+      if (p === '/' || p === '/overview') return 'overview';
+      if (p === '/workspaces') return 'workspaces';
+      if (p.indexOf('/workspaces/') === 0) return 'workspace-detail';
+      if (p === '/memories') return 'memories';
+      if (p.indexOf('/memories/') === 0) return 'memory-detail';
+      if (p === '/runs') return 'runs';
+      if (p.indexOf('/runs/') === 0) return 'run-detail';
+      if (p === '/retrievals') return 'retrievals';
+      if (p.indexOf('/retrievals/') === 0) return 'retrieval-detail';
+      if (p === '/sessions') return 'sessions';
+      if (p.indexOf('/sessions/') === 0) return 'session-detail';
+      if (p === '/context' || p === '/context/') return 'context';
+      if (p.indexOf('/context/') === 0) return 'context-detail';
+      if (p === '/reviews') return 'reviews';
+      if (p === '/graph') return 'graph';
+      if (p === '/evals') return 'evals';
+      if (p === '/exports') return 'exports';
+      if (p === '/settings') return 'settings';
+      return 'overview';
+    }
+    function applyEntityAttrsFromRoute(path) {
+      app.removeAttribute('data-entity-type');
+      app.removeAttribute('data-entity-id');
+      var parts = path.split('/').filter(function (x) { return x; });
+      if (parts.length < 2) return;
+      var kind = parts[0];
+      var raw = parts[1];
+      try {
+        raw = decodeURIComponent(raw);
+      } catch (e2) {}
+      if (kind === 'memories' && raw) {
+        app.setAttribute('data-entity-type', 'memory');
+        app.setAttribute('data-entity-id', raw);
+      } else if (kind === 'runs' && raw) {
+        app.setAttribute('data-entity-type', 'run');
+        app.setAttribute('data-entity-id', raw);
+      } else if (kind === 'retrievals' && raw) {
+        app.setAttribute('data-entity-type', 'retrieval');
+        app.setAttribute('data-entity-id', raw);
+      } else if (kind === 'sessions' && raw) {
+        app.setAttribute('data-entity-type', 'session');
+        app.setAttribute('data-entity-id', raw);
+      } else if (kind === 'context' && raw) {
+        app.setAttribute('data-entity-type', 'context');
+        app.setAttribute('data-entity-id', raw);
+      } else if (kind === 'workspaces' && raw) {
+        app.setAttribute('data-entity-type', 'workspace');
+        app.setAttribute('data-entity-id', raw);
+      }
+    }
+    function syncOdChromeAfterRender(label) {
+      document.title = label + ' · OpenDream Observability';
+      document.documentElement.setAttribute('data-page', routeToPageId(route));
+      applyEntityAttrsFromRoute(route);
+      var ann = document.getElementById('od-route-announce');
+      if (ann) {
+        ann.textContent = '';
+        setTimeout(function () {
+          ann.textContent = label + ' loaded';
+        }, 50);
+      }
+    }
+    function odLoadingSkeletonHtml(label) {
+      return (
+        '<section class="panel full od-skeleton-wrap" aria-hidden="true">' +
+        '<h2 class="od-skeleton-h">Loading…</h2>' +
+        '<p class="muted" style="margin:0 0 1rem">' +
+        escapeHtml(label) +
+        '</p>' +
+        '<div class="od-skeleton-grid">' +
+        '<div><div class="od-skel-metric" style="margin-bottom:10px"></div><div class="od-skel-line od-skel-line--med" style="margin-bottom:8px"></div><div class="od-skel-line od-skel-line--short"></div></div>' +
+        '<div><div class="od-skel-metric" style="margin-bottom:10px"></div><div class="od-skel-line od-skel-line--med" style="margin-bottom:8px"></div><div class="od-skel-line"></div></div>' +
+        '</div></section>'
+      );
+    }
     async function runRender(label, fn) {
       closeOdPanelFullscreen();
       app.setAttribute('aria-busy', 'true');
-      app.innerHTML = panel('Loading', `<p class="muted">${escapeHtml(label)}</p>`, true);
+      app.innerHTML = odLoadingSkeletonHtml(label);
       try {
         await fn();
         var fr = document.getElementById('od-data-freshness');
         if (fr) {
           fr.textContent = 'Data loaded at ' + new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
         }
+        syncOdChromeAfterRender(label);
       } catch (err) {
         const msg = err && err.message ? err.message : String(err);
         const status = err && err.status != null ? String(err.status) : '';
@@ -1001,6 +1443,17 @@ INDEX_HTML = """<!doctype html>
         app.innerHTML = [
           panel('Could not load', statusLine + `<p class="muted">${escapeHtml(msg)}</p><p class="row od-err-actions" style="gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="icon-btn od-api-copy-btn" id="od-retry-btn" aria-label="Retry" title="Retry"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button><button type="button" class="icon-btn od-api-copy-btn" id="od-copy-err-btn" aria-label="Copy error details" title="Copy error"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></p>`, true),
         ].join('');
+        document.title = 'Could not load · OpenDream Observability';
+        document.documentElement.setAttribute('data-page', 'error');
+        app.removeAttribute('data-entity-type');
+        app.removeAttribute('data-entity-id');
+        var annE = document.getElementById('od-route-announce');
+        if (annE) {
+          annE.textContent = '';
+          setTimeout(function () {
+            annE.textContent = 'Could not load page';
+          }, 50);
+        }
         const btn = document.getElementById('od-retry-btn');
         if (btn) btn.onclick = () => { void runRender(label, fn); };
         const copyErr = document.getElementById('od-copy-err-btn');
@@ -1638,6 +2091,39 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           : '';
       const parts = [];
       if (memTotal === 0) parts.push(panel('Get started', emptyNext, true));
+      let firstStepsDismissed = false;
+      try {
+        firstStepsDismissed = localStorage.getItem('opendream-first-steps-dismissed') === '1';
+      } catch (_fs0) {}
+      const firstStepsOpen = memTotal > 0 ? '' : ' open';
+      const reviewsStep =
+        contestedN > 0
+          ? `<li><a href="/reviews">Review queue</a> — triage contested or flagged items.</li>`
+          : `<li>Optional: open <a href="/reviews">Reviews</a> when the queue has items.</li>`;
+      if (!firstStepsDismissed) {
+        parts.push(
+          panel(
+            'First steps',
+            `<div id="od-first-steps-panel">
+            <details class="mem-detail-details od-first-steps" id="od-first-steps"${firstStepsOpen}>
+            <summary>What to do in the first few minutes</summary>
+            <ol class="glossary-hint" style="margin:10px 0 0 1rem;line-height:1.65;padding:0">
+              <li>Confirm <a href="/overview">Overview</a> store health and memory counts.</li>
+              <li>Browse <a href="/memories">Memories</a> and open a record to inspect provenance.</li>
+              <li>Check <a href="/runs">Runs</a> for consolidation and <a href="/graph">Graph</a> for relationships.</li>
+              ${reviewsStep}
+            </ol>
+            <p class="glossary-hint" style="margin:10px 0 0 0">CLI: <code>opendream observe index --workspace "$PWD"</code> then <code>opendream maintain --workspace "$PWD"</code>. See project README for capture setup.</p>
+          </details>
+          <p class="row" style="margin:12px 0 0 0;align-items:center;gap:10px;flex-wrap:wrap">
+            <button type="button" class="icon-btn" onclick="odDismissFirstSteps()" aria-label="Hide first steps from Overview" title="Hides this panel until you clear site data for this origin (localStorage key opendream-first-steps-dismissed)">Hide first steps</button>
+            <span class="muted" style="font-size:11px;line-height:1.45">To show again: delete <code>opendream-first-steps-dismissed</code> in this site’s storage (Application → Local Storage).</span>
+          </p>
+          </div>`,
+            true,
+          ),
+        );
+      }
       parts.push(
         panel('Store Health', `
           <div class="metric"><div class="label">State</div><div class="value">${data.store_health.lock.present ? 'Locked' : 'Ready'}</div></div>
@@ -1650,8 +2136,13 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           <div class="metric"><div class="label">Startup Entries</div><div class="value">${data.startup_index.entries}</div></div>
           <div class="metric"><div class="label">Retrieval Hit Rate</div><div class="value">${data.retrievals.total ? Math.round((data.retrievals.successful / data.retrievals.total) * 100) + '%' : '0%'}</div></div>
           <p class="muted" style="margin-top:12px;margin-bottom:0;font-size:12px">Read API: <code>${location.origin}/api/overview</code>
+            <span class="od-api-clip-row">
             <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/overview" onclick="odCopyApiUrl(this)" aria-label="Copy overview API request" title="Copy API URL"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/overview" onclick="odCopyApiCurl(this)" aria-label="Copy as curl" title="Copy curl"><span style="font-size:10px;font-weight:600">curl</span></button>
+            <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/overview" onclick="odCopyApiFetch(this)" aria-label="Copy as fetch" title="Copy fetch"><span style="font-size:10px;font-weight:600">fetch</span></button>
+            </span>
           </p>
+          <p class="muted" style="margin-top:10px;margin-bottom:0;font-size:12px;line-height:1.55">Machine-readable workspace contract (schemas in repo): <code>opendream contract export --workspace &lt;path&gt; --format json</code>. See <code>AGENTS.md</code> in the OpenDream repository for <code>cli_output_version</code> and contract fields.</p>
         `),
         panel('Recent Runs', `<table><caption class="sr-only">Recent consolidation runs</caption><thead><tr><th scope="col">ID</th><th scope="col">Status</th><th scope="col">Type</th></tr></thead><tbody>${data.recent_runs.map(run => `<tr><td><a href="/runs/${run.run_id}">${run.run_id}</a></td><td>${run.status || ''}</td><td>${run.type}</td></tr>`).join('')}</tbody></table>`, true),
         panel('Recent Sessions', `<p class="muted" style="margin:0 0 10px 0">Session timelines and context IDs: see <a href="/sessions">Sessions</a> and <a href="/context">Context</a>.</p><table><caption class="sr-only">Recent capture sessions</caption><thead><tr><th scope="col">Session</th><th scope="col">Events</th><th scope="col">Ended</th></tr></thead><tbody>${data.recent_sessions.map(session => `<tr><td><a href="/sessions/${session.session_id}">${session.session_id}</a></td><td>${session.event_count}</td><td>${session.ended_at ? escapeHtml(formatInstantLocal(session.ended_at)) : ''}</td></tr>`).join('')}</tbody></table>`, true),
@@ -1758,7 +2249,11 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             </div>
           </div>
           <p class="muted" style="margin-top:10px;font-size:12px">Read API: <code>${location.origin}/api/memories/${encodeURIComponent(memoryId)}</code>
+            <span class="od-api-clip-row">
             <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/memories/${encodeURIComponent(memoryId)}" onclick="odCopyApiUrl(this)" aria-label="Copy memory API URL" title="Copy API URL"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+            <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/memories/${encodeURIComponent(memoryId)}" onclick="odCopyApiCurl(this)" aria-label="Copy memory API as curl" title="Copy curl"><span style="font-size:10px;font-weight:600">curl</span></button>
+            <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/memories/${encodeURIComponent(memoryId)}" onclick="odCopyApiFetch(this)" aria-label="Copy memory API as fetch" title="Copy fetch"><span style="font-size:10px;font-weight:600">fetch</span></button>
+            </span>
           </p>`;
       }
       const rows = data.items.map(item => {
@@ -1900,6 +2395,23 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
         `, false, 'mem-explorer'),
         panel('Memory Detail', detailHtml, false, 'mem-detail'),
       ].join('');
+      var pMemFocus = new URLSearchParams(location.search);
+      if (pMemFocus.get('focus_search') === '1') {
+        requestAnimationFrame(function () {
+          var inpFs = document.querySelector('#memories-filter-form input[name=search]');
+          if (inpFs) {
+            inpFs.focus();
+            try {
+              inpFs.select();
+            } catch (eFs) {}
+          }
+          pMemFocus.delete('focus_search');
+          var qsFs = pMemFocus.toString();
+          try {
+            history.replaceState({}, '', location.pathname + (qsFs ? '?' + qsFs : ''));
+          } catch (eFs2) {}
+        });
+      }
     }
 
     async function renderRuns(runId=null) {
@@ -2479,6 +2991,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       }).join('');
       app.innerHTML = [
         panel('Workspaces Overview', `
+          <p class="muted" style="font-size:12px;line-height:1.55;margin:0 0 12px 0">This table is the machine-local catalog. Overview, Memories, Trace, and Audit in the sidebar still read the workspace bound to <strong>this</strong> running <code>observe serve</code> process; use another port (another tab) to inspect a different workspace.</p>
           <div class="metric"><div class="label">Total</div><div class="value">${summary.total}</div></div>
           <div class="metric"><div class="label">Healthy</div><div class="value">${summary.ok}</div></div>
           <div class="metric"><div class="label">With Service</div><div class="value">${summary.with_service}</div></div>
@@ -2523,6 +3036,106 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       ].join('');
     }
 
+    (function odCommandPalette() {
+      /* Cmd/Ctrl+K can overlap browser UI shortcuts when the chrome address bar steals focus; binding is intentional for this observability page. */
+      var dlg = document.getElementById('od-command-palette');
+      var inp = document.getElementById('od-palette-input');
+      var listEl = document.getElementById('od-palette-list');
+      var closeBtn = document.getElementById('od-palette-close');
+      if (!dlg || !inp || !listEl) return;
+      var items = [
+        { href: '/overview', label: 'Overview', kw: 'home health summary' },
+        { href: '/workspaces', label: 'Workspaces', kw: 'catalog roots' },
+        { href: '/memories', label: 'Memories', kw: 'records durable' },
+        { href: '/memories?focus_search=1', label: 'Memories — focus search', kw: 'find filter query search' },
+        { href: '/runs', label: 'Runs', kw: 'consolidation jobs' },
+        { href: '/retrievals', label: 'Retrievals', kw: 'audit ranked' },
+        { href: '/sessions', label: 'Sessions', kw: 'capture timeline' },
+        { href: '/context', label: 'Context', kw: 'assembled' },
+        { href: '/reviews', label: 'Reviews', kw: 'queue triage' },
+        { href: '/graph', label: 'Provenance graph', kw: 'relations edges sigma' },
+        { href: '/graph?view=data', label: 'Graph — data tables (a11y)', kw: 'keyboard screen reader table' },
+        { href: '/evals', label: 'Evals', kw: 'health metrics' },
+        { href: '/exports', label: 'Exports', kw: 'bundles' },
+        { href: '/settings', label: 'Settings', kw: 'store metadata diagnostic' },
+      ];
+      var filtered = items.slice();
+      var activeIdx = 0;
+      function renderList() {
+        var q = (inp.value || '').trim().toLowerCase();
+        filtered = !q
+          ? items.slice()
+          : items.filter(function (it) {
+              return (it.label + ' ' + it.kw).toLowerCase().indexOf(q) !== -1;
+            });
+        if (activeIdx >= filtered.length) activeIdx = Math.max(0, filtered.length - 1);
+        listEl.innerHTML = filtered
+          .map(function (it, ix) {
+            var active = ix === activeIdx ? ' od-palette-active' : '';
+            return (
+              '<li><button type="button" class="' +
+              active.trim() +
+              '" data-href="' +
+              it.href +
+              '">' +
+              it.label +
+              '</button></li>'
+            );
+          })
+          .join('');
+      }
+      function go(href) {
+        dlg.close();
+        location.href = href;
+      }
+      function openPalette() {
+        inp.value = '';
+        activeIdx = 0;
+        renderList();
+        dlg.showModal();
+        setTimeout(function () {
+          inp.focus();
+        }, 0);
+      }
+      function closePalette() {
+        dlg.close();
+      }
+      listEl.addEventListener('click', function (ev) {
+        var b = ev.target.closest('button[data-href]');
+        if (!b) return;
+        go(b.getAttribute('data-href') || '');
+      });
+      inp.addEventListener('input', function () {
+        activeIdx = 0;
+        renderList();
+      });
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          activeIdx = Math.min(filtered.length - 1, activeIdx + 1);
+          renderList();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          activeIdx = Math.max(0, activeIdx - 1);
+          renderList();
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (filtered[activeIdx]) go(filtered[activeIdx].href);
+        }
+      });
+      document.addEventListener('keydown', function (e) {
+        if ((e.metaKey || e.ctrlKey) && String(e.key || '').toLowerCase() === 'k') {
+          e.preventDefault();
+          if (dlg.open) closePalette();
+          else openPalette();
+        }
+      });
+      if (closeBtn) closeBtn.addEventListener('click', closePalette);
+      dlg.addEventListener('cancel', function (e) {
+        e.preventDefault();
+        closePalette();
+      });
+    })();
     if (route === '/' || route === '/overview') void runRender('Overview', renderOverview);
     else if (route === '/workspaces') void runRender('Workspaces', renderWorkspaces);
     else if (route.startsWith('/workspaces/')) void runRender('Workspace detail', () => renderWorkspaceDetail(route.split('/').pop()));
@@ -2601,6 +3214,9 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
 
     def _handle_api_get(self, parsed: Any) -> None:
         query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+        if parsed.path == "/api/ui-context":
+            self._write_json(_ui_context_payload(self.store))
+            return
         index = load_or_build_index(self.store)
         entities = index["entities"]
         if parsed.path == "/api/overview":
@@ -2824,6 +3440,21 @@ def serve_observability(store: MemoryStore, *, host: str = "127.0.0.1", port: in
         return {"status": "serving", "host": actual_host, "port": actual_port, "url": f"http://{actual_host}:{actual_port}"}
     finally:
         server.server_close()
+
+
+def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
+    """Minimal JSON for UI scope chrome (active workspace for this server)."""
+    workspace_path = str(store.workspace.resolve())
+    payload: dict[str, Any] = {
+        "kind": "observe_serve",
+        "workspace_path": workspace_path,
+    }
+    entry = workspace_catalog.inspect_entry(workspace_path)
+    if entry:
+        name = entry.get("workspace_name")
+        if isinstance(name, str) and name.strip():
+            payload["workspace_name"] = name.strip()
+    return payload
 
 
 def _workspace_dashboard_payload() -> dict[str, Any]:
