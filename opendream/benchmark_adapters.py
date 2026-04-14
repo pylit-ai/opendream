@@ -86,7 +86,7 @@ def run_internal_benchmark(
         # Run query-based tests
         for query_spec in queries:
             query = query_spec["query"]
-            retrieval_result = retrieve(store, query=query)
+            retrieval_result = retrieve(store, query=query, query_source="benchmark")
             passed = retrieval_result.get("gated", False) is False
             if passed:
                 total_passed += 1
@@ -147,7 +147,7 @@ def _compute_accurate_retrieval(
     for query_spec in test_queries:
         query = query_spec.get("query", "")
         expected_ids = set(query_spec.get("expected_memory_ids", []))
-        result = retrieve(store, query=query)
+        result = retrieve(store, query=query, query_source="benchmark")
         selected = set(result.get("selected_memory_ids", []))
         if expected_ids and expected_ids & selected:
             hits += 1
@@ -174,7 +174,7 @@ def _compute_test_time_learning(
     total = len(test_queries)
     for query_spec in test_queries:
         query = query_spec.get("query", "")
-        result = retrieve(store, query=query)
+        result = retrieve(store, query=query, query_source="benchmark")
         if result.get("selected_memory_ids"):
             hits += 1
     score = hits / max(1, total)
@@ -198,7 +198,7 @@ def _compute_long_range_understanding(
     total = len(old_queries)
     for query_spec in old_queries:
         query = query_spec.get("query", "")
-        result = retrieve(store, query=query)
+        result = retrieve(store, query=query, query_source="benchmark")
         if result.get("selected_memory_ids"):
             hits += 1
     score = hits / max(1, total)
@@ -223,7 +223,7 @@ def _compute_conflict_resolution(
     for query_spec in conflict_queries:
         query = query_spec.get("query", "")
         expected_winner = query_spec.get("expected_winner_id", "")
-        result = retrieve(store, query=query)
+        result = retrieve(store, query=query, query_source="benchmark")
         selected = result.get("selected_memory_ids", [])
         if selected and (not expected_winner or expected_winner in selected):
             correct += 1
@@ -347,7 +347,7 @@ def run_coding_task_eval(
         irrelevant_count = 0
         for query in test_queries:
             t0 = time.monotonic()
-            result = retrieve(store, query=query)
+            result = retrieve(store, query=query, query_source="benchmark")
             t1 = time.monotonic()
             total_latency += (t1 - t0)
             if result.get("selected_memory_ids"):

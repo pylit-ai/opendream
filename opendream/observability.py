@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -30,16 +31,149 @@ def load_or_build_index(store: MemoryStore, *, now: str | None = None) -> dict[s
     return index_observability(store, now=now)
 
 
+_VALID_MEMORY_SORTS = frozenset(
+    {
+        "title",
+        "type",
+        "scope",
+        "status",
+        "memory_id",
+        "created_at",
+        "updated_at",
+        "salience",
+        "confidence",
+        "retrieval_frequency",
+    }
+)
+
+
+def _memory_scalar_float(row: dict[str, Any], key: str) -> float | None:
+    raw = row.get(key)
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _memory_passes_range(
+    value: float | None,
+    lo: float | None,
+    hi: float | None,
+) -> bool:
+    """Inclusive bounds; rows missing the value fail when any bound is set."""
+    if lo is None and hi is None:
+        return True
+    if value is None:
+        return False
+    return not (lo is not None and value < lo) and not (hi is not None and value > hi)
+
+
+def _memory_passes_time_bound(
+    ts: str | None,
+    after: str | None,
+    before: str | None,
+) -> bool:
+    """ISO-8601 strings compare lexicographically when normalized."""
+    if not after and not before:
+        return True
+    if not ts:
+        return False
+    s = str(ts)
+    return not (after and s < after) and not (before and s > before)
+
+
+def _memory_sort_key(
+    row: dict[str, Any],
+    sort: str,
+    *,
+    reverse: bool,
+) -> tuple[Any, str]:
+    """Return a tuple sortable with ``reverse=``; tie-break on ``memory_id``."""
+    memory_id = str(row.get("memory_id", ""))
+    if sort in {"salience", "confidence"}:
+        v = _memory_scalar_float(row, sort)
+        primary: Any = -math.inf if v is None else v
+    elif sort == "retrieval_frequency":
+        raw = row.get("retrieval_frequency", 0)
+        try:
+            primary = int(raw)
+        except (TypeError, ValueError):
+            primary = 0
+    elif sort in {"created_at", "updated_at"}:
+        primary = str(row.get(sort, "") or "")
+    else:
+        primary = str(row.get(sort, "") or "").casefold()
+
+    if reverse:
+        primary = (
+            -primary if isinstance(primary, (float, int)) else _MemorySortStrDesc(primary)
+        )
+    return (primary, memory_id)
+
+
+class _MemorySortStrDesc:
+    """Wrap strings so descending lexicographic order uses ``reverse=False``."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, _MemorySortStrDesc):
+            return NotImplemented
+        return self.value > other.value
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _MemorySortStrDesc):
+            return NotImplemented
+        return self.value == other.value
+
+    def __gt__(self, other: object) -> bool:
+        if not isinstance(other, _MemorySortStrDesc):
+            return NotImplemented
+        return self.value < other.value
+
+    def __le__(self, other: object) -> bool:
+        if not isinstance(other, _MemorySortStrDesc):
+            return NotImplemented
+        return self.value >= other.value
+
+    def __ge__(self, other: object) -> bool:
+        if not isinstance(other, _MemorySortStrDesc):
+            return NotImplemented
+        return self.value <= other.value
+
+
 def query_memories(
     index: dict[str, Any],
     *,
     search: str = "",
     filters: dict[str, str] | None = None,
     sort: str = "updated_at",
+    sort_dir: str | None = None,
     offset: int = 0,
     limit: int = 50,
+    salience_min: float | None = None,
+    salience_max: float | None = None,
+    confidence_min: float | None = None,
+    confidence_max: float | None = None,
+    updated_after: str | None = None,
+    updated_before: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
 ) -> dict[str, Any]:
     filters = filters or {}
+    sort_field = sort if sort in _VALID_MEMORY_SORTS else "updated_at"
+    if sort_dir == "asc":
+        reverse = False
+    elif sort_dir == "desc":
+        reverse = True
+    else:
+        reverse = sort_field not in {"title", "type", "scope", "status", "memory_id"}
+
     rows = list(index["entities"]["memories"])
     lowered_search = search.strip().lower()
     if lowered_search:
@@ -58,8 +192,157 @@ def query_memories(
     for key, value in filters.items():
         if value:
             rows = [row for row in rows if str(row.get(key, "")) == value]
-    reverse = sort not in {"title", "type", "scope", "status"}
-    rows.sort(key=lambda row: str(row.get(sort, "")), reverse=reverse)
+
+    if salience_min is not None or salience_max is not None:
+        rows = [
+            row
+            for row in rows
+            if _memory_passes_range(
+                _memory_scalar_float(row, "salience"),
+                salience_min,
+                salience_max,
+            )
+        ]
+    if confidence_min is not None or confidence_max is not None:
+        rows = [
+            row
+            for row in rows
+            if _memory_passes_range(
+                _memory_scalar_float(row, "confidence"),
+                confidence_min,
+                confidence_max,
+            )
+        ]
+
+    if updated_after or updated_before:
+        rows = [
+            row
+            for row in rows
+            if _memory_passes_time_bound(
+                row.get("updated_at") if isinstance(row.get("updated_at"), str) else None,
+                updated_after,
+                updated_before,
+            )
+        ]
+    if created_after or created_before:
+        rows = [
+            row
+            for row in rows
+            if _memory_passes_time_bound(
+                row.get("created_at") if isinstance(row.get("created_at"), str) else None,
+                created_after,
+                created_before,
+            )
+        ]
+
+    rows.sort(key=lambda row: _memory_sort_key(row, sort_field, reverse=reverse))
+    total = len(rows)
+    return {"total": total, "items": rows[offset : offset + limit]}
+
+
+_VALID_RETRIEVAL_SORTS = frozenset({"timestamp", "id", "query", "selected_count"})
+
+
+def _retrieval_passes_selected_count(
+    row: dict[str, Any],
+    lo: int | None,
+    hi: int | None,
+) -> bool:
+    """Inclusive bounds on ``len(selected_memory_ids)``; missing list treated as []."""
+    if lo is None and hi is None:
+        return True
+    n = len(row.get("selected_memory_ids") or [])
+    if lo is not None and n < lo:
+        return False
+    if hi is not None and n > hi:
+        return False
+    return True
+
+
+def _retrieval_sort_key(
+    row: dict[str, Any],
+    sort: str,
+    *,
+    reverse: bool,
+) -> tuple[Any, str]:
+    """Sort key with stable tie-break on ``id``."""
+    rid = str(row.get("id", ""))
+    if sort == "selected_count":
+        primary: Any = len(row.get("selected_memory_ids") or [])
+    elif sort == "timestamp":
+        primary = str(row.get("timestamp", "") or "")
+    elif sort == "query":
+        primary = str(row.get("query", "") or "").casefold()
+    else:
+        primary = str(row.get("id", "") or "").casefold()
+
+    if reverse:
+        if isinstance(primary, int):
+            primary = -primary
+        elif sort == "timestamp":
+            primary = _MemorySortStrDesc(primary)
+        elif sort in {"query", "id"}:
+            primary = _MemorySortStrDesc(primary)
+    return (primary, rid)
+
+
+def query_retrievals(
+    index: dict[str, Any],
+    *,
+    search: str = "",
+    sort: str = "timestamp",
+    sort_dir: str | None = None,
+    offset: int = 0,
+    limit: int = 50,
+    timestamp_after: str | None = None,
+    timestamp_before: str | None = None,
+    min_selected: int | None = None,
+    max_selected: int | None = None,
+) -> dict[str, Any]:
+    sort_field = sort if sort in _VALID_RETRIEVAL_SORTS else "timestamp"
+    if sort_dir == "asc":
+        reverse = False
+    elif sort_dir == "desc":
+        reverse = True
+    else:
+        reverse = sort_field in {"timestamp", "selected_count"}
+
+    rows = list(index["entities"]["retrievals"])
+    lowered_search = search.strip().lower()
+    if lowered_search:
+        rows = [
+            row
+            for row in rows
+            if lowered_search
+            in " ".join(
+                [
+                    str(row.get("id", "")),
+                    str(row.get("run_id", "")),
+                    str(row.get("query", "")),
+                    str(row.get("summary", "")),
+                ]
+            ).lower()
+        ]
+
+    if timestamp_after or timestamp_before:
+        rows = [
+            row
+            for row in rows
+            if _memory_passes_time_bound(
+                row.get("timestamp") if isinstance(row.get("timestamp"), str) else None,
+                timestamp_after,
+                timestamp_before,
+            )
+        ]
+
+    if min_selected is not None or max_selected is not None:
+        rows = [
+            row
+            for row in rows
+            if _retrieval_passes_selected_count(row, min_selected, max_selected)
+        ]
+
+    rows.sort(key=lambda row: _retrieval_sort_key(row, sort_field, reverse=reverse))
     total = len(rows)
     return {"total": total, "items": rows[offset : offset + limit]}
 

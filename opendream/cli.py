@@ -447,6 +447,8 @@ def command_retrieve(args: argparse.Namespace) -> dict[str, Any]:
         limit=args.limit,
         now=args.now,
         include_contested=args.include_contested,
+        query_source="cli",
+        caller_detail=((args.caller_detail or "").strip() or None),
     )
     response["workspace"] = str(store.workspace)
     return response
@@ -1316,6 +1318,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     retrieve_parser.add_argument("--limit", type=int, default=5)
     retrieve_parser.add_argument("--include-contested", action="store_true")
+    retrieve_parser.add_argument(
+        "--caller-detail",
+        metavar="TEXT",
+        help="Optional free-text tag stored on the retrieval audit (e.g. agent session id, operator id).",
+    )
     retrieve_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(retrieve_parser)
     retrieve_parser.set_defaults(func=command_retrieve)

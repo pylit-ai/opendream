@@ -9,6 +9,8 @@
     focus: null,
     depth: 1,
     layout: 'hierarchical',
+    viewMode: 'canvas', // 'canvas' | 'data' — data = keyboard-friendly tables
+    tableSearch: '', // substring filter for Graph data view (id/title)
     filters: { nodeTypes: new Set(), edgeKinds: new Set() },
     hidden: new Set(),
     selected: null,
@@ -16,10 +18,22 @@
     graph: null,        // graphology Graph instance
     raw: null,          // last /api/graph payload
     rootEl: null,
+    canvasWrapEl: null,
     canvasEl: null,
+    dataPanelEl: null,
+    dataTablesHostEl: null,
     sidepanelEl: null,
     tooltipEl: null,
   };
+
+  function cssColor(prop, fallback) {
+    try {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(prop).trim();
+      return v || fallback;
+    } catch (_e) {
+      return fallback;
+    }
+  }
 
   // ---- 2. Theme -----------------------------------------------------------
   const THEME = {
@@ -134,16 +148,107 @@
     state.canvasEl.innerHTML = '';
     state.sigma = new window.Sigma(state.graph, state.canvasEl, {
       renderEdgeLabels: false,
-      defaultEdgeColor: '#94a3b8',
-      labelColor: { color: '#e2e8f0' },
+      defaultEdgeColor: cssColor('--muted', '#94a3b8'),
+      labelColor: { color: cssColor('--text', '#eaeaea') },
       labelSize: 11,
       labelWeight: '500',
     });
   }
 
+  function applyViewModeVisibility() {
+    const wrap = state.canvasWrapEl;
+    const panel = state.dataPanelEl;
+    if (!wrap || !panel) return;
+    if (state.viewMode === 'data') {
+      wrap.setAttribute('aria-hidden', 'true');
+      wrap.classList.add('graph-stage-hidden');
+      panel.hidden = false;
+      panel.removeAttribute('aria-hidden');
+    } else {
+      wrap.removeAttribute('aria-hidden');
+      wrap.classList.remove('graph-stage-hidden');
+      panel.hidden = true;
+      panel.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function nodeDetailHref(node) {
+    const detailRoutes = { memory: '/memories/', run: '/runs/', retrieval: '/retrievals/' };
+    const base = detailRoutes[node.type];
+    return base ? base + encodeURIComponent(node.id) : null;
+  }
+
+  function visibleNodesForDataView() {
+    const base = visibleNodes();
+    const q = (state.tableSearch || '').trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((n) => {
+      const id = String(n.id || '').toLowerCase();
+      const title = String(n.title || '').toLowerCase();
+      return id.includes(q) || title.includes(q);
+    });
+  }
+
+  function visibleEdgesForDataView() {
+    const ids = new Set(visibleNodesForDataView().map((n) => n.id));
+    return visibleEdges().filter((e) => ids.has(e.source) && ids.has(e.target));
+  }
+
+  function renderDataTables() {
+    const host = state.dataTablesHostEl;
+    if (!host) return;
+    const nodes = visibleNodesForDataView();
+    const edges = visibleEdgesForDataView();
+    if (!nodes.length && !edges.length) {
+      host.innerHTML = '<p class="graph-empty" style="min-height:120px">No relations to display for the current filters. Adjust filters or run consolidation.</p>';
+      return;
+    }
+    const nodeRows = nodes
+      .slice()
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+      .map((n) => {
+        const href = nodeDetailHref(n);
+        const titleCell = href
+          ? `<a href="${href}">${escapeHtml(n.title || n.id)}</a>`
+          : escapeHtml(n.title || n.id);
+        return `<tr><td><code>${escapeHtml(String(n.id))}</code></td><td>${escapeHtml(String(n.type || ''))}</td><td>${titleCell}</td></tr>`;
+      })
+      .join('');
+    const nodeTable =
+      '<table class="graph-data-table"><caption class="sr-only">Visible graph nodes</caption><thead><tr><th scope="col">ID</th><th scope="col">Type</th><th scope="col">Title</th></tr></thead><tbody>' +
+      nodeRows +
+      '</tbody></table>';
+    const edgeRows = edges
+      .map((e) => {
+        const src = state.raw.nodes.find((n) => n.id === e.source);
+        const tgt = state.raw.nodes.find((n) => n.id === e.target);
+        const srcLink = src && nodeDetailHref(src) ? `<a href="${nodeDetailHref(src)}"><code>${escapeHtml(String(e.source))}</code></a>` : `<code>${escapeHtml(String(e.source))}</code>`;
+        const tgtLink = tgt && nodeDetailHref(tgt) ? `<a href="${nodeDetailHref(tgt)}"><code>${escapeHtml(String(e.target))}</code></a>` : `<code>${escapeHtml(String(e.target))}</code>`;
+        return `<tr><td>${srcLink}</td><td>${tgtLink}</td><td>${escapeHtml(String(e.type || ''))}</td></tr>`;
+      })
+      .join('');
+    const edgeTable =
+      '<h4 class="graph-data-heading">Edges</h4><table class="graph-data-table"><caption class="sr-only">Visible graph edges</caption><thead><tr><th scope="col">Source</th><th scope="col">Target</th><th scope="col">Kind</th></tr></thead><tbody>' +
+      (edgeRows || '<tr><td colspan="3" class="muted">No edges</td></tr>') +
+      '</tbody></table>';
+    host.innerHTML = '<h4 class="graph-data-heading">Nodes</h4>' + nodeTable + edgeTable;
+  }
+
   async function refresh() {
     try {
       await fetchGraph();
+      if (state.viewMode === 'data') {
+        if (state.sigma) {
+          state.sigma.kill();
+          state.sigma = null;
+        }
+        state.graph = null;
+        applyViewModeVisibility();
+        renderDataTables();
+        renderSidePanel();
+        return;
+      }
+      applyViewModeVisibility();
       if (state.layout === 'forceatlas2') {
         state.canvasEl.innerHTML = '<div class="graph-empty">Computing layout…</div>';
         initSigma();
@@ -155,7 +260,13 @@
       updateMinimap();
       renderSidePanel();
     } catch (err) {
-      state.canvasEl.innerHTML = '<div class="graph-empty graph-error">Failed to load graph: ' + escapeHtml(err.message) + '</div>';
+      const msg = escapeHtml(err.message);
+      state.canvasEl.innerHTML = '<div class="graph-empty graph-error">Failed to load graph: ' + msg + '</div>';
+      if (state.dataTablesHostEl) {
+        state.dataTablesHostEl.innerHTML = '<p class="graph-empty graph-error">Failed to load graph: ' + msg + '</p>';
+      }
+      if (state.viewMode === 'data') applyViewModeVisibility();
+      renderSidePanel();
     }
   }
 
@@ -197,10 +308,27 @@
     }).join('');
     const selectedHtml = state.selected ? renderSelectedCard(state.selected) : '';
     const hiddenCount = state.hidden.size;
+    const searchPlaceholder =
+      state.viewMode === 'data' ? 'Filter nodes by id or title' : 'Search visible nodes (canvas)';
     state.sidepanelEl.innerHTML = `
+      <h3>View</h3>
+      <div class="graph-segmented graph-view-toggle" role="group" aria-label="Graph view mode">
+        <button type="button" data-view-mode="canvas" class="${state.viewMode === 'canvas' ? 'active' : ''}">Canvas</button>
+        <button type="button" data-view-mode="data" class="${state.viewMode === 'data' ? 'active' : ''}">Graph data</button>
+      </div>
+      <details class="graph-shortcuts-help">
+        <summary>Canvas shortcuts</summary>
+        <ul class="graph-shortcuts-list">
+          <li><strong>Graph data</strong> mode: use the tables for keyboard navigation and screen readers.</li>
+          <li><strong>Double-click</strong> a node: set focus to that node (narrow the neighborhood).</li>
+          <li><strong>Shift+click</strong> a node: open its detail page (memory, run, or retrieval).</li>
+          <li><strong>Right-click</strong> a node: context menu (focus, open detail, expand neighborhood, hide node).</li>
+        </ul>
+      </details>
+
       <h3>Focus</h3>
       <div>${escapeHtml(focusLabel)}</div>
-      <input id="graph-search" placeholder="search visible nodes" style="width:100%;margin-top:8px;background:#0f1630;border:1px solid rgba(255,255,255,0.12);color:#e2e8f0;border-radius:8px;padding:6px 10px;">
+      <input id="graph-search" class="graph-search" value="${escapeHtml(state.tableSearch)}" placeholder="${escapeHtml(searchPlaceholder)}">
 
       <h3>Layout</h3>
       <div class="graph-segmented">
@@ -232,7 +360,7 @@
       <div><strong>${escapeHtml(node.title || node.id)}</strong>
         <span class="graph-chip" style="background:${THEME.nodeColors[node.type]};color:#0b1020;">${node.type}</span>
       </div>
-      <pre style="background:#0a1128;padding:8px;border-radius:8px;max-height:200px;overflow:auto;font-size:11px;margin-top:8px;">${escapeHtml(JSON.stringify(node, null, 2))}</pre>
+      <pre class="graph-json-pre">${escapeHtml(JSON.stringify(node, null, 2))}</pre>
       ${detailLinkFor(node)}
     `;
   }
@@ -241,10 +369,21 @@
     const detailRoutes = { memory: '/memories/', run: '/runs/', retrieval: '/retrievals/' };
     const base = detailRoutes[node.type];
     if (!base) return '';
-    return `<a href="${base}${encodeURIComponent(node.id)}" style="color:#67e8f9;">Open detail →</a>`;
+    return `<a class="graph-detail-link" href="${base}${encodeURIComponent(node.id)}">Open detail →</a>`;
   }
 
   function wireSidePanelEvents() {
+    state.sidepanelEl.querySelectorAll('[data-view-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-view-mode');
+        if (v !== 'canvas' && v !== 'data') return;
+        if (v === state.viewMode) return;
+        state.viewMode = v;
+        if (v === 'canvas') state.tableSearch = '';
+        pushUrlState();
+        void refresh();
+      });
+    });
     // Layout toggle
     state.sidepanelEl.querySelectorAll('[data-layout]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -268,8 +407,12 @@
         toggleSetMember(state.filters.nodeTypes, t);
         pushUrlState();
         renderSidePanel();
-        initSigma();
-        wireSigmaEvents();
+        if (state.viewMode === 'data') {
+          renderDataTables();
+        } else {
+          initSigma();
+          wireSigmaEvents();
+        }
       });
     });
     // Edge kind chips
@@ -279,17 +422,27 @@
         toggleSetMember(state.filters.edgeKinds, k);
         pushUrlState();
         renderSidePanel();
-        initSigma();
-        wireSigmaEvents();
+        if (state.viewMode === 'data') {
+          renderDataTables();
+        } else {
+          initSigma();
+          wireSigmaEvents();
+        }
       });
     });
     // Search box
     const search = state.sidepanelEl.querySelector('#graph-search');
     if (search) search.addEventListener('input', e => {
-      const q = e.target.value.toLowerCase();
+      const q = e.target.value;
+      if (state.viewMode === 'data') {
+        state.tableSearch = q;
+        renderDataTables();
+        return;
+      }
+      const ql = q.toLowerCase();
       if (!state.sigma) return;
       state.sigma.setSetting('nodeReducer', (id, attrs) => {
-        const visible = !q || (attrs.label || '').toLowerCase().includes(q);
+        const visible = !ql || (attrs.label || '').toLowerCase().includes(ql);
         return visible ? attrs : { ...attrs, hidden: true };
       });
       state.sigma.refresh();
@@ -299,8 +452,12 @@
     if (showHidden) showHidden.addEventListener('click', () => {
       state.hidden.clear();
       renderSidePanel();
-      initSigma();
-      wireSigmaEvents();
+      if (state.viewMode === 'data') {
+        renderDataTables();
+      } else {
+        initSigma();
+        wireSigmaEvents();
+      }
     });
   }
 
@@ -377,7 +534,9 @@
     if (existing) existing.remove();
     const menu = document.createElement('div');
     menu.id = 'graph-ctx-menu';
-    menu.style.cssText = `position:fixed;left:${clientX}px;top:${clientY}px;background:#0f1630;border:1px solid rgba(255,255,255,0.18);border-radius:8px;padding:4px 0;z-index:1000;font-size:12px;`;
+    menu.className = 'graph-ctx-menu';
+    menu.style.left = clientX + 'px';
+    menu.style.top = clientY + 'px';
     // Unified close path — item clicks AND outside clicks both route through
     // here so the document-level dismiss listener is always removed exactly
     // once (previously an item click removed the menu but leaked the listener
@@ -401,11 +560,9 @@
       { label: 'Hide node', action: () => { state.hidden.add(nodeId); renderSidePanel(); initSigma(); wireSigmaEvents(); } },
     ];
     for (const item of items) {
-      const btn = document.createElement('div');
+      const btn = document.createElement('button');
+      btn.type = 'button';
       btn.textContent = item.label;
-      btn.style.cssText = 'padding:6px 14px;cursor:pointer;color:#e2e8f0;';
-      btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(103,232,249,0.12)');
-      btn.addEventListener('mouseleave', () => btn.style.background = '');
       btn.addEventListener('click', () => { item.action(); closeMenu(); });
       menu.appendChild(btn);
     }
@@ -417,7 +574,7 @@
     const canvas = document.getElementById('graph-minimap');
     if (!canvas || !state.sigma || !state.graph) return;
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = 'rgba(11,16,32,0.7)';
+    ctx.fillStyle = cssColor('--rail-bg', 'rgba(15,17,20,0.85)');
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     state.graph.forEachNode((_id, a) => {
@@ -445,6 +602,9 @@
     if (params.has('edges')) {
       state.filters.edgeKinds = new Set(params.get('edges').split(',').filter(Boolean));
     }
+    const view = (params.get('view') || '').toLowerCase();
+    if (view === 'data') state.viewMode = 'data';
+    else state.viewMode = 'canvas';
   }
 
   function pushUrlState() {
@@ -454,6 +614,7 @@
     if (state.layout !== 'hierarchical') params.set('layout', state.layout);
     if (state.filters.nodeTypes.size) params.set('types', Array.from(state.filters.nodeTypes).join(','));
     if (state.filters.edgeKinds.size) params.set('edges', Array.from(state.filters.edgeKinds).join(','));
+    if (state.viewMode === 'data') params.set('view', 'data');
     const qs = params.toString();
     const newUrl = '/graph' + (qs ? '?' + qs : '');
     window.history.replaceState({}, '', newUrl);
@@ -464,16 +625,24 @@
     rootEl.innerHTML = `
       <link rel="stylesheet" href="/static/graph.css">
       <div id="graph-sidepanel"><div class="graph-empty">Loading…</div></div>
-      <div id="graph-canvas-wrap">
-        <div id="graph-canvas"></div>
-        <div id="graph-tooltip"></div>
-        <canvas id="graph-minimap" width="320" height="200"></canvas>
+      <div id="graph-main-stage" class="graph-main-stage">
+        <div id="graph-canvas-wrap">
+          <div id="graph-canvas"></div>
+          <div id="graph-tooltip"></div>
+          <canvas id="graph-minimap" width="320" height="200" aria-hidden="true"></canvas>
+        </div>
+        <div id="graph-data-panel" class="graph-data-panel" hidden aria-hidden="true">
+          <div id="graph-data-tables-host" class="graph-data-tables-host"></div>
+        </div>
       </div>`;
     state.sidepanelEl = rootEl.querySelector('#graph-sidepanel');
+    state.canvasWrapEl = rootEl.querySelector('#graph-canvas-wrap');
     state.canvasEl = rootEl.querySelector('#graph-canvas');
+    state.dataPanelEl = rootEl.querySelector('#graph-data-panel');
+    state.dataTablesHostEl = rootEl.querySelector('#graph-data-tables-host');
     state.tooltipEl = rootEl.querySelector('#graph-tooltip');
     parseUrlState();
-    refresh();
+    void refresh();
   }
 
   window.__opendreamGraph = { mount, _state: state, _theme: THEME };

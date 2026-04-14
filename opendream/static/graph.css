@@ -1,26 +1,103 @@
-/* opendream/static/graph.css */
+/* opendream/static/graph.css — uses theme tokens from observability INDEX_HTML (html[data-theme]) */
 #graph-root {
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: 16px;
-  height: calc(100vh - 140px);
-  min-height: 480px;
+  min-height: min(720px, calc(100dvh - 5rem));
+  height: calc(100dvh - 5rem);
 }
 #graph-sidepanel {
-  background: rgba(18, 25, 53, 0.86);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 16px;
   overflow-y: auto;
   font-size: 13px;
+  color: var(--text);
 }
-#graph-sidepanel h3 { margin: 16px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #94a3b8; }
-#graph-canvas-wrap {
+#graph-sidepanel h3 { margin: 16px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.graph-main-stage {
   position: relative;
-  background: rgba(18, 25, 53, 0.86);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  min-height: min(720px, calc(100dvh - 5rem));
+  height: calc(100dvh - 5rem);
+}
+#graph-canvas-wrap {
+  position: absolute;
+  inset: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
+}
+#graph-canvas-wrap.graph-stage-hidden {
+  display: none !important;
+}
+#graph-data-panel {
+  position: absolute;
+  inset: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: auto;
+  padding: 12px 16px;
+  color: var(--text);
+}
+.graph-data-tables-host {
+  max-width: 100%;
+}
+.graph-data-heading {
+  margin: 16px 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.graph-data-heading:first-child {
+  margin-top: 0;
+}
+.graph-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.graph-data-table th,
+.graph-data-table td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.graph-data-table thead {
+  background: var(--table-head, var(--interactive));
+}
+.graph-data-table a {
+  color: var(--accent);
+}
+.graph-data-table .muted {
+  color: var(--muted);
+}
+.graph-view-toggle {
+  width: 100%;
+  margin-bottom: 8px;
+}
+.graph-shortcuts-help {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.graph-shortcuts-help summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 500;
+}
+.graph-shortcuts-list {
+  margin: 8px 0 0;
+  padding-left: 1.2rem;
+  line-height: 1.45;
+}
+.graph-shortcuts-list li {
+  margin-bottom: 4px;
 }
 #graph-canvas { position: absolute; inset: 0; }
 #graph-minimap {
@@ -29,21 +106,24 @@
   right: 12px;
   width: 160px;
   height: 100px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(11, 16, 32, 0.7);
+  border: 1px solid var(--border);
+  background: var(--rail-bg);
   border-radius: 8px;
+  opacity: 0.92;
 }
 #graph-tooltip {
   position: absolute;
   pointer-events: none;
-  background: #0f1630;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 12px;
+  color: var(--text);
   display: none;
   z-index: 5;
   max-width: 260px;
+  box-shadow: 0 8px 24px var(--shadow);
 }
 .graph-chip {
   display: inline-block;
@@ -52,16 +132,61 @@
   border-radius: 999px;
   font-size: 11px;
   cursor: pointer;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   user-select: none;
 }
 .graph-chip.disabled { opacity: 0.35; }
-.graph-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #94a3b8; font-size: 14px; text-align: center; padding: 24px; }
-.graph-error { background: rgba(248, 113, 113, 0.18); color: #f87171; padding: 10px; border-radius: 8px; margin-bottom: 12px; }
-.graph-segmented { display: inline-flex; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; overflow: hidden; }
-.graph-segmented button { background: transparent; color: #e2e8f0; border: 0; padding: 6px 12px; cursor: pointer; }
-.graph-segmented button.active { background: #67e8f9; color: #0b1020; }
+.graph-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 14px; text-align: center; padding: 24px; }
+.graph-error { background: rgba(248, 113, 113, 0.15); color: var(--bad); padding: 10px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--border); }
+.graph-segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.graph-segmented button { background: transparent; color: var(--text); border: 0; padding: 6px 12px; cursor: pointer; }
+.graph-segmented button.active { background: var(--accent); color: var(--on-accent, #fff); }
+#graph-search {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.graph-detail-link { color: var(--accent); text-decoration: none; }
+.graph-detail-link:hover { text-decoration: underline; }
+.graph-json-pre {
+  background: var(--pre-bg);
+  padding: 8px;
+  border-radius: 8px;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 11px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.graph-ctx-menu {
+  position: fixed;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 0;
+  z-index: 1000;
+  font-size: 12px;
+  box-shadow: 0 12px 40px var(--shadow);
+}
+.graph-ctx-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 14px;
+  cursor: pointer;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font: inherit;
+}
+.graph-ctx-menu button:hover { background: var(--interactive); }
 @media (max-width: 900px) {
-  #graph-root { grid-template-columns: 1fr; height: auto; }
-  #graph-canvas-wrap { height: 60vh; }
+  #graph-root { grid-template-columns: 1fr; height: auto; min-height: 480px; }
+  .graph-main-stage { height: 60vh; min-height: 360px; }
 }

@@ -63,6 +63,8 @@ def retrieve(
     now: str | None = None,
     embedding_enabled: bool | None = None,
     skip_retrieval: bool = False,
+    query_source: str | None = None,
+    caller_detail: str | None = None,
 ) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
 
@@ -255,7 +257,7 @@ def retrieve(
         "reranked": not reranked,
         "memory_hurt": hurt_payload,
     }
-    audit_payload = {
+    audit_payload: dict[str, Any] = {
         "run_id": run_id,
         "timestamp": timestamp,
         "query": query,
@@ -266,6 +268,10 @@ def retrieve(
         "excluded": response["excluded"],
         "summary": summarize(query, 80),
     }
+    if query_source:
+        audit_payload["query_source"] = query_source
+    if caller_detail:
+        audit_payload["caller_detail"] = caller_detail
     store.write_retrieval_audit(str(audit_payload["run_id"]), audit_payload)
     response["cli_output_version"] = CLI_JSON_VERSION
     return response
@@ -358,6 +364,7 @@ def retrieve_with_fusion(
         include_contested=include_contested,
         now=timestamp,
         skip_retrieval=skip_retrieval,
+        query_source="retrieve_with_fusion",
     )
 
     if base_result.get("gated"):

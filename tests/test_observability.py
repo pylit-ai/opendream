@@ -82,6 +82,22 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(memories["total"], 2)
         self.assertEqual(len(memories["items"]), 2)
 
+    def test_memories_api_pagination_limit_cap_and_range_query(self) -> None:
+        page0 = self.get_json("/api/memories?limit=1&offset=0&sort=memory_id&sort_dir=asc")
+        self.assertGreaterEqual(page0["total"], 2)
+        self.assertEqual(len(page0["items"]), 1)
+        page1 = self.get_json("/api/memories?limit=1&offset=1&sort=memory_id&sort_dir=asc")
+        self.assertEqual(len(page1["items"]), 1)
+        self.assertNotEqual(page0["items"][0]["memory_id"], page1["items"][0]["memory_id"])
+
+        capped = self.get_json("/api/memories?limit=9999&offset=0")
+        self.assertLessEqual(len(capped["items"]), 500)
+
+        ranged = self.get_json("/api/memories?salience_min=0&salience_max=1&limit=50")
+        self.assertIn("total", ranged)
+        self.assertIn("items", ranged)
+        self.assertLessEqual(len(ranged["items"]), 50)
+
     def test_context_and_retrieval_surfaces_are_available(self) -> None:
         retrievals = self.get_json("/api/retrievals")
         self.assertGreaterEqual(len(retrievals["items"]), 1)
@@ -93,6 +109,14 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         context = self.get_json(f"/api/context/{self.context['context_id']}")
         self.assertEqual(context["context_id"], self.context["context_id"])
         self.assertTrue(context["assembled_text"].startswith("# OpenDream Memory Context"))
+
+    def test_retrievals_api_pagination_and_total(self) -> None:
+        r0 = self.get_json("/api/retrievals?limit=1&offset=0&sort=id&sort_dir=asc")
+        self.assertIn("total", r0)
+        self.assertGreaterEqual(r0["total"], 1)
+        self.assertEqual(len(r0["items"]), 1)
+        capped = self.get_json("/api/retrievals?limit=9999&offset=0")
+        self.assertLessEqual(len(capped["items"]), 500)
 
     def test_runs_sessions_and_graph_endpoints(self) -> None:
         runs = self.get_json("/api/runs")

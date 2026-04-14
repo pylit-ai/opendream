@@ -43,7 +43,13 @@ def run_memory_quality_eval(
     paraphrase_hits = 0
     lexical_misses = 0
     for query_case in queries:
-        retrieval = retrieve(store, query=str(query_case["query"]), limit=5, now=timestamp)
+        retrieval = retrieve(
+            store,
+            query=str(query_case["query"]),
+            limit=5,
+            now=timestamp,
+            query_source="evaluation",
+        )
         records = {record["memory_id"]: record for record in store.load_durable_records()}
         selected_titles = [
             records[memory_id]["title"]
@@ -109,6 +115,7 @@ def run_dream_fidelity_eval(
         query="What package manager and schema migration workflow should I use?",
         limit=5,
         now=timestamp,
+        query_source="evaluation",
     )
     selected_titles = {
         record["title"]
@@ -232,7 +239,13 @@ def run_performance_eval(
 
     for query_case in should_match_queries:
         r_start = time.monotonic()
-        retrieval = retrieve(store, query=str(query_case["query"]), limit=5, now=timestamp)
+        retrieval = retrieve(
+            store,
+            query=str(query_case["query"]),
+            limit=5,
+            now=timestamp,
+            query_source="evaluation",
+        )
         r_ms = round((time.monotonic() - r_start) * 1000, 1)
         retrieval_timings.append(r_ms)
         records_map = {r["memory_id"]: r for r in durable_records}
@@ -260,7 +273,13 @@ def run_performance_eval(
     gating_correct = 0
     gating_results: list[dict[str, Any]] = []
     for query_case in should_gate_queries:
-        retrieval = retrieve(store, query=str(query_case["query"]), limit=5, now=timestamp)
+        retrieval = retrieve(
+            store,
+            query=str(query_case["query"]),
+            limit=5,
+            now=timestamp,
+            query_source="evaluation",
+        )
         gated = retrieval.get("gated", False)
         if gated:
             gating_correct += 1

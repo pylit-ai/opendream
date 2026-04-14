@@ -77,3 +77,40 @@ class GraphRouteTests(unittest.TestCase):
             '/static/vendor/graphology.umd.min.js',
         ]:
             self.assertIn(path, INDEX_HTML)
+
+    def test_observe_shell_nav_async_and_presets(self) -> None:
+        for needle in (
+            'href="/sessions"',
+            'href="/context"',
+            "pathMatchesNav",
+            "runRender",
+            "applyMemoryTimePreset",
+            "applyRetrievalTimePreset",
+            'aria-live="polite"',
+            "Could not load",
+            "Store metadata (read-only)",
+            "od-data-freshness",
+            "Data loaded at",
+            "odCopyApiUrl",
+            "od-copy-err-btn",
+            "err.status",
+            "sidebar-sec-workspace",
+            "od-empty-nextsteps",
+            "sidebar-mobile-open",
+            "data-mobile-nav",
+        ):
+            self.assertIn(needle, INDEX_HTML)
+
+    def test_graph_static_accessibility_needles(self) -> None:
+        graph_js = (
+            Path(__file__).resolve().parent.parent / "opendream" / "static" / "graph.js"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "Graph data",
+            "graph-data-panel",
+            "graph-shortcuts-help",
+            "data-view-mode",
+            "applyViewModeVisibility",
+            "graph-data-table",
+        ):
+            self.assertIn(needle, graph_js)

@@ -329,7 +329,13 @@ def prepare_context(
     for store in store_list:
         if not store.is_initialized():
             continue
-        retrieval = retrieve(store, query=query, limit=max(limit * 3, limit), now=timestamp)
+        retrieval = retrieve(
+            store,
+            query=query,
+            limit=max(limit * 3, limit),
+            now=timestamp,
+            query_source="prepare_context",
+        )
         retrieval_run_ids.append(str(retrieval.get("run_id", "")))
         records = {record["memory_id"]: record for record in store.load_durable_records()}
         for reason in retrieval["why"]:

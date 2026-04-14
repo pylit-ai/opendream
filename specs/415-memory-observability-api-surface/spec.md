@@ -32,6 +32,25 @@ The read model alone does not make the system inspectable by humans or tools. Op
 - [x] AC-4: API responses preserve provenance and never invent data not present in the read model or source artifacts
 - [x] AC-5: real-time updates expose active run status, lock state, and newly completed retrievals
 
+## GET `/api/memories` query parameters
+
+The list endpoint applies filters and sorting server-side, then returns a page slice. Response shape: `{ "total": <int>, "items": [ ... ] }`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `search` | Case-insensitive substring match across `title`, `summary`, `body`, and `memory_id`. |
+| `type`, `scope`, `status` | Exact match when non-empty. |
+| `salience_min`, `salience_max` | Inclusive numeric bounds; rows without `salience` are excluded when either bound is set. |
+| `confidence_min`, `confidence_max` | Inclusive numeric bounds; rows without `confidence` are excluded when either bound is set. |
+| `updated_after`, `updated_before` | Inclusive ISO-8601 bounds on `updated_at`; rows without `updated_at` are excluded when either bound is set. |
+| `created_after`, `created_before` | Inclusive ISO-8601 bounds on `created_at`; rows without `created_at` are excluded when either bound is set. |
+| `sort` | One of: `title`, `type`, `scope`, `status`, `memory_id`, `created_at`, `updated_at`, `salience`, `confidence`, `retrieval_frequency`. Invalid values fall back to `updated_at`. |
+| `sort_dir` | `asc` or `desc`. When omitted, string fields (`title`, `type`, `scope`, `status`, `memory_id`) default ascending; other fields default descending (legacy behavior). |
+| `offset` | Non-negative row offset (default `0`, clamped). |
+| `limit` | Page size from `1` to `500` (default `50`). |
+
+Sort order is stable: ties break on `memory_id`.
+
 ## Edge cases
 - page requests against empty stores
 - stale read-model snapshots
