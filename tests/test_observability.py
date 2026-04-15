@@ -13,6 +13,10 @@ from opendream.observability import index_observability
 from opendream.storage import MemoryStore
 from opendream.webapp import INDEX_HTML, build_server
 
+_OBSERVE_UI_JS = (
+    Path(__file__).resolve().parents[1] / "opendream" / "static" / "observe-ui.js"
+).read_text(encoding="utf-8")
+
 FIXED_NOW = "2026-03-27T12:00:00Z"
 
 
@@ -207,21 +211,29 @@ class ObservabilityIntegrationTests(unittest.TestCase):
             self.assertIn("OpenDream Observability", html)
 
     def test_index_html_includes_ux_ax_markers(self) -> None:
+        bundle = INDEX_HTML + _OBSERVE_UI_JS
         for needle in (
             "od-skip-link",
+            "od-dream-mode-select",
+            "syncDreamModeUi",
+            "/api/semantic-dream-mode",
             "od-route-announce",
             "od-command-palette",
             "od-skeleton-wrap",
             "odCopyApiCurl",
             "odCopyApiFetch",
+            "odCopyCurrentViewUrl",
+            "od-overview-strip",
+            "About this dashboard",
             "od-first-steps",
             "odDismissFirstSteps",
             "opendream-first-steps-dismissed",
             "focus_search=1",
             "odCommandPalette",
             "routeToPageId",
+            "handlePaletteAction",
         ):
-            self.assertIn(needle, INDEX_HTML)
+            self.assertIn(needle, bundle)
 
     def test_graph_js_includes_a11y_banner(self) -> None:
         graph_js = Path(__file__).resolve().parents[1] / "opendream" / "static" / "graph.js"

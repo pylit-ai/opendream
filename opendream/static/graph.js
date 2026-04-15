@@ -623,7 +623,6 @@
   function mount(rootEl) {
     state.rootEl = rootEl;
     rootEl.innerHTML = `
-      <link rel="stylesheet" href="/static/graph.css">
       <div class="od-graph-a11y-banner" role="region" aria-label="Graph view accessibility">
         <p class="od-graph-a11y-banner__p">
           The canvas is a <strong>visual</strong> view. For keyboard navigation and screen readers, use
