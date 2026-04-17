@@ -293,6 +293,29 @@
       else if (value === 'deleted' || value === 'quarantined') cls = 'error-badge';
       return `<span class="badge ${cls}">${escapeHtml(value)}</span>`;
     };
+    const agentHue = (agent) => memoryTypeHue(
+      (agent && (agent.agent_id || agent.agent_label)) || 'unknown'
+    );
+    const agentPillsHtml = (agents, opts = {}) => {
+      const arr = Array.isArray(agents) ? agents : (agents ? [agents] : []);
+      const usable = arr.length ? arr : [{ agent_id: 'unknown', agent_label: 'Unknown', model_id: 'unknown', model_version: 'unknown' }];
+      const labelPrefix = opts.prefix ? `<span class="agent-pill-prefix">${escapeHtml(opts.prefix)}</span>` : '';
+      return `<span class="agent-pill-row">${labelPrefix}${usable.map((agent) => {
+        const a = agent && typeof agent === 'object' ? agent : {};
+        const label = String(a.agent_label || a.agent_id || 'Unknown');
+        const id = String(a.agent_id || 'unknown');
+        const model = String(a.model_id || 'unknown');
+        const version = String(a.model_version || 'unknown');
+        const runtime = a.runtime ? String(a.runtime) : '';
+        const title = [label, id, runtime, model, version].filter(Boolean).join(' · ');
+        const hue = agentHue(a);
+        return (
+          `<span class="agent-pill agent-pill--agent" style="--agent-hue:${hue}" title="${escapeHtml(title)}"><span class="agent-dot"></span><span>${escapeHtml(label)}</span></span>` +
+          `<span class="agent-pill agent-pill--model" style="--agent-hue:${(hue + 44) % 360}" title="${escapeHtml(`Model · ${model}`)}"><span>Model</span><span class="agent-model">${escapeHtml(model)}</span></span>` +
+          `<span class="agent-pill agent-pill--version" style="--agent-hue:${(hue + 88) % 360}" title="${escapeHtml(`Version · ${version}`)}"><span>Version</span><span class="agent-model">${escapeHtml(version)}</span></span>`
+        );
+      }).join('')}</span>`;
+    };
     const memoryTypeHue = (str) => {
       let h = 0;
       const s = String(str || '');
@@ -368,6 +391,7 @@
                 item.type || ''
               )}</span>
               <span class="muted" style="font-size:11px">· ${escapeHtml(item.scope || '')}</span>
+              ${agentPillsHtml(item.reporting_agents, { prefix: 'Source' })}
             </div>
             <div class="t-title"><a href="${memoryHref(item.memory_id)}">${titleHtml}</a></div>
             <div class="t-sum">${sumHtml || '<span class="muted">No summary</span>'}</div>
@@ -428,6 +452,8 @@
             <div class="t-meta">
               <span class="muted" style="font-size:11px" title="Memories included in the ranked result set for this retrieval">${n} selected</span>
               <span class="muted" style="font-size:11px">· retrieval</span>
+              ${agentPillsHtml(item.reporting_agent, { prefix: 'Requester' })}
+              ${agentPillsHtml(item.source_reporting_agents, { prefix: 'Source' })}
             </div>
             <div class="t-title"><a href="${retrievalHref(item.id)}">${titleHtml}</a></div>
             <div class="t-sum">${sumHtml}</div>
@@ -495,6 +521,7 @@
               <span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em">${escapeHtml(
                 String(item.type || '')
               )}</span>
+              ${agentPillsHtml(item.source_reporting_agents, { prefix: 'Source' })}
             </div>
             <div class="t-title"><a href="${runHref(rid)}" title="${escapeHtml(rid)}">${titleHtml}</a></div>
             <div class="t-sum"><span class="muted" style="font-size:12px">Started</span> ${escapeHtml(
@@ -1113,6 +1140,14 @@
       if (Array.isArray(r.source_event_ids) && r.source_event_ids.length) meta += line('Source events', r.source_event_ids.join(', '));
       if (r.provenance_tier) meta += line('Provenance tier', r.provenance_tier);
       if (r.claim_class) meta += line('Claim class', r.claim_class);
+      if (Array.isArray(d.reporting_agents) && d.reporting_agents.length) {
+        meta += line(
+          'Reporting agent',
+          d.reporting_agents
+            .map((a) => `${a.agent_label || a.agent_id || 'Unknown'} (${a.agent_id || 'unknown'})`)
+            .join(', ')
+        );
+      }
       if (Array.isArray(r.workflow_steps) && r.workflow_steps.length) meta += line('Workflow steps', r.workflow_steps.join(' → '));
 
       const body = (r.body || '').trim();
@@ -1330,6 +1365,12 @@
         provBits.length ? provBits.join(' · ') : 'Not recorded',
         'Which pipeline invoked retrieve() for this audit (e.g. cli, prepare_context, evaluation). This does not by itself say whether a human or an agent typed the string — use caller_detail if your integration passes it. Older audits may omit this field.'
       );
+      meta += `<div class="mem-detail-field"><span class="mem-detail-label">Requesting agent</span><span class="mem-detail-val">${agentPillsHtml(
+        d.reporting_agent
+      )}</span></div>`;
+      meta += `<div class="mem-detail-field"><span class="mem-detail-label">Source agents</span><span class="mem-detail-val">${agentPillsHtml(
+        d.source_reporting_agents
+      )}</span></div>`;
 
       const glossaryHelp = `<details class="mem-detail-details">
         <summary>Glossary — how sections relate</summary>
@@ -1436,6 +1477,9 @@
       )}</span></div>`;
       meta += lineDate('Started', d.started_at);
       meta += lineDate('Ended', d.ended_at);
+      meta += `<div class="mem-detail-field"><span class="mem-detail-label">Source agents</span><span class="mem-detail-val">${agentPillsHtml(
+        d.source_reporting_agents
+      )}</span></div>`;
       meta = `<div class="mem-detail-meta">${meta}</div>`;
 
       const warns = Array.isArray(d.warnings) ? d.warnings : [];
@@ -1537,6 +1581,8 @@
           : '—';
         const kind = ev.kind != null ? String(ev.kind) : '';
         const label = ev.label != null ? String(ev.label) : '';
+        const agent = ev.reporting_agent && typeof ev.reporting_agent === 'object' ? ev.reporting_agent : null;
+        const agentLabel = agent ? String(agent.agent_label || agent.agent_id || 'Unknown') : '';
         let linkExtra = '';
         if (kind === 'memory.context.assembled' && ev.object_id) {
           linkExtra = ` · <a href="${contextHref(String(ev.object_id))}">Open context</a>`;
@@ -1553,7 +1599,7 @@
             <div class="mem-timeline-bar" style="height:44px;background:hsl(${memoryTypeHue(kind)} 45% 40%);"></div>
           </div>
           <div class="mem-timeline-body">
-            <div class="t-meta"><span class="muted" style="font-size:11px">${escapeHtml(kind)}</span>${linkExtra}</div>
+            <div class="t-meta"><span class="muted" style="font-size:11px">${escapeHtml(kind)}</span>${agentLabel ? `<span class="muted" style="font-size:11px"> · Agent: ${escapeHtml(agentLabel)}</span>` : ''}${linkExtra}</div>
             <div class="t-title">${escapeHtml(label)}${
               ev.object_id
                 ? ` <span class="muted" style="font-size:11px"><code>${escapeHtml(String(ev.object_id))}</code></span>`
@@ -1747,6 +1793,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const type = q('type');
       const scope = q('scope');
       const status = q('status');
+      const agentId = q('agent_id');
       const sort = q('sort', 'updated_at');
       const sortDir = q('sort_dir');
       const offset = q('offset', '0');
@@ -1766,6 +1813,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       if (type) apiParams.type = type;
       if (scope) apiParams.scope = scope;
       if (status) apiParams.status = status;
+      if (agentId) apiParams.agent_id = agentId;
       apiParams.sort = sort;
       if (sortDir) apiParams.sort_dir = sortDir;
       apiParams.offset = offset;
@@ -1800,6 +1848,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
         ['type','Type'],
         ['scope','Scope'],
         ['status','Status'],
+        ['reporting_agent','Agent'],
         ['salience','Salience'],
         ['confidence','Confidence'],
         ['retrieval_frequency','Retrievals'],
@@ -1850,11 +1899,13 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
         const sal = item.salience != null && item.salience !== '' ? Number(item.salience).toFixed(2) : '—';
         const conf = item.confidence != null && item.confidence !== '' ? Number(item.confidence).toFixed(2) : '—';
         const rf = item.retrieval_frequency != null ? String(item.retrieval_frequency) : '0';
+        const agent = item.reporting_agent_label || 'Unknown';
         return `<tr>
           <td><a href="${memoryHref(item.memory_id)}">${escapeHtml(item.title || '')}</a></td>
           <td>${badge(item.status)}</td>
           <td>${escapeHtml(item.type || '')}</td>
           <td>${escapeHtml(item.scope || '')}</td>
+          <td>${escapeHtml(agent)}</td>
           <td class="num">${escapeHtml(sal)}</td>
           <td class="num">${escapeHtml(conf)}</td>
           <td class="num">${escapeHtml(rf)}</td>
@@ -1878,6 +1929,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             type: f.type.value,
             scope: f.scope.value,
             status: f.status.value,
+            agent_id: f.agent_id.value,
             sort: f.sort.value,
             sort_dir: f.sort_dir.value,
             limit: f.limit.value,
@@ -1895,13 +1947,15 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             <input type="hidden" name="mem_view" value="${view === 'table' ? 'table' : ''}">
             <div class="row" style="align-items:flex-end">
               <label style="display:flex;flex-direction:column;gap:4px;min-width:180px;flex:1"><span class="muted" style="font-size:11px">Search</span>
-                <input name="search" type="search" placeholder="title, summary, body, id" value="${escapeHtml(search)}"></label>
+                <input name="search" type="search" placeholder="title, summary, body, id, agent" value="${escapeHtml(search)}"></label>
               <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Type</span>
                 <select name="type">${typeOpts}</select></label>
               <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Scope</span>
                 <select name="scope">${scopeOpts}</select></label>
               <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Status</span>
                 <select name="status">${statusOpts}</select></label>
+              <label style="display:flex;flex-direction:column;gap:4px;min-width:140px"><span class="muted" style="font-size:11px">Agent</span>
+                <input name="agent_id" type="search" placeholder="codex, claude-code" value="${escapeHtml(agentId)}"></label>
               <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Sort</span>
                 <select name="sort">${sortOpts}</select></label>
               <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Dir</span>
@@ -1985,10 +2039,10 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             ? `<div class="table-scroll"><div class="mem-timeline">${buildMemoryTimelineHtml(data.items, search)}</div></div>`
             : `<div class="table-scroll">
             <table class="memories-table"><caption class="sr-only">Memory records matching current filters</caption><thead><tr>
-              <th scope="col">Title</th><th scope="col">Status</th><th scope="col">Type</th><th scope="col">Scope</th>
+              <th scope="col">Title</th><th scope="col">Status</th><th scope="col">Type</th><th scope="col">Scope</th><th scope="col">Agent</th>
               <th class="num" scope="col">Salience</th><th class="num" scope="col">Confidence</th><th class="num" scope="col">Retr.</th><th scope="col">Updated</th>
             </tr></thead><tbody>
-              ${rows || '<tr><td colspan="8" class="muted">No memories match.</td></tr>'}
+              ${rows || '<tr><td colspan="9" class="muted">No memories match.</td></tr>'}
             </tbody></table>
           </div>`}
           <div class="pager">
@@ -2098,6 +2152,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           <td title="Effective sort time (ended_at, else started_at)">${escapeHtml(t || '—')}</td>
           <td title="${escapeHtml(rid)}">${escapeHtml(String(run.type || ''))}</td>
           <td>${badge(String(run.status || 'unknown'))}</td>
+          <td>${agentPillsHtml(run.source_reporting_agents)}</td>
           <td class="muted" style="font-size:12px"><a href="${runHref(rid)}" title="${escapeHtml(rid)}">${escapeHtml(rid)}</a></td>
         </tr>`;
         })
@@ -2129,7 +2184,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             <input type="hidden" name="list_view" value="${view === 'table' ? 'table' : ''}">
             <div class="row" style="align-items:flex-end">
               <label style="display:flex;flex-direction:column;gap:4px;min-width:180px;flex:1"><span class="muted" style="font-size:11px">Search</span>
-                <input name="search" type="search" placeholder="run id, type, status" value="${escapeHtml(search)}"></label>
+                <input name="search" type="search" placeholder="run id, type, status, agent, model" value="${escapeHtml(search)}"></label>
               <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Sort</span>
                 <select name="sort">${sortOpts}</select></label>
               <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Dir</span>
@@ -2200,9 +2255,10 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
               <th scope="col" title="ended_at when present, otherwise started_at (local)">Time</th>
               <th scope="col" title="consolidation, dream, …">Type</th>
               <th scope="col">Status</th>
+              <th scope="col">Agent</th>
               <th scope="col" title="Stable run id">ID</th>
             </tr></thead><tbody>
-              ${rows || '<tr><td colspan="4" class="muted">No runs match.</td></tr>'}
+              ${rows || '<tr><td colspan="5" class="muted">No runs match.</td></tr>'}
             </tbody></table>
           </div>`}
           <div class="pager">
@@ -2228,6 +2284,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const params = new URLSearchParams(location.search);
       const q = (k, d='') => params.get(k) || d;
       const search = q('search');
+      const agentId = q('agent_id');
       const sort = q('sort', 'timestamp');
       const sortDir = q('sort_dir');
       const offset = q('offset', '0');
@@ -2240,6 +2297,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const isTimeline = view !== 'table';
       const apiParams = {};
       if (search) apiParams.search = search;
+      if (agentId) apiParams.agent_id = agentId;
       apiParams.sort = sort;
       if (sortDir) apiParams.sort_dir = sortDir;
       apiParams.offset = offset;
@@ -2263,6 +2321,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
         ['timestamp', 'Time'],
         ['id', 'ID'],
         ['query', 'Query'],
+        ['reporting_agent', 'Agent'],
         ['selected_count', 'Selected count'],
       ];
       const sortOpts = sortFields.map(([v, lab]) => `<option value="${v}" ${optSel(v, sort)}>${lab}</option>`).join('');
@@ -2300,6 +2359,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
         return `<tr>
           <td>${escapeHtml(t || '—')}</td>
           <td>${qcell}</td>
+          <td>${agentPillsHtml(item.reporting_agent)}</td>
           <td class="num">${n}</td>
           <td class="muted" style="font-size:12px"><a href="${retrievalHref(item.id)}">${escapeHtml(String(item.id))}</a></td>
         </tr>`;
@@ -2318,6 +2378,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           <div class="od-toolbar-sticky">
           <form class="memories-toolbar" id="retrievals-filter-form" onsubmit="event.preventDefault(); const f=this; const p = memoryExplorerParams({
             search: f.search.value,
+            agent_id: f.agent_id.value,
             sort: f.sort.value,
             sort_dir: f.sort_dir.value,
             limit: f.limit.value,
@@ -2331,7 +2392,9 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             <input type="hidden" name="list_view" value="${view === 'table' ? 'table' : ''}">
             <div class="row" style="align-items:flex-end">
               <label style="display:flex;flex-direction:column;gap:4px;min-width:180px;flex:1"><span class="muted" style="font-size:11px">Search</span>
-                <input name="search" type="search" placeholder="id, query, summary" value="${escapeHtml(search)}"></label>
+                <input name="search" type="search" placeholder="id, query, summary, agent, model" value="${escapeHtml(search)}"></label>
+              <label style="display:flex;flex-direction:column;gap:4px;min-width:140px"><span class="muted" style="font-size:11px">Agent</span>
+                <input name="agent_id" type="search" placeholder="codex, claude-code" value="${escapeHtml(agentId)}"></label>
               <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Sort</span>
                 <select name="sort">${sortOpts}</select></label>
               <label style="display:flex;flex-direction:column;gap:4px"><span class="muted" style="font-size:11px">Dir</span>
@@ -2411,10 +2474,11 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             <table class="memories-table"><caption class="sr-only">Retrieval audit records matching current filters</caption><thead><tr>
               <th scope="col" title="When this retrieval was audited (shown in your local timezone in the cells below)">Time</th>
               <th scope="col" title="Query string passed to retrieve(). Who issued it is shown as Query provenance on the detail panel when the caller records it.">Query</th>
+              <th scope="col">Agent</th>
               <th class="num" scope="col" title="Number of memories in the final ranked top-k selection (len(selected_memory_ids))">Sel.</th>
               <th scope="col" title="Stable retrieval / run id (audit file key)">ID</th>
             </tr></thead><tbody>
-              ${rows || '<tr><td colspan="4" class="muted">No retrievals match.</td></tr>'}
+              ${rows || '<tr><td colspan="5" class="muted">No retrievals match.</td></tr>'}
             </tbody></table>
           </div>`}
           <div class="pager">
@@ -2596,6 +2660,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           <td><a href="${sessionHref(sid)}">${escapeHtml(sid)}</a></td>
           <td class="num">${item.event_count != null ? escapeHtml(String(item.event_count)) : '—'}</td>
           <td class="num">${item.context_count != null ? escapeHtml(String(item.context_count)) : '—'}</td>
+          <td>${agentPillsHtml(item.reporting_agents)}</td>
           <td title="Latest timestamp from embedded timeline">${escapeHtml(lastDisp)}</td>
         </tr>`;
         })
@@ -2617,8 +2682,9 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             <th scope="col">ID</th>
             <th class="num" scope="col" title="Events captured in this session">Events</th>
             <th class="num" scope="col" title="Context assemblies linked to this session">Contexts</th>
+            <th scope="col">Agent</th>
             <th scope="col" title="Max timestamp from the session timeline embedded in the index (client-derived)">Last activity</th>
-          </tr></thead><tbody>${sessionRows || '<tr><td colspan="4" class="muted">No sessions.</td></tr>'}</tbody></table>`,
+          </tr></thead><tbody>${sessionRows || '<tr><td colspan="5" class="muted">No sessions.</td></tr>'}</tbody></table>`,
         ),
         panel('Session Timeline', detailHtml, false, 'session-timeline'),
       ].join(''));

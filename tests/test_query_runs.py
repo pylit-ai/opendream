@@ -21,6 +21,9 @@ class QueryRunsTests(unittest.TestCase):
                     "status": "ok",
                     "started_at": "2026-01-01T10:00:00Z",
                     "ended_at": "2026-01-01T11:00:00Z",
+                    "source_reporting_agents": [
+                        {"agent_id": "codex", "agent_label": "Codex", "model_id": "gpt-5.4"}
+                    ],
                 },
                 {
                     "run_id": "run-beta",
@@ -28,10 +31,13 @@ class QueryRunsTests(unittest.TestCase):
                     "status": "failed",
                     "started_at": "2026-02-01T10:00:00Z",
                     "ended_at": "",
+                    "source_reporting_agents": [
+                        {"agent_id": "claude-code", "agent_label": "Claude Code"}
+                    ],
                 },
             ]
         )
-        r = query_runs(idx, search="dream")
+        r = query_runs(idx, search="Claude Code")
         self.assertEqual(r["total"], 1)
         self.assertEqual(r["items"][0]["run_id"], "run-beta")
 

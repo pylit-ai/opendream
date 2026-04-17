@@ -317,7 +317,7 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             result = query_memories(
                 index,
                 search=query.get("search", ""),
-                filters={key: query.get(key, "") for key in ["type", "scope", "status"]},
+                filters={key: query.get(key, "") for key in ["type", "scope", "status", "agent_id"]},
                 sort=query.get("sort", "updated_at"),
                 sort_dir=sort_dir,
                 offset=offset,
@@ -394,6 +394,7 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             result = query_retrievals(
                 index,
                 search=query.get("search", ""),
+                filters={key: query.get(key, "") for key in ["agent_id"]},
                 sort=query.get("sort", "timestamp"),
                 sort_dir=sort_dir,
                 offset=offset,

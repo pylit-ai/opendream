@@ -324,6 +324,27 @@ class TestDelegatedIngest(unittest.TestCase):
         result = ingest_envelope(self.store, {"bad": "data"}, now=FIXED_NOW)
         self.assertEqual(result["status"], "rejected")
 
+    def test_ingest_emits_proposed_events_with_agent_provenance(self) -> None:
+        envelope = self._valid_envelope()
+        envelope["proposed_events"] = [
+            {
+                "kind": "project_decision",
+                "content": "Delegated event should be captured.",
+                "scope": "project",
+            }
+        ]
+
+        result = ingest_envelope(self.store, envelope, now=FIXED_NOW)
+
+        self.assertEqual(result["events_emitted"], 1)
+        events = self.store.load_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["source"]["channel"], "tool")
+        self.assertEqual(events[0]["source"]["tool_refs"], ["delegated:claude-scheduled-task"])
+        self.assertEqual(events[0]["reporting_agent"]["agent_id"], "claude-scheduled-task")
+        self.assertEqual(events[0]["reporting_agent"]["agent_label"], "claude-scheduled-task")
+        validate_document("memory-event.schema.json", events[0])
+
     def test_ingest_file_and_archive(self) -> None:
         inbox = self.workspace / ".opendream" / "inbox" / "semantic" / "claude-scheduled-task"
         inbox.mkdir(parents=True, exist_ok=True)

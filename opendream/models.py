@@ -4,6 +4,34 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+def default_reporting_agent() -> dict[str, Any]:
+    return {
+        "agent_id": "unknown",
+        "agent_label": "Unknown",
+        "model_id": "unknown",
+        "model_version": "unknown",
+    }
+
+
+def normalize_reporting_agent(reporting_agent: dict[str, Any] | None = None) -> dict[str, Any]:
+    agent = default_reporting_agent()
+    if not reporting_agent:
+        return agent
+    agent_id = str(reporting_agent.get("agent_id") or "").strip()
+    agent_label = str(reporting_agent.get("agent_label") or "").strip()
+    if agent_id:
+        agent["agent_id"] = agent_id
+    if agent_label:
+        agent["agent_label"] = agent_label
+    elif agent_id:
+        agent["agent_label"] = agent_id
+    for key in ("runtime", "adapter_id", "model_id", "model_version"):
+        value = str(reporting_agent.get(key) or "").strip()
+        if value:
+            agent[key] = value
+    return agent
+
+
 @dataclass(slots=True)
 class MemoryEvent:
     event_id: str
@@ -14,6 +42,7 @@ class MemoryEvent:
     kind: str
     source: dict[str, Any]
     content: str
+    reporting_agent: dict[str, Any] = field(default_factory=default_reporting_agent)
     tags: list[str] = field(default_factory=list)
     confidence_hint: float | None = None
     sensitivity: str = "normal"

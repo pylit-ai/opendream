@@ -43,6 +43,7 @@ _VALID_MEMORY_SORTS = frozenset(
         "salience",
         "confidence",
         "retrieval_frequency",
+        "reporting_agent",
     }
 )
 
@@ -103,6 +104,8 @@ def _memory_sort_key(
             primary = 0
     elif sort in {"created_at", "updated_at"}:
         primary = str(row.get(sort, "") or "")
+    elif sort == "reporting_agent":
+        primary = str(row.get("reporting_agent_label", "") or "").casefold()
     else:
         primary = str(row.get(sort, "") or "").casefold()
 
@@ -172,7 +175,14 @@ def query_memories(
     elif sort_dir == "desc":
         reverse = True
     else:
-        reverse = sort_field not in {"title", "type", "scope", "status", "memory_id"}
+        reverse = sort_field not in {
+            "title",
+            "type",
+            "scope",
+            "status",
+            "memory_id",
+            "reporting_agent",
+        }
 
     rows = list(index["entities"]["memories"])
     lowered_search = search.strip().lower()
@@ -186,12 +196,29 @@ def query_memories(
                     str(row.get("summary", "")),
                     str(row.get("body", "")),
                     str(row.get("memory_id", "")),
+                    str(row.get("reporting_agent_label", "")),
+                    " ".join(
+                        str(agent.get("agent_id", "")) + " " + str(agent.get("agent_label", ""))
+                        for agent in row.get("reporting_agents", [])
+                        if isinstance(agent, dict)
+                    ),
                 ]
             ).lower()
         ]
     for key, value in filters.items():
         if value:
-            rows = [row for row in rows if str(row.get(key, "")) == value]
+            if key == "agent_id":
+                rows = [
+                    row
+                    for row in rows
+                    if any(
+                        str(agent.get("agent_id", "")) == value
+                        for agent in row.get("reporting_agents", [])
+                        if isinstance(agent, dict)
+                    )
+                ]
+            else:
+                rows = [row for row in rows if str(row.get(key, "")) == value]
 
     if salience_min is not None or salience_max is not None:
         rows = [
@@ -240,7 +267,7 @@ def query_memories(
     return {"total": total, "items": rows[offset : offset + limit]}
 
 
-_VALID_RETRIEVAL_SORTS = frozenset({"timestamp", "id", "query", "selected_count"})
+_VALID_RETRIEVAL_SORTS = frozenset({"timestamp", "id", "query", "selected_count", "reporting_agent"})
 
 
 def _retrieval_passes_selected_count(
@@ -254,9 +281,7 @@ def _retrieval_passes_selected_count(
     n = len(row.get("selected_memory_ids") or [])
     if lo is not None and n < lo:
         return False
-    if hi is not None and n > hi:
-        return False
-    return True
+    return not (hi is not None and n > hi)
 
 
 def _retrieval_sort_key(
@@ -273,15 +298,15 @@ def _retrieval_sort_key(
         primary = str(row.get("timestamp", "") or "")
     elif sort == "query":
         primary = str(row.get("query", "") or "").casefold()
+    elif sort == "reporting_agent":
+        primary = str((row.get("reporting_agent") or {}).get("agent_label", "") or "").casefold()
     else:
         primary = str(row.get("id", "") or "").casefold()
 
     if reverse:
         if isinstance(primary, int):
             primary = -primary
-        elif sort == "timestamp":
-            primary = _MemorySortStrDesc(primary)
-        elif sort in {"query", "id"}:
+        elif sort in {"timestamp", "query", "id", "reporting_agent"}:
             primary = _MemorySortStrDesc(primary)
     return (primary, rid)
 
@@ -298,7 +323,9 @@ def query_retrievals(
     timestamp_before: str | None = None,
     min_selected: int | None = None,
     max_selected: int | None = None,
+    filters: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    filters = filters or {}
     sort_field = sort if sort in _VALID_RETRIEVAL_SORTS else "timestamp"
     if sort_dir == "asc":
         reverse = False
@@ -320,9 +347,20 @@ def query_retrievals(
                     str(row.get("run_id", "")),
                     str(row.get("query", "")),
                     str(row.get("summary", "")),
+                    _agent_search_text(row.get("reporting_agent")),
+                    " ".join(_agent_search_text(agent) for agent in row.get("source_reporting_agents", [])),
                 ]
             ).lower()
         ]
+    for key, value in filters.items():
+        if not value:
+            continue
+        if key == "agent_id":
+            rows = [
+                row
+                for row in rows
+                if _row_has_agent(row, value, fields=("reporting_agent", "source_reporting_agents"))
+            ]
 
     if timestamp_after or timestamp_before:
         rows = [
@@ -418,6 +456,8 @@ def query_runs(
                     str(row.get("id", "")),
                     str(row.get("type", "")),
                     str(row.get("status", "")),
+                    str(row.get("reporting_agent_label", "")),
+                    " ".join(_agent_search_text(agent) for agent in row.get("source_reporting_agents", [])),
                 ]
             ).lower()
         ]
@@ -733,6 +773,7 @@ def _build_entities(store: MemoryStore) -> dict[str, Any]:
 
 def _build_memory_entities(store: MemoryStore) -> list[dict[str, Any]]:
     records = store.load_durable_records()
+    events_by_id = {str(event.get("event_id", "")): event for event in store.load_events()}
     retrievals = _load_json_records(store.audit_retrieval_dir)
     annotations = store.load_annotations()
     reviews = store.load_review_decisions()
@@ -750,10 +791,17 @@ def _build_memory_entities(store: MemoryStore) -> list[dict[str, Any]]:
     by_id = {record["memory_id"]: record for record in records}
     for record in records:
         memory_id = str(record["memory_id"])
+        reporting_agents = _agents_for_event_ids(
+            events_by_id,
+            [str(event_id) for event_id in record.get("source_event_ids", [])],
+        )
+        reporting_agent_label = ", ".join(agent["agent_label"] for agent in reporting_agents)
         items.append(
             {
                 **record,
                 "source_count": len(record.get("source_event_ids", [])),
+                "reporting_agents": reporting_agents,
+                "reporting_agent_label": reporting_agent_label,
                 "retrieval_frequency": retrieval_counts.get(memory_id, 0),
                 "annotations": annotation_map.get(memory_id, []),
                 "manual_reviews": review_map.get(memory_id, []),
@@ -784,15 +832,122 @@ def _build_memory_entities(store: MemoryStore) -> list[dict[str, Any]]:
     return items
 
 
+def _normalize_event_reporting_agent(event: dict[str, Any]) -> dict[str, str]:
+    raw = event.get("reporting_agent")
+    source = event.get("source")
+    if not isinstance(raw, dict):
+        raw = {}
+    raw_agent_id = str(raw.get("agent_id") or "").strip()
+    raw_agent_label = str(raw.get("agent_label") or "").strip()
+    inferred = _infer_reporting_agent_from_source(source) if raw_agent_id in {"", "unknown"} else {}
+    agent_id = raw_agent_id if raw_agent_id and raw_agent_id != "unknown" else str(
+        inferred.get("agent_id") or "unknown"
+    )
+    agent_label = raw_agent_label if raw_agent_label and raw_agent_label != "Unknown" else str(
+        inferred.get("agent_label") or agent_id or "Unknown"
+    )
+    result = {"agent_id": agent_id, "agent_label": agent_label}
+    for key in ("runtime", "adapter_id"):
+        value = str(raw.get(key) or inferred.get(key) or "")
+        if value:
+            result[key] = value
+    for key in ("model_id", "model_version"):
+        value = str(raw.get(key) or "")
+        if value:
+            result[key] = value
+    result.setdefault("model_id", "unknown")
+    result.setdefault("model_version", "unknown")
+    return result
+
+
+def _infer_reporting_agent_from_source(source: Any) -> dict[str, str]:
+    if not isinstance(source, dict):
+        return {}
+    message_ref = str(source.get("message_ref") or "").casefold()
+    tool_refs = " ".join(str(item).casefold() for item in source.get("tool_refs", []) if item)
+    haystack = f"{message_ref} {tool_refs}"
+    if "codex" in haystack:
+        return {
+            "agent_id": "codex",
+            "agent_label": "Codex",
+            "runtime": "codex-cli",
+            "adapter_id": "codex-account",
+        }
+    if "claude" in haystack:
+        return {
+            "agent_id": "claude-code",
+            "agent_label": "Claude Code",
+            "runtime": "claude-code",
+            "adapter_id": "claude-code",
+        }
+    if "cursor" in haystack:
+        return {
+            "agent_id": "cursor",
+            "agent_label": "Cursor",
+            "runtime": "cursor",
+            "adapter_id": "cursor-automation",
+        }
+    if "openclaw" in haystack:
+        return {
+            "agent_id": "openclaw",
+            "agent_label": "OpenClaw",
+            "runtime": "openclaw",
+            "adapter_id": "openclaw",
+        }
+    return {}
+
+
+def _agent_search_text(agent: Any) -> str:
+    if not isinstance(agent, dict):
+        return ""
+    return " ".join(
+        str(agent.get(key, ""))
+        for key in ("agent_id", "agent_label", "runtime", "adapter_id", "model_id", "model_version")
+    )
+
+
+def _row_has_agent(row: dict[str, Any], agent_id: str, *, fields: tuple[str, ...]) -> bool:
+    for field in fields:
+        value = row.get(field)
+        if isinstance(value, dict) and str(value.get("agent_id", "")) == agent_id:
+            return True
+        if isinstance(value, list) and any(
+            isinstance(agent, dict) and str(agent.get("agent_id", "")) == agent_id for agent in value
+        ):
+            return True
+    return False
+
+
+def _agents_for_event_ids(
+    events_by_id: dict[str, dict[str, Any]],
+    event_ids: list[str],
+) -> list[dict[str, str]]:
+    agents_by_id: dict[str, dict[str, str]] = {}
+    for event_id in event_ids:
+        event = events_by_id.get(event_id)
+        if not event:
+            agent = {"agent_id": "unknown", "agent_label": "Unknown"}
+        else:
+            agent = _normalize_event_reporting_agent(event)
+        agents_by_id.setdefault(agent["agent_id"], agent)
+    if not agents_by_id:
+        agents_by_id["unknown"] = {"agent_id": "unknown", "agent_label": "Unknown"}
+    return sorted(agents_by_id.values(), key=lambda item: (item["agent_label"].casefold(), item["agent_id"]))
+
+
 def _load_run_records(store: MemoryStore) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
+    events_by_id = {str(event.get("event_id", "")): event for event in store.load_events()}
     for summary_path in sorted(store.audit_consolidation_dir.glob("*-summary.json"), reverse=True):
         summary = read_json(summary_path, {})
         run_id = str(summary.get("run_id") or summary_path.stem.replace("-summary", ""))
         op_path = store.audit_consolidation_dir / f"{run_id}.jsonl"
         diff_path = store.audit_consolidation_dir / f"{run_id}.diff"
         operations = []
+        run_event_ids: list[str] = []
         for payload in _load_jsonl(op_path):
+            source_event_ids = [str(event_id) for event_id in payload.get("source_event_ids", [])]
+            run_event_ids.extend(source_event_ids)
             op = ObservabilityConsolidationOp(
                 id=str(payload.get("op_id", stable_id("op", run_id, payload))),
                 run_id=run_id,
@@ -805,7 +960,10 @@ def _load_run_records(store: MemoryStore) -> list[dict[str, Any]]:
                 reason=str(payload.get("reason", "")),
                 created_at=str(payload.get("timestamp", "")),
             ).to_dict()
+            op["source_event_ids"] = source_event_ids
+            op["source_reporting_agents"] = _agents_for_event_ids(events_by_id, source_event_ids)
             operations.append(op)
+        source_reporting_agents = _agents_for_event_ids(events_by_id, run_event_ids)
         runs.append(
             {
                 "id": run_id,
@@ -819,6 +977,8 @@ def _load_run_records(store: MemoryStore) -> list[dict[str, Any]]:
                 "diff_path": str(diff_path) if diff_path.exists() else None,
                 "diff_text": diff_path.read_text(encoding="utf-8") if diff_path.exists() else "",
                 "operations": operations,
+                "source_reporting_agents": source_reporting_agents,
+                "reporting_agent_label": ", ".join(agent["agent_label"] for agent in source_reporting_agents),
                 "phase_traces": _phase_traces_for_consolidation(run_id, summary, operations),
                 "warnings": _collect_run_warnings(summary, operations),
                 "source_paths": [str(summary_path), str(op_path), str(diff_path)],
@@ -842,6 +1002,8 @@ def _load_run_records(store: MemoryStore) -> list[dict[str, Any]]:
                 "diff_path": str(diff_path) if diff_path.exists() else None,
                 "diff_text": diff_path.read_text(encoding="utf-8") if diff_path.exists() else "",
                 "operations": [],
+                "source_reporting_agents": [{"agent_id": "opendream", "agent_label": "OpenDream"}],
+                "reporting_agent_label": "OpenDream",
                 "phase_traces": _phase_traces_for_dream(run_id, dream_summary, summary.get("target_paths", [])),
                 "warnings": [dream_summary["reason"]] if "reason" in dream_summary else [],
                 "source_paths": [str(summary_path), str(diff_path)],
@@ -853,10 +1015,20 @@ def _load_run_records(store: MemoryStore) -> list[dict[str, Any]]:
 
 def _load_retrieval_entities(store: MemoryStore) -> list[dict[str, Any]]:
     items = []
+    events_by_id = {str(event.get("event_id", "")): event for event in store.load_events()}
+    records_by_id = {str(record.get("memory_id", "")): record for record in store.load_durable_records()}
     for path in sorted(store.audit_retrieval_dir.glob("*.json"), reverse=True):
         payload = read_json(path, {})
         payload.setdefault("id", payload.get("run_id", path.stem))
         payload.setdefault("source_path", str(path))
+        payload.setdefault("reporting_agent", {"agent_id": "unknown", "agent_label": "Unknown"})
+        source_event_ids: list[str] = []
+        for memory_id in payload.get("selected_memory_ids", []):
+            record = records_by_id.get(str(memory_id))
+            if record:
+                source_event_ids.extend(str(event_id) for event_id in record.get("source_event_ids", []))
+        payload["source_reporting_agents"] = _agents_for_event_ids(events_by_id, source_event_ids)
+        payload["reporting_agent_label"] = str(payload.get("reporting_agent", {}).get("agent_label", "Unknown"))
         payload["near_threshold"] = payload.get("excluded", [])
         payload["final_context_assembly_order"] = payload.get("selected_memory_ids", [])
         items.append(payload)
@@ -880,13 +1052,17 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
     session_ids = sorted(set(grouped_events) | set(grouped_contexts))
     for session_id in session_ids:
         timeline = []
+        session_agents: dict[str, dict[str, str]] = {}
         for event in grouped_events.get(session_id, []):
+            agent = _normalize_event_reporting_agent(event)
+            session_agents.setdefault(agent["agent_id"], agent)
             timeline.append(
                 {
                     "timestamp": event.get("timestamp"),
                     "kind": "memory.event.emitted",
                     "label": event.get("kind"),
                     "object_id": event.get("event_id"),
+                    "reporting_agent": agent,
                     "payload": event,
                 }
             )
@@ -907,6 +1083,11 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
                 "session_id": session_id,
                 "event_count": len(grouped_events.get(session_id, [])),
                 "context_count": len(grouped_contexts.get(session_id, [])),
+                "reporting_agents": sorted(
+                    session_agents.values(),
+                    key=lambda item: (item["agent_label"].casefold(), item["agent_id"]),
+                )
+                or [{"agent_id": "unknown", "agent_label": "Unknown"}],
                 "timeline": timeline,
             }
         )

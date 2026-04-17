@@ -58,6 +58,19 @@
       },
       "additionalProperties": false
     },
+    "reporting_agent": {
+      "type": "object",
+      "required": ["agent_id", "agent_label"],
+      "properties": {
+        "agent_id": { "type": "string" },
+        "agent_label": { "type": "string" },
+        "runtime": { "type": "string" },
+        "adapter_id": { "type": "string" },
+        "model_id": { "type": "string" },
+        "model_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "content": { "type": "string" },
     "tags": {
       "type": "array",

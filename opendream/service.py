@@ -807,6 +807,25 @@ def _resolve_autowire_targets(workspace: Path, target: str) -> list[str]:
 
 
 def _hook_script(adapter: str, phase: str) -> str:
+    if adapter == "codex":
+        agent_lines = [
+            'AGENT_LABEL="${OPENDREAM_AGENT_LABEL:-${CODEX_INTERNAL_ORIGINATOR_OVERRIDE:-Codex}}"',
+            'AGENT_MODEL_ID="${OPENDREAM_AGENT_MODEL_ID:-${OPENAI_MODEL:-${MODEL:-unknown}}}"',
+            'AGENT_MODEL_VERSION="${OPENDREAM_AGENT_MODEL_VERSION:-${OPENAI_MODEL_VERSION:-${MODEL_VERSION:-unknown}}}"',
+        ]
+        agent_args = " ".join(
+            [
+                '--agent-id "${OPENDREAM_AGENT_ID:-codex}"',
+                '--agent-label "$AGENT_LABEL"',
+                '--agent-runtime "${OPENDREAM_AGENT_RUNTIME:-codex-cli}"',
+                '--agent-adapter-id "${OPENDREAM_AGENT_ADAPTER_ID:-codex-account}"',
+                '--agent-model-id "$AGENT_MODEL_ID"',
+                '--agent-model-version "$AGENT_MODEL_VERSION"',
+            ]
+        )
+    else:
+        agent_lines = []
+        agent_args = ""
     if phase == "pre":
         task_var = "current task"
         return "\n".join(
@@ -818,11 +837,13 @@ def _hook_script(adapter: str, phase: str) -> str:
                 f'QUERY="${{1:-${{OPENDREAM_QUERY:-{task_var}}}}}"',
                 'GLOBAL="${OPENDREAM_GLOBAL_WORKSPACE:-}"',
                 "",
+                *agent_lines,
+                "",
                 'if [ -n "$GLOBAL" ]; then',
                 "  opendream prepare-context --workspace "
-                '"$WORKSPACE" --query "$QUERY" --include-global --global-workspace "$GLOBAL"',
+                f'"$WORKSPACE" --query "$QUERY" --include-global --global-workspace "$GLOBAL" {agent_args}'.rstrip(),
                 "else",
-                '  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY"',
+                f'  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY" {agent_args}'.rstrip(),
                 "fi",
                 "",
             ]
@@ -837,8 +858,10 @@ def _hook_script(adapter: str, phase: str) -> str:
             'SUMMARY="${1:-${OPENDREAM_SUMMARY:-Task completed.}}"',
             f'MESSAGE_REF="${{OPENDREAM_REF:-{ref}}}"',
             "",
+            *agent_lines,
+            "",
             "opendream emit-event --workspace "
-            '"$WORKSPACE" --kind task_outcome --content "$SUMMARY" --message-ref "$MESSAGE_REF"',
+            f'"$WORKSPACE" --kind task_outcome --content "$SUMMARY" --message-ref "$MESSAGE_REF" {agent_args}'.rstrip(),
             'opendream maintain --workspace "$WORKSPACE"',
             'opendream dream worker --workspace "$WORKSPACE" --once',
             "",

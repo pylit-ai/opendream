@@ -36,6 +36,13 @@ class ObservabilityIntegrationTests(unittest.TestCase):
             message_ref="obs-msg-1",
             timestamp=FIXED_NOW,
             tags=["key:package-manager"],
+            reporting_agent={
+                "agent_id": "codex",
+                "agent_label": "Codex",
+                "runtime": "codex-cli",
+                "model_id": "gpt-5.4",
+                "model_version": "2026-04-17",
+            },
         )
         emit_event(
             self.store,
@@ -46,9 +53,21 @@ class ObservabilityIntegrationTests(unittest.TestCase):
             message_ref="obs-msg-2",
             timestamp=FIXED_NOW,
             tags=["key:redis"],
+            reporting_agent={"agent_id": "claude-code", "agent_label": "Claude Code"},
         )
         maintain(self.store, now=FIXED_NOW)
-        self.context = prepare_context(self.store, query="package manager and redis", now=FIXED_NOW)
+        self.context = prepare_context(
+            self.store,
+            query="package manager and redis",
+            now=FIXED_NOW,
+            reporting_agent={
+                "agent_id": "codex",
+                "agent_label": "Codex",
+                "runtime": "codex-cli",
+                "model_id": "gpt-5.4",
+                "model_version": "2026-04-17",
+            },
+        )
         index_observability(self.store, now=FIXED_NOW)
 
         self.server = build_server(self.store, host="127.0.0.1", port=0)
@@ -101,6 +120,78 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertIn("total", ranged)
         self.assertIn("items", ranged)
         self.assertLessEqual(len(ranged["items"]), 50)
+
+    def test_memories_api_search_filter_and_sort_by_reporting_agent(self) -> None:
+        codex = self.get_json("/api/memories?agent_id=codex&limit=50")
+        self.assertGreaterEqual(codex["total"], 1)
+        self.assertTrue(
+            all(item["reporting_agents"][0]["agent_id"] == "codex" for item in codex["items"])
+        )
+
+        searched = self.get_json("/api/memories?search=Claude%20Code&limit=50")
+        self.assertGreaterEqual(searched["total"], 1)
+        self.assertTrue(
+            any(
+                agent["agent_label"] == "Claude Code"
+                for item in searched["items"]
+                for agent in item["reporting_agents"]
+            )
+        )
+
+        sorted_rows = self.get_json("/api/memories?sort=reporting_agent&sort_dir=asc&limit=50")
+        labels = [item["reporting_agent_label"] for item in sorted_rows["items"]]
+        self.assertEqual(labels, sorted(labels))
+
+    def test_retrievals_and_runs_expose_agent_provenance(self) -> None:
+        retrievals = self.get_json("/api/retrievals?search=gpt-5.4&sort=reporting_agent&limit=50")
+        self.assertGreaterEqual(retrievals["total"], 1)
+        retrieval = retrievals["items"][0]
+        self.assertEqual(retrieval["reporting_agent"]["agent_id"], "codex")
+        self.assertEqual(retrieval["reporting_agent"]["model_id"], "gpt-5.4")
+        self.assertTrue(retrieval["source_reporting_agents"])
+
+        runs = self.get_json("/api/runs?search=gpt-5.4&limit=50")
+        self.assertGreaterEqual(runs["total"], 1)
+        self.assertTrue(
+            any(
+                agent.get("model_id") == "gpt-5.4"
+                for run in runs["items"]
+                for agent in run.get("source_reporting_agents", [])
+            )
+        )
+
+    def test_legacy_codex_events_are_inferred_and_unknown_model_is_explicit(self) -> None:
+        emit_event(
+            self.store,
+            kind="task_outcome",
+            content="Legacy Codex completion.",
+            scope="project",
+            channel="cli",
+            message_ref="codex-post-task",
+            timestamp="2026-03-27T12:05:00Z",
+        )
+        maintain(self.store, now="2026-03-27T12:05:00Z")
+        index_observability(self.store, now=FIXED_NOW)
+
+        sessions = self.get_json("/api/sessions")
+        session_id = next(
+            item["session_id"]
+            for item in sessions["items"]
+            if any(
+                agent["agent_id"] == "codex" and agent.get("model_id") == "unknown"
+                for agent in item.get("reporting_agents", [])
+            )
+        )
+        timeline = self.get_json(f"/api/sessions/{session_id}/timeline")
+        row = next(
+            item
+            for item in timeline["timeline"]
+            if "Legacy Codex completion." in str((item.get("payload") or {}).get("content", ""))
+        )
+        self.assertTrue(
+            row["reporting_agent"]["agent_id"] == "codex"
+        )
+        self.assertEqual(row["reporting_agent"]["model_id"], "unknown")
 
     def test_context_and_retrieval_surfaces_are_available(self) -> None:
         retrievals = self.get_json("/api/retrievals")
@@ -232,6 +323,12 @@ class ObservabilityIntegrationTests(unittest.TestCase):
             "odCommandPalette",
             "routeToPageId",
             "handlePaletteAction",
+            "Agent",
+            "agent_id",
+            "reporting_agent",
+            "model_id",
+            "agent-pill",
+            "agentPillsHtml",
         ):
             self.assertIn(needle, bundle)
 

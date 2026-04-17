@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -378,7 +379,139 @@ def command_emit_event(args: argparse.Namespace) -> dict[str, Any]:
         tags=args.tag,
         confidence_hint=args.confidence_hint,
         sensitivity=args.sensitivity,
+        reporting_agent=_resolve_reporting_agent(args),
     )
+
+
+def _read_hook_stdin() -> dict[str, Any]:
+    text = sys.stdin.read().strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid Claude hook JSON on stdin: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Claude hook JSON on stdin must be an object")
+    return payload
+
+
+def _string_field(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _extract_text_from_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(part.strip() for part in parts if part.strip()).strip()
+    return ""
+
+
+def _assistant_text_from_transcript_row(row: dict[str, Any]) -> str:
+    role = row.get("role")
+    row_type = row.get("type")
+    message = row.get("message")
+    if isinstance(message, dict):
+        role = message.get("role", role)
+    if role != "assistant" and row_type != "assistant":
+        return ""
+    if isinstance(message, dict):
+        text = _extract_text_from_content(message.get("content"))
+        if text:
+            return text
+    return _extract_text_from_content(row.get("content") or row.get("text"))
+
+
+def _latest_assistant_transcript_text(transcript_path: str | None) -> str | None:
+    if not transcript_path:
+        return None
+    path = Path(transcript_path).expanduser()
+    if not path.exists() or not path.is_file():
+        return None
+    latest = ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        text = _assistant_text_from_transcript_row(row)
+        if text:
+            latest = text
+    return latest.strip() or None
+
+
+def command_hook_claude_pre_task(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _read_hook_stdin()
+    query = _string_field(payload, "prompt") or args.fallback_query
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    context = prepare_context(
+        store,
+        query=query,
+        reporting_agent=_resolve_reporting_agent(
+            fallback={
+                "agent_id": "claude-code",
+                "agent_label": "Claude Code",
+                "runtime": "claude-code",
+                "adapter_id": "claude-code",
+            }
+        ),
+    )
+    output = store.workspace / ".opendream" / "context" / "claude-pre-task.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json_dumps(context) + "\n", encoding="utf-8")
+    return context
+
+
+def command_hook_claude_post_task(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _read_hook_stdin()
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    summary = (
+        _latest_assistant_transcript_text(_string_field(payload, "transcript_path"))
+        or _string_field(payload, "summary")
+        or args.fallback_summary
+    )
+    event = emit_event(
+        store,
+        kind="task_outcome",
+        content=summary,
+        scope="project",
+        channel="cli",
+        message_ref=args.message_ref,
+        session_id=_string_field(payload, "session_id"),
+        reporting_agent=_resolve_reporting_agent(
+            fallback={
+                "agent_id": "claude-code",
+                "agent_label": "Claude Code",
+                "runtime": "claude-code",
+                "adapter_id": "claude-code",
+            }
+        ),
+    )
+    maintenance = maintain(store)
+    worker = dream_worker(store, max_polls=1)
+    return {
+        "status": "completed",
+        "workspace": str(store.workspace),
+        "event": event,
+        "maintain": maintenance,
+        "dream_worker": worker,
+    }
 
 
 def command_extract(args: argparse.Namespace) -> dict[str, Any]:
@@ -448,7 +581,8 @@ def command_retrieve(args: argparse.Namespace) -> dict[str, Any]:
         now=args.now,
         include_contested=args.include_contested,
         query_source="cli",
-        caller_detail=((args.caller_detail or "").strip() or None),
+        caller_detail=((getattr(args, "caller_detail", "") or "").strip() or None),
+        reporting_agent=_resolve_reporting_agent(args),
     )
     response["workspace"] = str(store.workspace)
     return response
@@ -479,7 +613,62 @@ def command_prepare_context(args: argparse.Namespace) -> dict[str, Any]:
         query=args.query,
         limit=args.limit,
         now=args.now,
+        reporting_agent=_resolve_reporting_agent(args),
     )
+
+
+def _env_first(*keys: str) -> str | None:
+    for key in keys:
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _infer_agent_from_environment() -> dict[str, Any]:
+    explicit = {
+        "agent_id": _env_first("OPENDREAM_AGENT_ID"),
+        "agent_label": _env_first("OPENDREAM_AGENT_LABEL"),
+        "runtime": _env_first("OPENDREAM_AGENT_RUNTIME"),
+        "adapter_id": _env_first("OPENDREAM_AGENT_ADAPTER_ID"),
+        "model_id": _env_first("OPENDREAM_AGENT_MODEL_ID"),
+        "model_version": _env_first("OPENDREAM_AGENT_MODEL_VERSION"),
+    }
+    if explicit["agent_id"] or explicit["agent_label"] or explicit["runtime"]:
+        return {key: value for key, value in explicit.items() if value}
+    return {}
+
+
+def _resolve_reporting_agent(
+    args: argparse.Namespace | None = None,
+    *,
+    fallback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved = dict(fallback or {})
+    resolved.update(_infer_agent_from_environment())
+    if args is not None:
+        defaults = {
+            "agent_id": "unknown",
+            "agent_label": "Unknown",
+            "agent_runtime": "",
+            "agent_adapter_id": "",
+            "agent_model_id": "",
+            "agent_model_version": "",
+        }
+        mapping = {
+            "agent_id": "agent_id",
+            "agent_label": "agent_label",
+            "runtime": "agent_runtime",
+            "adapter_id": "agent_adapter_id",
+            "model_id": "agent_model_id",
+            "model_version": "agent_model_version",
+        }
+        for target_key, arg_key in mapping.items():
+            value = str(getattr(args, arg_key, "") or "").strip()
+            if value and value != defaults.get(arg_key, ""):
+                resolved[target_key] = value
+    from .models import normalize_reporting_agent
+    return normalize_reporting_agent(resolved)
 
 
 def command_status(args: argparse.Namespace) -> dict[str, Any]:
@@ -1267,10 +1456,37 @@ def build_parser() -> argparse.ArgumentParser:
     emit_parser.add_argument("--tag", action="append", default=[])
     emit_parser.add_argument("--confidence-hint", type=float)
     emit_parser.add_argument("--sensitivity", default="normal")
+    emit_parser.add_argument("--agent-id", default="unknown")
+    emit_parser.add_argument("--agent-label", default="Unknown")
+    emit_parser.add_argument("--agent-runtime")
+    emit_parser.add_argument("--agent-adapter-id")
+    emit_parser.add_argument("--agent-model-id")
+    emit_parser.add_argument("--agent-model-version")
     emit_parser.add_argument("--route", choices=["project", "global"], default="project")
     emit_parser.add_argument("--global-workspace")
     add_layout_arguments(emit_parser)
     emit_parser.set_defaults(func=command_emit_event)
+
+    hook_parser = subparsers.add_parser("hook", help="Internal: run managed agent hook entrypoints")
+    hook_subparsers = hook_parser.add_subparsers(dest="hook_command", required=True)
+    claude_pre_parser = hook_subparsers.add_parser(
+        "claude-pre-task",
+        help="Internal: prepare context from Claude Code UserPromptSubmit hook JSON",
+    )
+    claude_pre_parser.add_argument("--workspace", required=True)
+    claude_pre_parser.add_argument("--fallback-query", default="current task")
+    add_layout_arguments(claude_pre_parser)
+    claude_pre_parser.set_defaults(func=command_hook_claude_pre_task)
+
+    claude_post_parser = hook_subparsers.add_parser(
+        "claude-post-task",
+        help="Internal: emit outcome from Claude Code Stop hook JSON",
+    )
+    claude_post_parser.add_argument("--workspace", required=True)
+    claude_post_parser.add_argument("--fallback-summary", default="Task completed.")
+    claude_post_parser.add_argument("--message-ref", default="claude-post-task")
+    add_layout_arguments(claude_post_parser)
+    claude_post_parser.set_defaults(func=command_hook_claude_post_task)
 
     extract_parser = subparsers.add_parser("extract")
     extract_parser.add_argument("--workspace", required=True)
@@ -1323,6 +1539,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TEXT",
         help="Optional free-text tag stored on the retrieval audit (e.g. agent session id, operator id).",
     )
+    retrieve_parser.add_argument("--agent-id", default="unknown")
+    retrieve_parser.add_argument("--agent-label", default="Unknown")
+    retrieve_parser.add_argument("--agent-runtime")
+    retrieve_parser.add_argument("--agent-adapter-id")
+    retrieve_parser.add_argument("--agent-model-id")
+    retrieve_parser.add_argument("--agent-model-version")
     retrieve_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(retrieve_parser)
     retrieve_parser.set_defaults(func=command_retrieve)
@@ -1331,6 +1553,12 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_context_parser.add_argument("--workspace", required=True)
     prepare_context_parser.add_argument("--query", required=True)
     prepare_context_parser.add_argument("--limit", type=int, default=5)
+    prepare_context_parser.add_argument("--agent-id", default="unknown")
+    prepare_context_parser.add_argument("--agent-label", default="Unknown")
+    prepare_context_parser.add_argument("--agent-runtime")
+    prepare_context_parser.add_argument("--agent-adapter-id")
+    prepare_context_parser.add_argument("--agent-model-id")
+    prepare_context_parser.add_argument("--agent-model-version")
     prepare_context_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(prepare_context_parser)
     add_store_group_arguments(prepare_context_parser)

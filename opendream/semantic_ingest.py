@@ -140,8 +140,17 @@ def ingest_envelope(
                     kind=pe.get("kind", "delegated_observation"),
                     content=pe.get("content", ""),
                     scope=pe.get("scope", "project"),
-                    channel=f"delegated:{adapter_id}",
+                    channel="tool",
                     message_ref=f"delegated-ingest:{run_id}",
+                    tool_refs=[f"delegated:{adapter_id}"],
+                    reporting_agent={
+                        "agent_id": adapter_id,
+                        "agent_label": adapter_id,
+                        "runtime": "delegated-semantic-ingest",
+                        "adapter_id": adapter_id,
+                        "model_id": str(envelope.get("model_id") or ""),
+                        "model_version": str(envelope.get("model_version") or ""),
+                    },
                 )
                 events_emitted += 1
             except (ValueError, TypeError):

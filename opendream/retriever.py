@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .models import normalize_reporting_agent
 from .relation_graph import build_relation_explanations, relation_aware_score_adjustment
 from .storage import MemoryStore
 from .util import (
@@ -65,8 +66,10 @@ def retrieve(
     skip_retrieval: bool = False,
     query_source: str | None = None,
     caller_detail: str | None = None,
+    reporting_agent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
+    normalized_agent = normalize_reporting_agent(reporting_agent)
 
     # Retrieval gating
     min_content_tokens = int(store.config["retrieval"].get("gating_min_content_tokens", 3))
@@ -84,6 +87,7 @@ def retrieve(
             "why": [],
             "explanations": [],
             "excluded": [],
+            "reporting_agent": normalized_agent,
             "cli_output_version": CLI_JSON_VERSION,
         }
 
@@ -256,6 +260,7 @@ def retrieve(
         "excluded": excluded[: max(limit, 3)],
         "reranked": not reranked,
         "memory_hurt": hurt_payload,
+        "reporting_agent": normalized_agent,
     }
     audit_payload: dict[str, Any] = {
         "run_id": run_id,
@@ -267,6 +272,7 @@ def retrieve(
         "explanations": response["explanations"],
         "excluded": response["excluded"],
         "summary": summarize(query, 80),
+        "reporting_agent": normalized_agent,
     }
     if query_source:
         audit_payload["query_source"] = query_source

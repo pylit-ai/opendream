@@ -7,7 +7,7 @@ from typing import Any
 from .automation import tick as automation_tick
 from .consolidator import consolidate
 from .extractor import extract_candidates, filter_by_salience
-from .models import ContextAssembly, MemoryEvent
+from .models import ContextAssembly, MemoryEvent, normalize_reporting_agent
 from .retriever import retrieve
 from .storage import STORE_KIND_PRECEDENCE, MemoryStore, store_sort_key
 from .util import CLI_JSON_VERSION, parse_timestamp, stable_id, summarize, to_iso, utc_now
@@ -38,6 +38,8 @@ def emit_event(
     scope: str,
     channel: str,
     message_ref: str,
+    file_refs: list[str] | None = None,
+    tool_refs: list[str] | None = None,
     session_id: str | None = None,
     turn_id: str | None = None,
     event_id: str | None = None,
@@ -45,6 +47,7 @@ def emit_event(
     tags: list[str] | None = None,
     confidence_hint: float | None = None,
     sensitivity: str = "normal",
+    reporting_agent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if store.store_kind == "global" and scope == "project":
         raise ValueError("project-scoped events must stay in the project store")
@@ -55,6 +58,11 @@ def emit_event(
     computed_session_id = session_id or stable_id("session", event_timestamp, store.store_kind, scope)
     computed_turn_id = turn_id or stable_id("turn", event_timestamp, kind, message_ref)
     computed_event_id = event_id or stable_id("event", event_timestamp, kind, content, message_ref)
+    source: dict[str, Any] = {"channel": channel, "message_ref": message_ref}
+    if file_refs:
+        source["file_refs"] = file_refs
+    if tool_refs:
+        source["tool_refs"] = tool_refs
     event = MemoryEvent(
         event_id=computed_event_id,
         session_id=computed_session_id,
@@ -62,8 +70,9 @@ def emit_event(
         timestamp=event_timestamp,
         scope=scope,
         kind=kind,
-        source={"channel": channel, "message_ref": message_ref},
+        source=source,
         content=content,
+        reporting_agent=normalize_reporting_agent(reporting_agent),
         tags=tags or [],
         confidence_hint=confidence_hint,
         sensitivity=sensitivity,
@@ -318,6 +327,7 @@ def prepare_context(
     query: str,
     limit: int = 5,
     now: str | None = None,
+    reporting_agent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
     store_list = [stores] if isinstance(stores, MemoryStore) else sorted(stores, key=store_sort_key)
@@ -335,6 +345,7 @@ def prepare_context(
             limit=max(limit * 3, limit),
             now=timestamp,
             query_source="prepare_context",
+            reporting_agent=reporting_agent,
         )
         retrieval_run_ids.append(str(retrieval.get("run_id", "")))
         records = {record["memory_id"]: record for record in store.load_durable_records()}

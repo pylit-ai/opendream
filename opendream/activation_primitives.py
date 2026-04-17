@@ -50,6 +50,19 @@ def opendream_command(store: MemoryStore, command: str) -> str:
 
 
 def pre_task_script(store: MemoryStore, target: str) -> str:
+    if target == "claude":
+        command = opendream_command(store, "hook claude-pre-task")
+        return "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                "",
+                'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
+                'QUERY="${1:-${OPENDREAM_QUERY:-current task}}"',
+                f'{command} --fallback-query "$QUERY"',
+                "",
+            ]
+        )
     command = opendream_command(store, "prepare-context")
     output_name = f"{target}-pre-task.json"
     return "\n".join(
@@ -74,6 +87,21 @@ def pre_task_script(store: MemoryStore, target: str) -> str:
 
 
 def post_task_script(store: MemoryStore, target: str) -> str:
+    if target == "claude":
+        command = opendream_command(store, "hook claude-post-task")
+        ref = f"{target}-post-task"
+        return "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                "",
+                'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
+                'SUMMARY="${1:-${OPENDREAM_SUMMARY:-Task completed.}}"',
+                f'MESSAGE_REF="${{OPENDREAM_REF:-{ref}}}"',
+                f'{command} --fallback-summary "$SUMMARY" --message-ref "$MESSAGE_REF"',
+                "",
+            ]
+        )
     emit_command = opendream_command(store, "emit-event")
     maintain_command = opendream_command(store, "maintain")
     worker_command = opendream_command(store, "dream worker")

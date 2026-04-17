@@ -166,6 +166,69 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(project_store["store_kind"], "project")
         self.assertEqual(global_store["store_kind"], "global")
 
+    def test_emit_event_records_reporting_agent_with_unknown_default(self) -> None:
+        run_cli(
+            "emit-event",
+            "--workspace",
+            str(self.workspace),
+            "--kind",
+            "project_decision",
+            "--content",
+            "Agent metadata should be explicit.",
+            "--message-ref",
+            "agent-msg-1",
+            "--timestamp",
+            FIXED_NOW,
+        )
+
+        event_path = next((self.workspace / DEFAULT_MEMORY_DIR / "state" / "events").glob("*.jsonl"))
+        event = json.loads(event_path.read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(event["reporting_agent"]["agent_id"], "unknown")
+        self.assertEqual(event["reporting_agent"]["agent_label"], "Unknown")
+        validate_document("memory-event.schema.json", event)
+
+    def test_emit_event_records_explicit_reporting_agent(self) -> None:
+        run_cli(
+            "emit-event",
+            "--workspace",
+            str(self.workspace),
+            "--kind",
+            "project_decision",
+            "--content",
+            "Codex reported this decision.",
+            "--message-ref",
+            "agent-msg-2",
+            "--timestamp",
+            FIXED_NOW,
+            "--agent-id",
+            "codex",
+            "--agent-label",
+            "Codex",
+            "--agent-runtime",
+            "codex-cli",
+            "--agent-adapter-id",
+            "codex-account",
+            "--agent-model-id",
+            "gpt-5.4",
+            "--agent-model-version",
+            "2026-04-17",
+        )
+
+        event_path = next((self.workspace / DEFAULT_MEMORY_DIR / "state" / "events").glob("*.jsonl"))
+        event = json.loads(event_path.read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(
+            event["reporting_agent"],
+            {
+                "agent_id": "codex",
+                "agent_label": "Codex",
+                "runtime": "codex-cli",
+                "adapter_id": "codex-account",
+                "model_id": "gpt-5.4",
+                "model_version": "2026-04-17",
+            },
+        )
+        validate_document("memory-event.schema.json", event)
+
     def test_deterministic_consolidation_and_schema_validation(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
         run_cli("append-event", "--workspace", str(self.workspace), "--events", str(fixture))
@@ -404,6 +467,48 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertTrue(context["selected_memory_ids"])
         self.assertIsNone(context.get("empty_reason"))
         self.assertEqual(context.get("hints"), [])
+
+    def test_prepare_context_records_reporting_agent_and_model(self) -> None:
+        fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
+        run_cli("append-event", "--workspace", str(self.workspace), "--events", str(fixture))
+        run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+
+        context = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "package manager and workflow",
+            "--now",
+            FIXED_NOW,
+            "--agent-id",
+            "codex",
+            "--agent-label",
+            "Codex",
+            "--agent-runtime",
+            "codex-cli",
+            "--agent-model-id",
+            "gpt-5.4",
+            "--agent-model-version",
+            "2026-04-17",
+        )
+
+        self.assertTrue(context["context_id"])
+        assembly_path = (
+            self.workspace
+            / DEFAULT_MEMORY_DIR
+            / "audit"
+            / "context"
+            / f"{context['context_id']}.json"
+        )
+        assembly = json.loads(assembly_path.read_text(encoding="utf-8"))
+        retrieval_run_id = str(assembly["retrieval_run_id"]).split(",")[0]
+        retrieval_path = self.workspace / DEFAULT_MEMORY_DIR / "audit" / "retrieval" / f"{retrieval_run_id}.json"
+        retrieval = json.loads(retrieval_path.read_text(encoding="utf-8"))
+        self.assertEqual(retrieval["reporting_agent"]["agent_id"], "codex")
+        self.assertEqual(retrieval["reporting_agent"]["agent_label"], "Codex")
+        self.assertEqual(retrieval["reporting_agent"]["model_id"], "gpt-5.4")
+        self.assertEqual(retrieval["reporting_agent"]["model_version"], "2026-04-17")
 
     def test_prepare_context_reports_empty_reason_when_no_durable_memories(self) -> None:
         run_cli("init", "--workspace", str(self.workspace))
@@ -1519,6 +1624,88 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 7)
         self.assertTrue((self.workspace / ".opendream" / "context" / "codex-pre-task.json").exists())
         self.assertTrue(any((self.workspace / DEFAULT_MEMORY_DIR / "state" / "events").glob("*.jsonl")))
+
+    def test_claude_hooks_consume_native_stdin_payloads(self) -> None:
+        shim_path = self.write_opendream_shim()
+        run_cli("init", "--workspace", str(self.workspace))
+        run_cli("activate", "--workspace", str(self.workspace), "--targets", "claude-code")
+        env = {
+            **os.environ,
+            "PATH": f"{shim_path.parent}{os.pathsep}{os.environ.get('PATH', '')}",
+            "PYTHONPATH": str(REPO_ROOT),
+            "OPENDREAM_WORKSPACE": str(self.workspace),
+            "CLAUDE_PROJECT_DIR": str(self.workspace),
+        }
+
+        pre_hook = self.workspace / ".opendream" / "hooks" / "claude-pre-task.sh"
+        prompt_payload = {
+            "session_id": "claude-session-1",
+            "transcript_path": str(self.workspace / ".claude" / "projects" / "session.jsonl"),
+            "cwd": str(self.workspace),
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "Use the ledger-backed resolver in this task.",
+        }
+        pre = subprocess.run(
+            ["sh", str(pre_hook)],
+            cwd=self.workspace,
+            env=env,
+            input=json.dumps(prompt_payload),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("Use the ledger-backed resolver", pre.stdout)
+        context_text = (self.workspace / ".opendream" / "context" / "claude-pre-task.json").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Use the ledger-backed resolver", context_text)
+
+        transcript_path = self.workspace / ".claude" / "projects" / "session.jsonl"
+        transcript_path.parent.mkdir(parents=True, exist_ok=True)
+        transcript_path.write_text(
+            "\n".join(
+                [
+                    json.dumps({"type": "user", "message": {"content": "Please fix the resolver."}}),
+                    json.dumps(
+                        {
+                            "type": "assistant",
+                            "message": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "Implemented real Claude hook summary from the transcript.",
+                                    }
+                                ]
+                            },
+                        }
+                    ),
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        post_hook = self.workspace / ".opendream" / "hooks" / "claude-post-task.sh"
+        stop_payload = {
+            "session_id": "claude-session-1",
+            "transcript_path": str(transcript_path),
+            "cwd": str(self.workspace),
+            "hook_event_name": "Stop",
+        }
+        subprocess.run(
+            ["sh", str(post_hook)],
+            cwd=self.workspace,
+            env=env,
+            input=json.dumps(stop_payload),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        event_path = next((self.workspace / DEFAULT_MEMORY_DIR / "state" / "events").glob("*.jsonl"))
+        event = json.loads(event_path.read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(event["content"], "Implemented real Claude hook summary from the transcript.")
+        self.assertEqual(event["source"]["message_ref"], "claude-post-task")
+        self.assertEqual(event["session_id"], "claude-session-1")
+        self.assertEqual(event["reporting_agent"]["agent_id"], "claude-code")
 
     def test_activation_plan_does_not_write_files(self) -> None:
         run_cli("init", "--workspace", str(self.workspace))

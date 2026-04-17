@@ -21,6 +21,8 @@ class QueryRetrievalsTests(unittest.TestCase):
                 "query": "alpha query",
                 "summary": "s1",
                 "selected_memory_ids": ["a", "b"],
+                "reporting_agent": {"agent_id": "codex", "agent_label": "Codex"},
+                "source_reporting_agents": [{"agent_id": "claude-code", "agent_label": "Claude Code"}],
             },
             {
                 "id": "r2",
@@ -29,6 +31,7 @@ class QueryRetrievalsTests(unittest.TestCase):
                 "query": "beta",
                 "summary": "s2",
                 "selected_memory_ids": [],
+                "reporting_agent": {"agent_id": "unknown", "agent_label": "Unknown"},
             },
             {
                 "id": "r3",
@@ -37,6 +40,7 @@ class QueryRetrievalsTests(unittest.TestCase):
                 "query": "gamma beta",
                 "summary": "s3",
                 "selected_memory_ids": ["x"],
+                "reporting_agent": {"agent_id": "cursor", "agent_label": "Cursor"},
             },
         ]
 
@@ -44,6 +48,21 @@ class QueryRetrievalsTests(unittest.TestCase):
         r = query_retrievals(_idx(self.rows), search="beta")
         ids = {row["id"] for row in r["items"]}
         self.assertEqual(ids, {"r2", "r3"})
+
+    def test_search_filter_and_sort_by_agent(self) -> None:
+        searched = query_retrievals(_idx(self.rows), search="Claude Code")
+        self.assertEqual([row["id"] for row in searched["items"]], ["r1"])
+
+        filtered = query_retrievals(_idx(self.rows), filters={"agent_id": "codex"})
+        self.assertEqual([row["id"] for row in filtered["items"]], ["r1"])
+
+        sorted_rows = query_retrievals(
+            _idx(self.rows),
+            sort="reporting_agent",
+            sort_dir="asc",
+            limit=10,
+        )
+        self.assertEqual([row["id"] for row in sorted_rows["items"]], ["r1", "r3", "r2"])
 
     def test_timestamp_window(self) -> None:
         r = query_retrievals(
