@@ -3,10 +3,17 @@ __pycache__/
 .tmp/
 tmp/
 .DS_Store
+.claude/
+.codex/
+.cursor/
+.gemini/
 build/
 dist/
 *.egg-info/
+memory/
 notepads/
+opencode.json
+openspec/changes/**/prompts/
 /.metactl/
 skills/
 .venv/
@@ -14,9 +21,8 @@ skills/
 .coverage
 htmlcov/
 
-# Repomix: ignore generated pack outputs; keep bundle config tracked
+# Repomix: ignore generated pack outputs and local bundle metadata
 .repomix/*
-!.repomix/bundles.json
 
 # Git worktrees (isolated feature workspaces)
 .worktrees/

@@ -17,7 +17,6 @@ targets:
 starter_library:
   # Default/first-party corpus: metactl repo `library/starter` (roles, policies, targets, base packs)
   - ../metactl/library/starter
-  - /Users/reynard/src/wx-b/metactl-library
 defaults:
   brownfield_mode: refuse_due_to_conflict
   discovery_mode: candidate_search

@@ -8,7 +8,7 @@ Canonical guide for wiring **recurring automation dreams** in OpenDream: capture
 
 **Clarification:** **Transcript `dream`** (episodes → consolidation / optional semantic pipeline) and **automation radar** (`automation register|run` projecting durable memory) are different subsystems. Feature mining uses **automation** + Layer A capture; see the setup guide above.
 
-**Cursor skill (on-demand workflow):** [`.cursor/skills/opendream-dream-automation/SKILL.md`](../../.cursor/skills/opendream-dream-automation/SKILL.md) — same Layer A/B/C steps in agent-executable form; portable `SKILL.md` body for other IDEs via **Platform deltas** in that file.
+If you maintain repo-local agent skills or commands for this workflow, keep them aligned with this playbook rather than duplicating policy here.
 
 ---
 

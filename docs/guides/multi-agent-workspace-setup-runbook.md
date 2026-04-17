@@ -2,8 +2,8 @@
 
 This document records the **exact command sequence** used to initialize OpenDream and activate **Claude Code**, **Codex**, **Cursor**, and **Gemini** in a single repository workspace.
 
-- **Example workspace (as run):** `/Users/reynard/src/wx-b/lone-ranger`
-- **CLI version (as run):** `opendream 0.1.0` (`/Users/reynard/.local/bin/opendream`, from `uv tool install`)
+- **Example workspace (as run):** `/path/to/your/repo`
+- **CLI version (as run):** `opendream <version>` (installed with `uv tool install`)
 - **Date:** 2026-04-07
 
 For product behavior and alternatives, see the repository [README](../../README.md) and [coding-agents.md](../coding-agents.md).
@@ -25,7 +25,7 @@ If flags like `activate` or `semantic` are missing, upgrade per the [README quic
 Set the workspace to your repository root (must match the root you initialized):
 
 ```bash
-export WS="/Users/reynard/src/wx-b/lone-ranger"
+export WS="/path/to/your/repo"
 ```
 
 ### 1. Initialize memory layout

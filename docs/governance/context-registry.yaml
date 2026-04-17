@@ -117,22 +117,6 @@ adapters:
       - AGENTS.md
       - docs/governance/DOCS_SYSTEM.md
 
-  - path: .cursor/rules/00-router.mdc
-    tool: cursor
-    canonical: false
-    must_not_define_policy: true
-    points_to:
-      - AGENTS.md
-      - docs/governance/DOCS_SYSTEM.md
-
-  - path: opencode.json
-    tool: opencode
-    canonical: false
-    must_not_define_policy: true
-    points_to:
-      - AGENTS.md
-      - docs/governance/DOCS_SYSTEM.md
-
 checks:
   - id: no_duplicate_policy
     description: Canonical policy text must not be duplicated in adapter files.
