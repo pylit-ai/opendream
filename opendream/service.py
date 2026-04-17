@@ -29,6 +29,14 @@ CODEX_BLOCK_END = "<!-- OPENDREAM:CODEX END -->"
 RECENT_FAILURE_LIMIT = 5
 DEFAULT_STUCK_SECONDS = 180
 CRASH_LOOP_THRESHOLD = 3
+CLAUDE_PRE_TASK_COMMAND = (
+    'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" '
+    'sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh'
+)
+CLAUDE_POST_TASK_COMMAND = (
+    'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" '
+    'sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
+)
 
 
 def detect_supervisor() -> str:
@@ -571,8 +579,8 @@ def _autowire_claude(workspace: Path, *, force: bool, uninstall: bool) -> dict[s
     payload = _load_json_file(settings_path)
     hooks = payload.setdefault("hooks", {})
 
-    pre_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh'
-    post_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
+    pre_command = CLAUDE_PRE_TASK_COMMAND
+    post_command = CLAUDE_POST_TASK_COMMAND
 
     if uninstall:
         # Remove from UserPromptSubmit event

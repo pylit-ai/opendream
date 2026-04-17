@@ -7,6 +7,15 @@ from typing import Any
 from . import activation_primitives as P
 from .storage import MemoryStore
 
+CLAUDE_PRE_TASK_COMMAND = (
+    'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" '
+    'sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh'
+)
+CLAUDE_POST_TASK_COMMAND = (
+    'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" '
+    'sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
+)
+
 
 def _req_install(manifest: dict[str, Any], *keys: str) -> dict[str, Any]:
     inst = manifest.get("install")
@@ -68,7 +77,7 @@ def expected_surfaces(store: MemoryStore, manifest: dict[str, Any]) -> list[dict
                     "hooks": [
                         {
                             "type": "command",
-                            "command": 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh',
+                            "command": CLAUDE_PRE_TASK_COMMAND,
                         }
                     ]
                 }
@@ -80,7 +89,7 @@ def expected_surfaces(store: MemoryStore, manifest: dict[str, Any]) -> list[dict
                     "hooks": [
                         {
                             "type": "command",
-                            "command": 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh',
+                            "command": CLAUDE_POST_TASK_COMMAND,
                         }
                     ]
                 }
@@ -179,8 +188,8 @@ def _install_claude_code_hooks(store: MemoryStore, aid: str) -> dict[str, Any]:
     hooks = payload.setdefault("hooks", {})
 
     # New event-based schema
-    pre_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh'
-    post_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
+    pre_command = CLAUDE_PRE_TASK_COMMAND
+    post_command = CLAUDE_POST_TASK_COMMAND
 
     # Clean up old deprecated keys
     hooks.pop("preTask", None)
@@ -246,8 +255,8 @@ def _remove_claude_code_hooks(workspace: Path, aid: str) -> dict[str, Any]:
     payload = P.load_json_object(settings_path)
     hooks = payload.setdefault("hooks", {})
 
-    pre_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-pre-task.sh'
-    post_command = 'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
+    pre_command = CLAUDE_PRE_TASK_COMMAND
+    post_command = CLAUDE_POST_TASK_COMMAND
 
     # Remove from UserPromptSubmit event
     if "UserPromptSubmit" in hooks:

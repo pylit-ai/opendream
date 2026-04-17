@@ -1466,8 +1466,19 @@ class MemoryCliIntegrationTests(unittest.TestCase):
     def test_service_autowire_is_idempotent_and_reversible(self) -> None:
         claude_settings = self.workspace / ".claude" / "settings.json"
         claude_settings.parent.mkdir(parents=True, exist_ok=True)
+        existing_hooks = {
+            "hooks": {
+                "OtherEvent": [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": "echo keep-me"}
+                        ]
+                    }
+                ]
+            }
+        }
         claude_settings.write_text(
-            json.dumps({"hooks": {"OtherEvent": [{"hooks": [{"type": "command", "command": "echo keep-me"}]}]}}, indent=2) + "\n",
+            json.dumps(existing_hooks, indent=2) + "\n",
             encoding="utf-8",
         )
         agents_path = self.workspace / "AGENTS.md"
@@ -1524,8 +1535,19 @@ class MemoryCliIntegrationTests(unittest.TestCase):
     def test_activate_is_idempotent_and_repairable(self) -> None:
         claude_settings = self.workspace / ".claude" / "settings.json"
         claude_settings.parent.mkdir(parents=True, exist_ok=True)
+        existing_hooks = {
+            "hooks": {
+                "OtherEvent": [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": "echo keep-me"}
+                        ]
+                    }
+                ]
+            }
+        }
         claude_settings.write_text(
-            json.dumps({"hooks": {"OtherEvent": [{"hooks": [{"type": "command", "command": "echo keep-me"}]}]}}, indent=2) + "\n",
+            json.dumps(existing_hooks, indent=2) + "\n",
             encoding="utf-8",
         )
         codex_config = self.workspace / ".codex" / "config.toml"
