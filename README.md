@@ -205,6 +205,7 @@ opendream observe serve --workspace "$PWD" --port 8000
 ```
 
 Then open `http://127.0.0.1:8000/overview` on the same machine. `observe serve` blocks until Ctrl+C.
+The observe server also exposes `GET /api/health` for startup/readiness/liveness evidence and `POST /api/health/live-check` for a synthetic end-to-end probe that verifies append plus index refresh without creating durable memory.
 
 <details>
 <summary><strong>What the observability app exposes</strong></summary>
@@ -213,6 +214,7 @@ Built from the same on-disk artifacts as the runtime (read model is derived; fil
 
 - Index at `.opendream/memory/state/observability_index.json` (under your configured memory root)
 - Read APIs: overview, memories, runs, retrievals, sessions, context, graph, reviews, evals, exports
+- Health APIs: `/api/health` and `/api/health/live-check`
 - Audited writes: annotations, review decisions, exports
 - SSE at `/api/stream/status`
 - Desktop-first routes: `/overview`, `/memories`, `/runs`, `/retrievals`, `/sessions`, `/reviews`, `/graph`, `/evals`, `/exports`

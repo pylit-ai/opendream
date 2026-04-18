@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections import defaultdict
@@ -13,8 +14,10 @@ from .util import read_json, sha256_path, stable_id, to_iso, utc_now
 
 def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
+    source_fingerprint = _observability_source_fingerprint(store)
     index = {
         "generated_at": timestamp,
+        "source_fingerprint": source_fingerprint,
         "store": store.status_snapshot(now=timestamp),
         "overview": _build_overview(store, timestamp),
         "entities": _build_entities(store),
@@ -26,9 +29,64 @@ def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[s
 def load_or_build_index(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
     if store.observability_index_path.exists():
         payload = store.load_observability_index()
-        if payload.get("entities"):
+        if payload.get("entities") and payload.get("source_fingerprint") == _observability_source_fingerprint(store):
             return payload
     return index_observability(store, now=now)
+
+
+def _observability_source_fingerprint(store: MemoryStore) -> str:
+    digest = hashlib.sha256()
+    workspace = store.workspace.resolve()
+    for path in _iter_observability_source_paths(store):
+        stat = path.stat()
+        try:
+            rel = path.resolve().relative_to(workspace)
+            label = str(rel)
+        except ValueError:
+            label = str(path.resolve())
+        digest.update(label.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(stat.st_mtime_ns).encode("ascii"))
+        digest.update(b":")
+        digest.update(str(stat.st_size).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _iter_observability_source_paths(store: MemoryStore) -> list[Path]:
+    paths: list[Path] = []
+    explicit_files = [
+        store.durable_records_path,
+        store.index_json_path,
+        store.memory_md_path,
+        store.relation_edges_path,
+        store.semantic_config_path,
+    ]
+    for path in explicit_files:
+        if path.exists():
+            paths.append(path)
+    roots = [
+        store.events_dir,
+        store.audit_retrieval_dir,
+        store.audit_context_dir,
+        store.audit_consolidation_dir,
+        store.audit_dream_dir,
+        store.annotations_dir,
+        store.reviews_dir,
+        store.exports_dir,
+        store.audit_claim_verification_dir,
+        store.audit_transcript_probe_dir,
+        store.audit_reconciliation_dir,
+        store.audit_boundary_dir,
+    ]
+    for root in roots:
+        if not root.exists():
+            continue
+        for child in sorted(root.rglob("*")):
+            if child.is_file():
+                paths.append(child)
+    paths.sort(key=lambda item: str(item))
+    return paths
 
 
 _VALID_MEMORY_SORTS = frozenset(
@@ -636,6 +694,12 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
         scope_counts[str(record.get("scope", "unknown"))] += 1
     retrievals = _load_json_records(store.audit_retrieval_dir)
     runs = _load_run_records(store)
+    recent_sessions = _recent_sessions(events)
+    last_event_at = _max_iso_timestamp(event.get("timestamp") for event in events)
+    last_retrieval_at = _max_iso_timestamp(item.get("timestamp") for item in retrievals)
+    last_run_at = _max_iso_timestamp(_effective_run_timestamp(item) for item in runs)
+    pending_events = store.pending_event_count()
+    pending_candidates = len(store.load_pending_candidates())
     transcript_events = 0
     explicit_events = 0
     for event in events:
@@ -651,9 +715,12 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
         "generated_at": timestamp,
         "store_health": {
             "initialized": store.is_initialized(),
+            "state": "locked" if store.lock_state().get("present") else "ready",
             "lock": store.lock_state(),
             "dream_lock": store.dream_lock_state(),
             "memory_root": str(store.memory_root),
+            "pending_events": pending_events,
+            "pending_candidates": pending_candidates,
         },
         "memory_counts": {
             "total": len(records),
@@ -685,9 +752,16 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
             "successful": sum(1 for item in retrievals if item.get("selected_memory_ids")),
             "failed": sum(1 for item in retrievals if not item.get("selected_memory_ids")),
         },
-        "recent_sessions": _recent_sessions(events),
+        "recent_sessions": recent_sessions,
         "recent_runs": runs[:5],
         "last_consolidation_run": runs[0] if runs else None,
+        "freshness": {
+            "index_generated_at": timestamp,
+            "last_event_at": last_event_at,
+            "last_session_activity_at": recent_sessions[0].get("ended_at") if recent_sessions else None,
+            "last_retrieval_at": last_retrieval_at,
+            "last_run_at": last_run_at,
+        },
         "memory_excellence": _build_memory_excellence_overview(store, records),
         "execution_ownership": {
             "active_strategy": semantic_config.get("execution_strategy", "deterministic"),
@@ -964,15 +1038,25 @@ def _load_run_records(store: MemoryStore) -> list[dict[str, Any]]:
             op["source_reporting_agents"] = _agents_for_event_ids(events_by_id, source_event_ids)
             operations.append(op)
         source_reporting_agents = _agents_for_event_ids(events_by_id, run_event_ids)
+        summary_payload = summary.get("summary", {})
+        started_at = (
+            summary_payload.get("started_at")
+            or summary_payload.get("generated_at")
+        )
+        ended_at = (
+            summary_payload.get("completed_at")
+            or summary_payload.get("generated_at")
+            or started_at
+        )
         runs.append(
             {
                 "id": run_id,
                 "run_id": run_id,
                 "type": "consolidation",
-                "started_at": summary.get("summary", {}).get("started_at"),
-                "ended_at": summary.get("summary", {}).get("completed_at"),
-                "status": summary.get("summary", {}).get("status", "completed"),
-                "summary": summary.get("summary", {}),
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "status": summary_payload.get("status", "completed"),
+                "summary": summary_payload,
                 "target_paths": summary.get("target_paths", []),
                 "diff_path": str(diff_path) if diff_path.exists() else None,
                 "diff_text": diff_path.read_text(encoding="utf-8") if diff_path.exists() else "",
@@ -1077,12 +1161,17 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
                 }
             )
         timeline.sort(key=lambda item: str(item.get("timestamp", "")))
+        started_at = timeline[0].get("timestamp") if timeline else None
+        ended_at = timeline[-1].get("timestamp") if timeline else None
         sessions.append(
             {
                 "id": session_id,
                 "session_id": session_id,
                 "event_count": len(grouped_events.get(session_id, [])),
                 "context_count": len(grouped_contexts.get(session_id, [])),
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "last_activity_at": ended_at,
                 "reporting_agents": sorted(
                     session_agents.values(),
                     key=lambda item: (item["agent_label"].casefold(), item["agent_id"]),
@@ -1091,7 +1180,13 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
                 "timeline": timeline,
             }
         )
-    sessions.sort(key=lambda item: item["session_id"])
+    sessions.sort(
+        key=lambda item: (
+            str(item.get("last_activity_at") or ""),
+            str(item.get("session_id") or ""),
+        ),
+        reverse=True,
+    )
     return sessions
 
 
@@ -1253,7 +1348,7 @@ def _phase_traces_for_consolidation(
     updated = int(payload.get("updated", 0))
     contested = int(payload.get("contested", 0))
     pruned = int(payload.get("pruned", 0))
-    timestamp = str(payload.get("completed_at") or payload.get("started_at") or "")
+    timestamp = str(payload.get("completed_at") or payload.get("started_at") or payload.get("generated_at") or "")
     return [
         PhaseTrace(
             id=stable_id("phase", run_id, "orientation"),
@@ -1357,6 +1452,15 @@ def _recent_sessions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
     sessions.sort(key=lambda item: str(item.get("ended_at", "")), reverse=True)
     return sessions[:5]
+
+
+def _max_iso_timestamp(values: Any) -> str | None:
+    usable = [str(value) for value in values if value]
+    return max(usable) if usable else None
+
+
+def _effective_run_timestamp(run: dict[str, Any]) -> str | None:
+    return str(run.get("ended_at") or run.get("started_at") or "") or None
 
 
 def create_annotation(

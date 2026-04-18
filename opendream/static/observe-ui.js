@@ -566,6 +566,43 @@
         ' }).then(function (r) { return r.json(); });';
       void navigator.clipboard.writeText(line).catch(function () {});
     };
+    function odReadLiveCheckResult() {
+      try {
+        var raw = sessionStorage.getItem('od-live-check-result');
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch (e) {
+        return null;
+      }
+    }
+    function odClearLiveCheckResult() {
+      try {
+        sessionStorage.removeItem('od-live-check-result');
+      } catch (e) {}
+    }
+    window.odClearLiveCheckResult = odClearLiveCheckResult;
+    window.odRunLiveCheck = async function () {
+      var fr = document.getElementById('od-data-freshness');
+      if (fr) fr.textContent = 'Running live check…';
+      try {
+        var out = await fetchJson('/api/health/live-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        try {
+          sessionStorage.setItem('od-live-check-result', JSON.stringify(out));
+        } catch (e0) {}
+        if (location.pathname === '/' || location.pathname === '/overview') {
+          await runRender('Overview', renderOverview);
+        } else if (fr) {
+          fr.textContent = 'Live check completed at ' + new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
+        }
+      } catch (err) {
+        var msg = err && err.message ? err.message : String(err);
+        if (fr) fr.textContent = 'Live check failed: ' + msg;
+      }
+    };
     const fetchJson = async (path, options={}) => {
       const response = await fetch(path, options);
       const bodyText = await response.text();
@@ -740,6 +777,9 @@
         var tip = 'Memories: ' + (sh.memory_total != null ? sh.memory_total : '—');
         if (sh.contested != null) tip += ', contested: ' + sh.contested;
         if (sh.pending_events != null) tip += ', pending events: ' + sh.pending_events;
+        if (sh.last_event_at) tip += ', last event: ' + sh.last_event_at;
+        if (sh.last_run_at) tip += ', last run: ' + sh.last_run_at;
+        if (sh.index_generated_at) tip += ', index built: ' + sh.index_generated_at;
         pill.setAttribute('title', tip);
         var link = sh.link || '/overview';
         if (pill.tagName === 'A') pill.setAttribute('href', link);
@@ -1693,8 +1733,10 @@
 
     async function renderOverview() {
       const data = await fetchJson('/api/overview');
+      const health = await fetchJson('/api/health');
       const contestedN = Number(data.contested_memories) || 0;
       const memTotal = Number(data.memory_counts && data.memory_counts.total) || 0;
+      const recentLiveCheck = odReadLiveCheckResult();
       const contestedCallout =
         contestedN > 0
           ? `<p class="glossary-hint" style="margin-top:12px;margin-bottom:0"><strong>${contestedN}</strong> contested memory record(s) may need review before agents should rely on them. <a href="/memories?status=contested">Open Memories (contested)</a> to triage.</p>`
@@ -1747,41 +1789,125 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const lastRunLabel = lastRunId ? odTruncateMiddle(lastRunId, 14) : '—';
       const lastRunHref = lastRunId ? '/runs/' + encodeURIComponent(lastRunId) : '/runs';
       const sig = data.signal_coverage || {};
+      const freshness = data.freshness || {};
+      const healthEvidence = health.evidence || {};
+      const liveCheck = health.live_check || {};
       const evTotal = (Number(sig.transcript_events) || 0) + (Number(sig.explicit_events) || 0);
       const contestedClass = contestedN > 0 ? ' od-strip-card--warn' : '';
+      const memoryRoot = escapeHtml(String((data.store_health && data.store_health.memory_root) || '—'));
+      const storeStateRaw = String(data.store_health.state || (data.store_health.lock.present ? 'locked' : 'ready'));
+      const storeState = escapeHtml(storeStateRaw.replace(/^./, (c) => c.toUpperCase()));
+      const startupStatus = escapeHtml(String((health.startup && health.startup.status) || '—'));
+      const readinessStatus = escapeHtml(String((health.readiness && health.readiness.status) || '—'));
+      const livenessStatus = escapeHtml(String((health.liveness && health.liveness.status) || '—'));
+      const healthReason = escapeHtml(
+        String(
+          (health.readiness && health.readiness.reasons && health.readiness.reasons[0]) ||
+          (health.liveness && health.liveness.reasons && health.liveness.reasons[0]) ||
+          'Health evidence is derived from the current store and index.'
+        )
+      );
+      const statusTone = (value) => {
+        const normalized = String(value || '').toLowerCase();
+        if (!normalized || normalized === '—') return 'neutral';
+        if (/(fail|error|broken|down|dead|unavailable|contested|locked|crash)/.test(normalized)) return 'bad';
+        if (/(warn|degraded|pending|stale|idle)/.test(normalized)) return 'warn';
+        if (/(healthy|ready|live|ok|pass|active)/.test(normalized)) return 'good';
+        return 'neutral';
+      };
+      const snapshotMetric = (label, value, opts = {}) => {
+        const tone = opts.tone || 'neutral';
+        const classes = ['od-snapshot-metric'];
+        if (opts.kind === 'meta') classes.push('od-snapshot-metric--meta');
+        return `<div class="${classes.join(' ')}">
+          <div class="od-snapshot-label">${escapeHtml(label)}</div>
+          <div class="od-snapshot-value od-snapshot-value--${tone}">${value}</div>
+        </div>`;
+      };
+      const snapshotGroup = (title, items, opts = {}) => `
+        <section class="od-snapshot-group${opts.featured ? ' od-snapshot-group--featured' : ''}">
+          <div class="od-snapshot-group-title">${escapeHtml(title)}</div>
+          <div class="od-snapshot-group-grid">${items.join('')}</div>
+        </section>
+      `;
+      const liveCheckNotice =
+        recentLiveCheck && recentLiveCheck.probe
+          ? `<div class="od-empty-nextsteps glossary-hint" role="status"><strong>Live check completed.</strong> Probe <code>${escapeHtml(recentLiveCheck.probe.event_id || '—')}</code> was observed at <strong>${escapeHtml(formatInstantLocal(recentLiveCheck.probe.timestamp) || '—')}</strong>. <button type="button" class="icon-btn" onclick="odClearLiveCheckResult(); void runRender('Overview', renderOverview)" aria-label="Dismiss live check result" title="Dismiss">Dismiss</button></div>`
+          : '';
+      const snapshotApiFooter = `
+        <div class="od-snapshot-footer">
+          <div>
+            <div class="od-snapshot-footer-title">Snapshot APIs</div>
+            <p class="muted" style="margin:6px 0 0 0;font-size:12px;line-height:1.55">${healthReason}</p>
+          </div>
+          <div class="od-snapshot-api-stack">
+            <div class="od-snapshot-api-row">
+              <span class="od-snapshot-api-label">Health API</span>
+              <code>${location.origin}/api/health</code>
+              <span class="od-api-clip-row">
+                <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/health" onclick="odCopyApiUrl(this)" aria-label="Copy health API request" title="Copy API URL"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/health" onclick="odCopyApiCurl(this)" aria-label="Copy health API as curl" title="Copy curl"><span style="font-size:10px;font-weight:600">curl</span></button>
+                <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/health" onclick="odCopyApiFetch(this)" aria-label="Copy health API as fetch" title="Copy fetch"><span style="font-size:10px;font-weight:600">fetch</span></button>
+                <button type="button" class="icon-btn" onclick="void odRunLiveCheck()" aria-label="Run live check" title="Run live check">Run live check</button>
+                <button type="button" class="icon-btn od-api-copy-btn" data-api-method="POST" data-api-path="/api/health/live-check" onclick="odCopyApiCurl(this)" aria-label="Copy live-check API as curl" title="Copy live-check curl"><span style="font-size:10px;font-weight:600">live</span></button>
+              </span>
+            </div>
+            <div class="od-snapshot-api-row">
+              <span class="od-snapshot-api-label">Overview API</span>
+              <code>${location.origin}/api/overview</code>
+              <span class="od-api-clip-row">
+                <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/overview" onclick="odCopyApiUrl(this)" aria-label="Copy overview API request" title="Copy API URL"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/overview" onclick="odCopyApiCurl(this)" aria-label="Copy as curl" title="Copy curl"><span style="font-size:10px;font-weight:600">curl</span></button>
+                <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/overview" onclick="odCopyApiFetch(this)" aria-label="Copy as fetch" title="Copy fetch"><span style="font-size:10px;font-weight:600">fetch</span></button>
+              </span>
+            </div>
+          </div>
+          <p class="muted od-snapshot-contract">Machine-readable workspace contract (schemas in repo): <code>opendream contract export --workspace &lt;path&gt; --format json</code>. See <code>AGENTS.md</code> in the OpenDream repository for <code>cli_output_version</code> and contract fields.</p>
+        </div>`;
+      if (liveCheckNotice) parts.push(panel('Live Check Result', liveCheckNotice, true));
       parts.push(
         '<div class="full od-overview-strip" role="region" aria-label="At a glance">' +
           `<a class="od-strip-card" href="/memories"><span class="od-strip-value">${memTotal}</span><span class="od-strip-label">Memories</span></a>` +
           `<a class="od-strip-card${contestedClass}" href="/memories?status=contested"><span class="od-strip-value">${contestedN}</span><span class="od-strip-label">Contested</span></a>` +
           `<a class="od-strip-card" href="${lastRunHref}"><span class="od-strip-value">${escapeHtml(lastRunLabel)}</span><span class="od-strip-label">Latest run</span></a>` +
           `<a class="od-strip-card" href="/retrievals"><span class="od-strip-value">${hitPct}%</span><span class="od-strip-label">Retrieval hit</span></a>` +
-          `<a class="od-strip-card" href="/sessions"><span class="od-strip-value">${evTotal}</span><span class="od-strip-label">Capture events</span></a>` +
-          '<a class="od-strip-card" href="/graph"><span class="od-strip-value" style="font-size:0.95rem;font-weight:600">Open</span><span class="od-strip-label">Graph</span></a>' +
+          `<a class="od-strip-card od-strip-card--info" href="/sessions"><span class="od-strip-value">${evTotal}</span><span class="od-strip-label">Capture events</span></a>` +
           '</div>',
       );
       parts.push(
-        panel('Store Health', `
-          <div class="metric"><div class="label">State</div><div class="value">${data.store_health.lock.present ? 'Locked' : 'Ready'}</div></div>
-          <div class="metric"><div class="label">Memory Root</div><div class="value" style="font-size:16px">${data.store_health.memory_root}</div></div>
-          <div class="metric"><div class="label">Contested</div><div class="value">${data.contested_memories}</div></div>
-          ${contestedCallout}
-        `),
-        panel('Counts', `
-          <div class="metric"><div class="label">Total Memories</div><div class="value">${data.memory_counts.total}</div></div>
-          <div class="metric"><div class="label">Startup Entries</div><div class="value">${data.startup_index.entries}</div></div>
-          <div class="metric"><div class="label">Retrieval Hit Rate</div><div class="value">${data.retrievals.total ? Math.round((data.retrievals.successful / data.retrievals.total) * 100) + '%' : '0%'}</div></div>
-          <p class="muted" style="margin-top:12px;margin-bottom:0;font-size:12px">Read API: <code>${location.origin}/api/overview</code>
-            <span class="od-api-clip-row">
-            <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/overview" onclick="odCopyApiUrl(this)" aria-label="Copy overview API request" title="Copy API URL"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
-            <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/overview" onclick="odCopyApiCurl(this)" aria-label="Copy as curl" title="Copy curl"><span style="font-size:10px;font-weight:600">curl</span></button>
-            <button type="button" class="icon-btn od-api-copy-btn" data-api-method="GET" data-api-path="/api/overview" onclick="odCopyApiFetch(this)" aria-label="Copy as fetch" title="Copy fetch"><span style="font-size:10px;font-weight:600">fetch</span></button>
-            </span>
-          </p>
-          <p class="muted" style="margin-top:10px;margin-bottom:0;font-size:12px;line-height:1.55">Machine-readable workspace contract (schemas in repo): <code>opendream contract export --workspace &lt;path&gt; --format json</code>. See <code>AGENTS.md</code> in the OpenDream repository for <code>cli_output_version</code> and contract fields.</p>
-        `),
+        panel('Operator Snapshot', `
+          <div class="od-overview-snapshot">
+            ${snapshotGroup('Runtime', [
+              snapshotMetric('State', storeState, { tone: statusTone(storeStateRaw) }),
+              snapshotMetric('Startup', startupStatus, { tone: statusTone(startupStatus) }),
+              snapshotMetric('Readiness', readinessStatus, { tone: statusTone(readinessStatus) }),
+              snapshotMetric('Liveness', livenessStatus, { tone: statusTone(livenessStatus) }),
+            ], { featured: true })}
+            ${snapshotGroup('Store', [
+              snapshotMetric('Memory root', memoryRoot, { kind: 'meta' }),
+              snapshotMetric('Contested', escapeHtml(String(data.contested_memories)), { tone: contestedN > 0 ? 'warn' : 'good' }),
+              snapshotMetric('Pending events', escapeHtml(String(data.store_health.pending_events != null ? data.store_health.pending_events : '—')), { tone: Number(data.store_health.pending_events) > 0 ? 'warn' : 'neutral' }),
+              snapshotMetric('Pending candidates', escapeHtml(String(data.store_health.pending_candidates != null ? data.store_health.pending_candidates : '—')), { tone: Number(data.store_health.pending_candidates) > 0 ? 'warn' : 'neutral' }),
+            ])}
+            ${snapshotGroup('Freshness', [
+              snapshotMetric('Index built', escapeHtml(formatInstantLocal(freshness.index_generated_at) || '—'), { kind: 'meta' }),
+              snapshotMetric('Last event', escapeHtml(formatInstantLocal(freshness.last_event_at) || '—'), { kind: 'meta' }),
+              snapshotMetric('Last run', escapeHtml(formatInstantLocal(freshness.last_run_at) || '—'), { kind: 'meta' }),
+              snapshotMetric('Latest probe', escapeHtml(formatInstantLocal(liveCheck.last_probe_at) || '—'), { kind: 'meta' }),
+            ])}
+            ${snapshotGroup('Volume', [
+              snapshotMetric('Total memories', escapeHtml(String(data.memory_counts.total)), { tone: 'info' }),
+              snapshotMetric('Startup entries', escapeHtml(String(data.startup_index.entries)), { tone: 'info' }),
+              snapshotMetric('Retrieval hit rate', escapeHtml(data.retrievals.total ? Math.round((data.retrievals.successful / data.retrievals.total) * 100) + '%' : '0%'), { tone: 'info' }),
+              snapshotMetric('Capture events', escapeHtml(String(evTotal)), { tone: 'info' }),
+            ])}
+            ${contestedCallout}
+            ${snapshotApiFooter}
+          </div>
+        `, true),
+        panel('Fidelity Diagnostics', `<div class="split"><div>${pretty(data.signal_coverage)}</div><div>${pretty({ activation_diagnostics: data.activation_diagnostics, health_evidence: healthEvidence })}</div></div>`, true),
         panel('Recent Runs', `<table><caption class="sr-only">Recent consolidation runs</caption><thead><tr><th scope="col">ID</th><th scope="col">Status</th><th scope="col">Type</th></tr></thead><tbody>${data.recent_runs.map(run => `<tr><td><a href="/runs/${run.run_id}">${run.run_id}</a></td><td>${run.status || ''}</td><td>${run.type}</td></tr>`).join('')}</tbody></table>`, true),
         panel('Recent Sessions', `<p class="muted" style="margin:0 0 10px 0">Session timelines and context IDs: see <a href="/sessions">Sessions</a> and <a href="/context">Context</a>.</p><table><caption class="sr-only">Recent capture sessions</caption><thead><tr><th scope="col">Session</th><th scope="col">Events</th><th scope="col">Ended</th></tr></thead><tbody>${data.recent_sessions.map(session => `<tr><td><a href="/sessions/${session.session_id}">${session.session_id}</a></td><td>${session.event_count}</td><td>${session.ended_at ? escapeHtml(formatInstantLocal(session.ended_at)) : ''}</td></tr>`).join('')}</tbody></table>`, true),
-        panel('Fidelity Diagnostics', `<div class="split"><div>${pretty(data.signal_coverage)}</div><div>${pretty(data.activation_diagnostics)}</div></div>`, true),
       );
       odSetMainHtml(parts.join(''));
     }
@@ -2654,7 +2780,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const sessionRows = data.items
         .map((item) => {
           const sid = String(item.session_id || '');
-          const last = sessionLastInstant(item);
+          const last = item.last_activity_at || sessionLastInstant(item);
           const lastDisp = last ? formatInstantLocal(last) : '—';
           return `<tr>
           <td><a href="${sessionHref(sid)}">${escapeHtml(sid)}</a></td>

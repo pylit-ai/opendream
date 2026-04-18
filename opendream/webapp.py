@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import workspace_catalog
+from .integration import emit_event
 from .observability import (
     build_graph,
     create_annotation,
@@ -19,8 +20,9 @@ from .observability import (
     query_retrievals,
     query_runs,
 )
+from .service import service_status
 from .storage import MemoryStore
-from .util import CLI_JSON_VERSION
+from .util import CLI_JSON_VERSION, to_iso, utc_now
 from .validation import SchemaValidationError, validate_document
 
 
@@ -52,6 +54,141 @@ def _parse_query_int(raw: str | None, default: int, *, minimum: int, maximum: in
     except ValueError:
         value = default
     return max(minimum, min(value, maximum))
+
+
+def _health_section(status: str, checked_at: str, reasons: list[str]) -> dict[str, Any]:
+    return {"status": status, "checked_at": checked_at, "reasons": reasons}
+
+
+def _latest_live_check_event(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for event in reversed(events):
+        source = event.get("source", {})
+        if (
+            isinstance(source, dict)
+            and source.get("message_ref") == "observe-live-check"
+            and event.get("sensitivity") == "do_not_store"
+        ):
+            return event
+    return None
+
+
+def _health_payload(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+    checked_at = now or to_iso(utc_now())
+    index = load_or_build_index(store, now=checked_at)
+    overview = index["overview"]
+    freshness = overview.get("freshness", {})
+    snapshot = store.status_snapshot(now=checked_at)
+    service = service_status(store, now=checked_at)
+    events = store.load_events()
+    latest_probe = _latest_live_check_event(events)
+
+    startup = _health_section(
+        "ok",
+        checked_at,
+        [
+            f"observe server bound to workspace {store.workspace}",
+            f"memory root {store.memory_root}",
+        ],
+    )
+
+    readiness_reasons: list[str] = []
+    if not snapshot.get("initialized"):
+        readiness_status = "not_ready"
+        readiness_reasons.append("memory store is not initialized")
+    else:
+        readiness_status = "ready"
+        readiness_reasons.append("observability index is readable")
+        lock = (overview.get("store_health") or {}).get("lock") or {}
+        if lock.get("present") and not lock.get("stale"):
+            readiness_reasons.append("consolidator lock is present; reads are available while writes may be in flight")
+    readiness = _health_section(readiness_status, checked_at, readiness_reasons)
+
+    liveness_reasons: list[str] = []
+    if not snapshot.get("initialized"):
+        liveness_status = "unknown"
+        liveness_reasons.append("workspace has not been initialized yet")
+    elif service.get("installed"):
+        service_health = str(service.get("health", "unknown"))
+        if service_health == "healthy":
+            liveness_status = "live"
+        elif service_health in {"idle", "draining"}:
+            liveness_status = "idle"
+        elif service_health in {"degraded", "stuck", "crash_loop"}:
+            liveness_status = "stale"
+        else:
+            liveness_status = "unknown"
+        liveness_reasons.append(f"background service health is {service_health}")
+    elif freshness.get("last_event_at") or freshness.get("last_run_at") or freshness.get("index_generated_at"):
+        liveness_status = "live"
+        liveness_reasons.append("recent artifacts are readable through the observability index")
+    else:
+        liveness_status = "idle"
+        liveness_reasons.append("no recent event or run evidence is available yet")
+    if snapshot.get("pending_events"):
+        liveness_reasons.append(f"{snapshot['pending_events']} pending event(s) are waiting for maintenance")
+    liveness = _health_section(liveness_status, checked_at, liveness_reasons)
+
+    return {
+        "checked_at": checked_at,
+        "startup": startup,
+        "readiness": readiness,
+        "liveness": liveness,
+        "evidence": {
+            "index_generated_at": freshness.get("index_generated_at"),
+            "last_event_at": freshness.get("last_event_at"),
+            "last_run_at": freshness.get("last_run_at"),
+            "last_session_activity_at": freshness.get("last_session_activity_at"),
+            "last_retrieval_at": freshness.get("last_retrieval_at"),
+            "pending_events": snapshot.get("pending_events", 0),
+            "pending_candidates": snapshot.get("pending_candidates", 0),
+            "memory_total": overview.get("memory_counts", {}).get("total", 0),
+            "contested_memories": overview.get("contested_memories", 0),
+            "service_health": service.get("health"),
+            "service_running": service.get("running"),
+        },
+        "live_check": {
+            "supported": True,
+            "last_probe_at": latest_probe.get("timestamp") if latest_probe else None,
+            "last_probe_event_id": latest_probe.get("event_id") if latest_probe else None,
+            "last_probe_session_id": latest_probe.get("session_id") if latest_probe else None,
+        },
+    }
+
+
+def _run_live_check(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+    checked_at = now or to_iso(utc_now())
+    session_id = "session-observe-live-check"
+    result = emit_event(
+        store,
+        kind="task_outcome",
+        content=f"Observe live check at {checked_at}",
+        scope="workspace",
+        channel="system",
+        message_ref="observe-live-check",
+        session_id=session_id,
+        timestamp=checked_at,
+        tags=["probe:live-check", "key:observe-live-check"],
+        sensitivity="do_not_store",
+        reporting_agent={
+            "agent_id": "opendream",
+            "agent_label": "OpenDream",
+            "runtime": "observe-serve",
+        },
+    )
+    store.mark_events_processed([str(result["event_id"])])
+    health = _health_payload(store, now=checked_at)
+    probe = {
+        "event_id": str(result["event_id"]),
+        "session_id": session_id,
+        "timestamp": checked_at,
+        "observed_in_index": health["live_check"]["last_probe_event_id"] == str(result["event_id"]),
+    }
+    return {
+        "status": "ok",
+        "checked_at": checked_at,
+        "probe": probe,
+        "evidence": health["evidence"],
+    }
 
 
 INDEX_HTML = """<!doctype html>
@@ -242,6 +379,8 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 response = create_annotation(self.store, **payload)
             elif parsed.path == "/api/exports":
                 response = create_export(self.store, **payload)
+            elif parsed.path == "/api/health/live-check":
+                response = _run_live_check(self.store, now=payload.get("now"))
             elif parsed.path.startswith("/api/reviews/"):
                 review_id = parsed.path.split("/")[3]
                 action = parsed.path.split("/")[-1]
@@ -285,6 +424,9 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/ui-meta":
             self._write_json(_ui_meta_payload())
+            return
+        if parsed.path == "/api/health":
+            self._write_json(_health_payload(self.store))
             return
         index = load_or_build_index(self.store)
         entities = index["entities"]
@@ -570,6 +712,7 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
     mem_total = int(overview.get("memory_counts", {}).get("total", 0))
     contested = int(overview.get("contested_memories") or 0)
     pending_events = store.pending_event_count() if initialized else 0
+    freshness = overview.get("freshness", {})
 
     if not initialized:
         kind = "uninitialized"
@@ -594,7 +737,7 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
     else:
         kind = "ok"
         level = "ok"
-        label = "Healthy"
+        label = "Ready"
 
     link_by_kind: dict[str, str] = {
         "uninitialized": "/settings",
@@ -613,6 +756,9 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
         "contested": contested,
         "pending_events": pending_events,
         "lock_present": lock_present,
+        "index_generated_at": freshness.get("index_generated_at"),
+        "last_event_at": freshness.get("last_event_at"),
+        "last_run_at": freshness.get("last_run_at"),
     }
     return payload
 

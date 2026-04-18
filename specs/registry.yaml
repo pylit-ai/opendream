@@ -761,3 +761,24 @@ specs:
       - /workspaces dashboard route renders from the local catalog
       - docs explain both the workspace-scoped state model and the machine-local catalog
       - make verify includes catalog/dashboard tests
+  - id: 442-observe-health-and-live-check
+    title: observe health contract and live end-to-end check
+    status: active
+    owner: platform
+    created: 2026-04-18
+    touched_surfaces:
+      - observability
+      - observability-ui
+      - api
+      - tests
+      - docs
+    depends_on:
+      - 440-advanced-memory-platform-release-bundle
+      - 441-workspace-catalog-dashboard-bundle
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs: []
+    verification:
+      - /api/health reports startup, readiness, liveness, reasons, and freshness without inventing state
+      - live check proves append plus reindex without producing durable memory artifacts
+      - overview makes health evidence and live-check results visible

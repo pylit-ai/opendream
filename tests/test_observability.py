@@ -100,10 +100,27 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         payload = self.get_json("/api/overview")
         self.assertEqual(payload["memory_counts"]["total"], 2)
         self.assertIn("recent_runs", payload)
+        self.assertIn("freshness", payload)
+        self.assertEqual(payload["freshness"]["last_event_at"], FIXED_NOW)
+        self.assertEqual(payload["freshness"]["last_session_activity_at"], FIXED_NOW)
+        self.assertEqual(payload["freshness"]["last_retrieval_at"], FIXED_NOW)
+        self.assertEqual(payload["freshness"]["last_run_at"], FIXED_NOW)
 
         memories = self.get_json("/api/memories")
         self.assertGreaterEqual(memories["total"], 2)
         self.assertEqual(len(memories["items"]), 2)
+
+    def test_health_api_reports_evidence(self) -> None:
+        payload = self.get_json("/api/health")
+        self.assertEqual(payload["startup"]["status"], "ok")
+        self.assertEqual(payload["readiness"]["status"], "ready")
+        self.assertIn(payload["liveness"]["status"], {"live", "idle"})
+        self.assertEqual(payload["evidence"]["last_event_at"], FIXED_NOW)
+        self.assertEqual(payload["evidence"]["last_run_at"], FIXED_NOW)
+        self.assertEqual(payload["evidence"]["pending_events"], 0)
+        self.assertEqual(payload["evidence"]["pending_candidates"], 0)
+        self.assertTrue(payload["live_check"]["supported"])
+        self.assertIsNone(payload["live_check"]["last_probe_at"])
 
     def test_memories_api_pagination_limit_cap_and_range_query(self) -> None:
         page0 = self.get_json("/api/memories?limit=1&offset=0&sort=memory_id&sort_dir=asc")
@@ -222,16 +239,49 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         run = self.get_json(f"/api/runs/{run_id}")
         self.assertIn("phase_traces", run)
         self.assertIn("diff_text", run)
+        self.assertEqual(run["started_at"], FIXED_NOW)
+        self.assertEqual(run["ended_at"], FIXED_NOW)
 
         sessions = self.get_json("/api/sessions")
         self.assertGreaterEqual(len(sessions["items"]), 1)
         session_id = sessions["items"][0]["session_id"]
+        self.assertEqual(sessions["items"][0]["started_at"], FIXED_NOW)
+        self.assertEqual(sessions["items"][0]["ended_at"], FIXED_NOW)
+        self.assertEqual(sessions["items"][0]["last_activity_at"], FIXED_NOW)
         timeline = self.get_json(f"/api/sessions/{session_id}/timeline")
         self.assertIn("timeline", timeline)
 
         graph = self.get_json("/api/graph")
         self.assertIn("nodes", graph)
         self.assertIn("edges", graph)
+
+    def test_server_refreshes_index_when_new_capture_arrives(self) -> None:
+        later = "2026-03-27T12:10:00Z"
+        emit_event(
+            self.store,
+            kind="task_outcome",
+            content="A fresh live capture arrived after observe serve started.",
+            scope="project",
+            channel="cli",
+            message_ref="obs-msg-live",
+            session_id="session-live",
+            timestamp=later,
+            reporting_agent={
+                "agent_id": "claude-code",
+                "agent_label": "Claude Code",
+                "model_id": "claude-opus-4.1",
+                "model_version": "2026-04-17",
+            },
+        )
+        maintain(self.store, now=later)
+
+        sessions = self.get_json("/api/sessions")
+        self.assertEqual(sessions["items"][0]["session_id"], "session-live")
+        self.assertEqual(sessions["items"][0]["last_activity_at"], later)
+
+        overview = self.get_json("/api/overview")
+        self.assertEqual(overview["freshness"]["last_event_at"], later)
+        self.assertEqual(overview["freshness"]["last_run_at"], later)
 
     def test_runs_api_pagination_and_limit_cap(self) -> None:
         page0 = self.get_json("/api/runs?limit=1&offset=0&sort=run_id&sort_dir=asc")
@@ -240,6 +290,21 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertEqual(len(page0["items"]), 1)
         capped = self.get_json("/api/runs?limit=9999&offset=0")
         self.assertLessEqual(len(capped["items"]), 500)
+
+    def test_live_check_appends_probe_without_creating_memory(self) -> None:
+        payload = self.post_json("/api/health/live-check", {})
+        probe = payload["probe"]
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(probe["observed_in_index"])
+        self.assertEqual(payload["evidence"]["last_event_at"], probe["timestamp"])
+        self.assertEqual(payload["evidence"]["pending_events"], 0)
+
+        memories = self.get_json("/api/memories")
+        self.assertEqual(memories["total"], 2)
+
+        health = self.get_json("/api/health")
+        self.assertEqual(health["live_check"]["last_probe_at"], probe["timestamp"])
+        self.assertEqual(health["live_check"]["last_probe_event_id"], probe["event_id"])
 
     def test_review_annotation_export_and_sse_work(self) -> None:
         reviews = self.get_json("/api/reviews")
