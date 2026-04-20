@@ -15,6 +15,8 @@ from .adapter_profiles import (
     install_adapter,
     remove_adapter,
 )
+from .memory_quality import analyze_memory_quality
+from .semantic_readiness import empty_context_pruning
 from .storage import MemoryStore
 from .util import CLI_JSON_VERSION, read_json, stable_id, to_iso, utc_now, write_json
 from .validation import validate_document
@@ -299,16 +301,24 @@ def compressed_status(
         "next_eligible_reason": snapshot["next_eligible_reason"],
         "next_eligible_at": snapshot["next_eligible_at"],
     }
+    semantic_surface = _semantic_quality_surface(store, now=generated_at)
+    operational_next_action = _next_action(store.workspace, overall_state, targets, runtime)
     payload = {
         **snapshot,
         "workspace": str(store.workspace),
         "overall_state": overall_state,
         "targets": targets,
         "runtime": runtime,
-        "next_action": _next_action(store.workspace, overall_state, targets, runtime),
         "activation_state": activation_state,
         "service": service_state,
         "memory_layout": store.memory_layout_advisory(),
+        **semantic_surface,
+        "next_action": (
+            semantic_surface["next_action"]
+            if semantic_surface["semantic_capability_state"] in {"setup_required", "degraded"}
+            else operational_next_action
+        ),
+        "context_pruning": empty_context_pruning(),
         "cli_output_version": CLI_JSON_VERSION,
     }
     validate_document("compressed-status.schema.json", payload)
@@ -369,20 +379,28 @@ def doctor_memory(store: MemoryStore) -> dict[str, Any]:
             "durable_record_count": 0,
             "pending_events": 0,
             "pending_candidates": 0,
+            **_semantic_quality_surface(store),
+            "context_pruning": empty_context_pruning(),
             "hints": [*hints, "Run `opendream init --workspace <path>`."],
             "cli_output_version": CLI_JSON_VERSION,
         }
     store.ensure_layout()
+    semantic_surface = _semantic_quality_surface(store)
+    warnings = semantic_surface["memory_quality"].get("warnings") or []
+    if warnings:
+        hints.extend(str(item.get("remediation", "")).strip() for item in warnings if item.get("remediation"))
     return {
         "generated_at": to_iso(utc_now()),
         "workspace": str(store.workspace),
         "surface": "memory",
-        "status": "healthy",
+        "status": "warning" if warnings else "healthy",
         "memory_layout": ml,
         "durable_record_count": len(store.load_durable_records()),
         "pending_events": store.pending_event_count(),
         "pending_candidates": len(store.load_pending_candidates()),
-        "hints": hints,
+        **semantic_surface,
+        "context_pruning": empty_context_pruning(),
+        "hints": list(dict.fromkeys(hints)),
         "cli_output_version": CLI_JSON_VERSION,
     }
 
@@ -959,3 +977,18 @@ def _next_action(
     if runtime.get("service", {}).get("installed") and not runtime.get("service", {}).get("running"):
         return f"run `opendream service start --workspace {workspace}` if you want background polling"
     return "no action required"
+
+
+def _semantic_quality_surface(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+    report = analyze_memory_quality(store, now=now)
+    posture_map = {
+        "semantic_first": "semantic-first",
+        "deterministic_only": "deterministic-by-choice",
+    }
+    return {
+        "product_posture": posture_map.get(report["product_posture"], str(report["product_posture"])),
+        "semantic_capability_state": report["semantic_capability_state"],
+        "semantic_unavailability_reason": report["semantic_unavailability_reason"],
+        "memory_quality": report["memory_quality"],
+        "next_action": report["next_action"],
+    }

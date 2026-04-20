@@ -5,7 +5,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from . import workspace_catalog
 from .integration import emit_event
@@ -20,13 +20,42 @@ from .observability import (
     query_retrievals,
     query_runs,
 )
+from .semantic_dreamer import dream_status_semantic
 from .service import service_status
 from .storage import MemoryStore
 from .util import CLI_JSON_VERSION, to_iso, utc_now
 from .validation import SchemaValidationError, validate_document
 
-
 _STATIC_ROOT = (Path(__file__).parent / "static").resolve()
+
+
+def _observe_static_asset_version() -> str:
+    """Cache-bust string for observe UI assets (changes when observe-ui.js mtime changes)."""
+    try:
+        return str(int((_STATIC_ROOT / "observe-ui.js").stat().st_mtime))
+    except OSError:
+        return "1"
+
+
+def _index_html() -> str:
+    """INDEX_HTML with versioned /static/* URLs so browsers pick up updated JS/CSS."""
+    v = _observe_static_asset_version()
+    return (
+        INDEX_HTML.replace(
+            'href="/static/observe-ui.css"',
+            f'href="/static/observe-ui.css?v={v}"',
+        )
+        .replace(
+            'href="/static/graph.css"',
+            f'href="/static/graph.css?v={v}"',
+        )
+        .replace(
+            'src="/static/observe-ui.js"',
+            f'src="/static/observe-ui.js?v={v}"',
+        )
+    )
+
+
 _STATIC_MIME_TYPES = {
     ".js": "application/javascript",
     ".css": "text/css",
@@ -37,6 +66,46 @@ _STATIC_MIME_TYPES = {
 _MEMORY_LIST_LIMIT_CAP = 500
 _RETRIEVAL_LIST_LIMIT_CAP = 500
 _RUN_LIST_LIMIT_CAP = 500
+
+
+def _graph_default_focus(index: dict[str, Any]) -> str | None:
+    memories = list(index.get("entities", {}).get("memories", []))
+    if not memories:
+        return None
+    memories.sort(
+        key=lambda item: (
+            str(item.get("updated_at") or item.get("created_at") or ""),
+            str(item.get("memory_id") or ""),
+        ),
+        reverse=True,
+    )
+    focus = memories[0].get("memory_id")
+    return str(focus) if focus else None
+
+
+def _resolve_graph_request(index: dict[str, Any], query: dict[str, str]) -> tuple[str | None, int, str]:
+    explicit_focus = (query.get("focus") or "").strip() or None
+    explicit_depth = (query.get("depth") or "").strip() or None
+    focus = explicit_focus or _graph_default_focus(index)
+    if explicit_depth is not None:
+        depth = _parse_query_int(explicit_depth, 1, minimum=0, maximum=3)
+    else:
+        depth = 2 if explicit_focus is None and focus else 1
+    layout = (query.get("layout") or "").strip() or "hierarchical"
+    return focus, depth, layout
+
+
+def _default_graph_location(index: dict[str, Any], query: dict[str, str]) -> str | None:
+    if (query.get("focus") or "").strip():
+        return None
+    focus, depth, _layout = _resolve_graph_request(index, query)
+    if not focus:
+        return None
+    params = dict(query)
+    params["focus"] = focus
+    if not (query.get("depth") or "").strip():
+        params["depth"] = str(depth)
+    return "/graph?" + urlencode(params)
 
 
 def _parse_query_float(raw: str | None) -> float | None:
@@ -200,9 +269,23 @@ INDEX_HTML = """<!doctype html>
   try {
     var k='opendream-ui-theme';
     var s=localStorage.getItem(k);
-    if(s==='light'||s==='dark') document.documentElement.setAttribute('data-theme',s);
-    else document.documentElement.setAttribute('data-theme', window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
-  } catch(e) { document.documentElement.setAttribute('data-theme','dark'); }
+    var pref=(s==='light'||s==='dark'||s==='system')?s:'system';
+    var resolved;
+    if(pref==='light') resolved='light';
+    else if(pref==='dark') resolved='dark';
+    else resolved=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+    document.documentElement.setAttribute('data-theme-pref', pref);
+    document.documentElement.setAttribute('data-theme', resolved);
+  } catch(e) {
+    document.documentElement.setAttribute('data-theme-pref', 'system');
+    document.documentElement.setAttribute('data-theme','dark');
+  }
+  try {
+    var pk='opendream-ui-palette';
+    var pv=localStorage.getItem(pk);
+    var ok=['default','violet','teal','rose','emerald'];
+    document.documentElement.setAttribute('data-palette', ok.indexOf(pv)>=0 ? pv : 'default');
+  } catch(e4) { document.documentElement.setAttribute('data-palette','default'); }
   try {
     var sk='opendream-sidebar';
     var sv=localStorage.getItem(sk);
@@ -271,12 +354,15 @@ INDEX_HTML = """<!doctype html>
         </ul>
       </nav>
       <div class="sidebar-footer">
-        <div class="theme-toggle" role="group" aria-label="Color theme">
-          <button type="button" data-theme="light" id="theme-btn-light" class="icon-btn" aria-label="Light theme" title="Light theme">
+        <div class="theme-toggle" role="group" aria-label="Appearance">
+          <button type="button" data-theme-pref="light" id="theme-btn-light" class="icon-btn" aria-label="Light theme" title="Light theme">
             <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
           </button>
-          <button type="button" data-theme="dark" id="theme-btn-dark" class="icon-btn" aria-label="Dark theme" title="Dark theme">
+          <button type="button" data-theme-pref="dark" id="theme-btn-dark" class="icon-btn" aria-label="Dark theme" title="Dark theme">
             <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <button type="button" data-theme-pref="system" id="theme-btn-system" class="icon-btn" aria-label="Match system theme" title="Match system">
+            <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </button>
         </div>
       </div>
@@ -293,7 +379,7 @@ INDEX_HTML = """<!doctype html>
             <div class="od-dream-mode-row" id="od-dream-mode-row">
               <div class="od-dream-mode-control">
                 <span id="od-dream-mode-sparkle" class="od-dream-mode-sparkle-wrap" aria-hidden="true" hidden></span>
-                <label for="od-dream-mode-select" class="od-dream-mode-label">Dream pipeline</label>
+                <label for="od-dream-mode-select" class="od-dream-mode-label">Advanced semantic mode</label>
                 <select id="od-dream-mode-select" class="od-dream-mode-select" disabled aria-describedby="od-dream-mode-help">
                   <option value="deterministic" title='Same as opendream semantic config JSON "mode": "deterministic" — consolidation only; semantic synthesis stays off until providers are configured.'>Deterministic only — consolidation only (matches CLI mode deterministic)</option>
                   <option value="hybrid" title='Same as "mode": "hybrid" — run deterministic consolidation, then learned-context / semantic phases.'>Hybrid — consolidation then learned-context (matches CLI mode hybrid)</option>
@@ -301,12 +387,12 @@ INDEX_HTML = """<!doctype html>
                 </select>
                 <span id="od-dream-mode-status" class="od-dream-mode-status muted" aria-live="polite"></span>
               </div>
-              <p id="od-dream-mode-help" class="od-dream-mode-help muted">Updates <code>memory/state/semantic_config.json</code> for this workspace — the same <code>mode</code> field shown by <code>opendream semantic config --workspace …</code> (deterministic only, hybrid, or semantic only). Each <code>opendream dream run --mode …</code> can still override for that run. Does not start workers. Sparkle appears for hybrid or semantic.</p>
+              <p id="od-dream-mode-help" class="od-dream-mode-help muted">This is an advanced control for the raw <code>mode</code> field in <code>memory/state/semantic_config.json</code>. It does not by itself prove semantic readiness. Use <a href="/overview">Overview</a> and <a href="/settings">Settings</a> for readiness, state reason, next action, memory-quality warnings, and pruning evidence. Each <code>opendream dream run --mode …</code> can still override for a single run.</p>
             </div>
             <p id="od-scope-origin" class="od-scope-origin muted"></p>
             <details class="od-scope-about">
               <summary class="od-scope-about-summary muted">About this dashboard</summary>
-              <p class="od-scope-hint muted">The Workspaces page lists every catalog entry on this machine. Overview, Memories, Trace, and Audit tabs show data for the workspace bound to this <code>observe serve</code> process only. <strong>Dream pipeline</strong> mirrors the three <code>mode</code> values from <code>opendream semantic config</code>: deterministic only, hybrid, or semantic only.</p>
+              <p class="od-scope-hint muted">The Workspaces page lists every catalog entry on this machine. Overview, Memories, Trace, and Audit tabs show data for the workspace bound to this <code>observe serve</code> process only. Overview and Settings lead with semantic readiness, degraded fallback, memory-quality warnings, and pruning evidence; the raw mode selector remains available as an advanced control.</p>
             </details>
           </div>
           <div class="od-scope-actions">
@@ -356,6 +442,7 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
         if parsed.path.startswith("/api/stream"):
             self._write_event_stream()
             return
@@ -365,7 +452,15 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/"):
             self._handle_api_get(parsed)
             return
-        self._write_html(INDEX_HTML)
+        if parsed.path == "/graph":
+            index = load_or_build_index(self.store)
+            location = _default_graph_location(index, query)
+            if location:
+                self.send_response(HTTPStatus.FOUND)
+                self.send_header("Location", location)
+                self.end_headers()
+                return
+        self._write_html(_index_html())
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -561,13 +656,15 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             self._write_json(_find_by_id(entities["contexts"], "context_id", context_id) or {})
             return
         if parsed.path == "/api/graph":
+            index = load_or_build_index(self.store)
+            focus, depth, layout = _resolve_graph_request(index, query)
             self._write_json(
                 build_graph(
                     index,
-                    focus=query.get("focus"),
+                    focus=focus,
                     limit=int(query.get("limit", "24")),
-                    depth=int(query.get("depth", "1")),
-                    layout=query.get("layout", "hierarchical"),
+                    depth=depth,
+                    layout=layout,
                 )
             )
             return
@@ -704,6 +801,7 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
 
     index = load_or_build_index(store)
     overview = index["overview"]
+    semantic_status = dream_status_semantic(store)
     sh = overview["store_health"]
     initialized = bool(sh.get("initialized"))
     lock = sh.get("lock") or {}
@@ -713,8 +811,46 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
     contested = int(overview.get("contested_memories") or 0)
     pending_events = store.pending_event_count() if initialized else 0
     freshness = overview.get("freshness", {})
+    product_posture = str(overview.get("product_posture") or "deterministic-by-choice")
+    semantic_capability_state = str(overview.get("semantic_capability_state") or "unknown")
+    semantic_unavailability_reason = overview.get("semantic_unavailability_reason")
+    next_action = overview.get("next_action")
+    memory_quality = overview.get("memory_quality") or {"state": "unknown", "warnings": [], "metrics": {}}
+    context_pruning = overview.get("context_pruning") or {}
+    execution_ownership = overview.get("execution_ownership") or {}
 
-    if not initialized:
+    payload["product_posture"] = product_posture
+    payload["semantic_capability_state"] = semantic_capability_state
+    payload["semantic_unavailability_reason"] = semantic_unavailability_reason
+    payload["next_action"] = next_action
+    payload["memory_quality"] = memory_quality
+    payload["context_pruning"] = context_pruning
+    payload["execution_ownership"] = execution_ownership
+    payload["last_semantic_run"] = {
+        "mode": semantic_status.get("last_semantic_run"),
+        "execution_strategy": semantic_status.get("execution_strategy"),
+        "trust_boundary": semantic_status.get("trust_boundary"),
+        "auth_source": semantic_status.get("auth_source"),
+        "learned_context": semantic_status.get("learned_context"),
+    }
+
+    if product_posture == "semantic-first" and semantic_capability_state == "setup_required":
+        kind = "semantic_setup_required"
+        level = "attention"
+        label = "Semantic setup required"
+    elif product_posture == "semantic-first" and semantic_capability_state == "degraded":
+        kind = "semantic_degraded"
+        level = "warning"
+        label = "Semantic degraded"
+    elif product_posture == "semantic-first" and semantic_capability_state == "ready":
+        kind = "semantic_ready"
+        level = "ok"
+        label = "Semantic ready"
+    elif semantic_capability_state == "disabled_by_choice":
+        kind = "deterministic_choice"
+        level = "neutral"
+        label = "Deterministic by choice"
+    elif not initialized:
         kind = "uninitialized"
         level = "attention"
         label = "Not initialized"
@@ -740,6 +876,10 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
         label = "Ready"
 
     link_by_kind: dict[str, str] = {
+        "semantic_setup_required": "/settings",
+        "semantic_degraded": "/settings",
+        "semantic_ready": "/overview",
+        "deterministic_choice": "/settings",
         "uninitialized": "/settings",
         "locked": "/settings",
         "contested": "/memories?status=contested",
@@ -756,6 +896,10 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
         "contested": contested,
         "pending_events": pending_events,
         "lock_present": lock_present,
+        "product_posture": product_posture,
+        "semantic_capability_state": semantic_capability_state,
+        "semantic_unavailability_reason": semantic_unavailability_reason,
+        "next_action": next_action,
         "index_generated_at": freshness.get("index_generated_at"),
         "last_event_at": freshness.get("last_event_at"),
         "last_run_at": freshness.get("last_run_at"),

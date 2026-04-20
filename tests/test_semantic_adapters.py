@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from opendream.contract_export import build_contract_export
 from opendream.semantic_adapters import (
@@ -32,6 +33,7 @@ from opendream.semantic_ingest import (
 )
 from opendream.semantic_setup import (
     UNSUPPORTED_STRATEGIES,
+    apply_setup_recommendation,
     semantic_setup,
 )
 from opendream.storage import MemoryStore
@@ -177,6 +179,30 @@ class TestSetupWizard(unittest.TestCase):
     def test_setup_has_next_actions(self) -> None:
         report = semantic_setup(self.workspace)
         self.assertIsInstance(report["next_actions"], list)
+
+    def test_apply_setup_recommendation_updates_config_and_scaffolds(self) -> None:
+        store = MemoryStore(self.workspace)
+        store.initialize(store_kind="project")
+        report = {
+            "workspace": str(self.workspace),
+            "preference": "no-extra-key",
+            "recommended_strategy": "codex-account",
+            "candidates": [
+                {"strategy": "codex-account", "supported": True},
+                {"strategy": "deterministic", "supported": True},
+            ],
+        }
+
+        result = apply_setup_recommendation(store, report)
+
+        config = store.load_semantic_config()
+        self.assertEqual(result["applied_strategy"], "codex-account")
+        self.assertEqual(config["mode"], "semantic")
+        self.assertEqual(config["execution_strategy"], "codex-account")
+        self.assertEqual(config["active_adapter"], "codex-account")
+        self.assertEqual(config["candidate_strategies"], ["codex-account", "deterministic"])
+        manifest = self.workspace / ".opendream" / "semantic-adapters" / "codex-account" / "manifest.json"
+        self.assertTrue(manifest.exists())
 
 
 class TestAdapterScaffolding(unittest.TestCase):
@@ -482,6 +508,73 @@ class TestSemanticStatus(unittest.TestCase):
         self.assertEqual(status["execution_strategy"], "deterministic")
         self.assertEqual(status["auth_source"], "none")
 
+    def test_status_reports_setup_required_for_detected_unapplied_strategy(self) -> None:
+        from opendream.semantic_dreamer import dream_status_semantic
+
+        self.store.save_semantic_config(
+            {
+                **self.store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "deterministic",
+                "preferred_auth_mode": "no-extra-key",
+            }
+        )
+
+        with patch(
+            "opendream.semantic_setup.detect_all_tools",
+            return_value={
+                "detected_tools": ["codex"],
+                "details": [
+                    {
+                        "tool": "codex",
+                        "detected": True,
+                        "binary_found": True,
+                        "config_found": True,
+                    }
+                ],
+            },
+        ):
+            status = dream_status_semantic(self.store)
+
+        self.assertEqual(status["semantic_capability_state"], "setup_required")
+        self.assertEqual(status["recommended_strategy"], "codex-account")
+        self.assertIn("codex-account", status["candidate_strategies"])
+
+    def test_status_reports_ready_for_applied_codex_adapter_without_providers(self) -> None:
+        from opendream.semantic_dreamer import dream_status_semantic
+
+        scaffold_adapter(self.workspace, "codex-account")
+        self.store.save_semantic_config(
+            {
+                **self.store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "codex-account",
+                "active_adapter": "codex-account",
+                "candidate_strategies": ["codex-account", "deterministic"],
+                "preferred_auth_mode": "no-extra-key",
+            }
+        )
+
+        with patch(
+            "opendream.semantic_setup.detect_all_tools",
+            return_value={
+                "detected_tools": ["codex"],
+                "details": [
+                    {
+                        "tool": "codex",
+                        "detected": True,
+                        "binary_found": True,
+                        "config_found": True,
+                    }
+                ],
+            },
+        ):
+            status = dream_status_semantic(self.store)
+
+        self.assertTrue(status["available"])
+        self.assertEqual(status["semantic_capability_state"], "ready")
+        self.assertEqual(status["active_adapter"], "codex-account")
+
 
 class TestSecurityPolicy(unittest.TestCase):
     """WS10: Security and unsupported-path policy tests."""
@@ -571,6 +664,16 @@ class TestCLICommands(unittest.TestCase):
             result = run_cli_json("semantic", "setup", "--workspace", str(ws))
             self.assertIn("recommended_strategy", result)
             self.assertIn("blocked_strategies", result)
+
+    def test_semantic_setup_apply_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td) / "ws"
+            ws.mkdir()
+            store = MemoryStore(ws)
+            store.initialize(store_kind="project")
+            result = run_cli_json("semantic", "setup", "--workspace", str(ws), "--apply")
+            self.assertIn("applied", result)
+            self.assertIn("readiness", result)
 
     def test_semantic_adapters_detect_cli(self) -> None:
         with tempfile.TemporaryDirectory() as td:

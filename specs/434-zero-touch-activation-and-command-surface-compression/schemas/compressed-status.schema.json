@@ -5,7 +5,12 @@
     "overall_state",
     "targets",
     "runtime",
-    "next_action"
+    "next_action",
+    "product_posture",
+    "semantic_capability_state",
+    "semantic_unavailability_reason",
+    "memory_quality",
+    "context_pruning"
   ],
   "properties": {
     "workspace": {
@@ -31,6 +36,34 @@
     },
     "next_action": {
       "type": "string"
+    },
+    "product_posture": {
+      "type": "string",
+      "enum": [
+        "semantic-first",
+        "deterministic-by-choice"
+      ]
+    },
+    "semantic_capability_state": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "setup_required",
+        "degraded",
+        "disabled_by_choice"
+      ]
+    },
+    "semantic_unavailability_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "memory_quality": {
+      "type": "object"
+    },
+    "context_pruning": {
+      "type": "object"
     }
   }
 }

@@ -10,10 +10,40 @@ from .extractor import extract_candidates, filter_by_salience
 from .models import ContextAssembly, MemoryEvent, normalize_reporting_agent
 from .retriever import retrieve
 from .storage import STORE_KIND_PRECEDENCE, MemoryStore, store_sort_key
-from .util import CLI_JSON_VERSION, parse_timestamp, stable_id, summarize, to_iso, utc_now
+from .util import (
+    CLI_JSON_VERSION,
+    STOPWORDS,
+    parse_timestamp,
+    semantic_tokens,
+    stable_id,
+    summarize,
+    to_iso,
+    tokenize,
+    utc_now,
+)
 from .validation import validate_document
 
 GLOBAL_ROUTE_BLOCKED_SENSITIVITY = {"secret", "sensitive", "do_not_store"}
+_STARTUP_PROFILE_TERMS = {"bootstrap", "context", "overview", "resume", "startup", "status"}
+_TASK_PROFILE_TERMS = {
+    "analysis",
+    "analyze",
+    "bug",
+    "debug",
+    "deep",
+    "fix",
+    "how",
+    "implement",
+    "investigate",
+    "issue",
+    "repair",
+    "run",
+    "task",
+    "test",
+    "troubleshoot",
+    "update",
+    "workflow",
+}
 
 
 def _store_descriptor(store: MemoryStore) -> dict[str, Any]:
@@ -28,6 +58,95 @@ def _memory_key(record: dict[str, Any]) -> str:
     title = str(record.get("title", ""))
     _, _, suffix = title.partition(":")
     return suffix.strip().lower() or title.strip().lower()
+
+
+def _content_tokens(query: str) -> set[str]:
+    return tokenize(query) - STOPWORDS
+
+
+def _context_profile(query: str, *, limit: int) -> dict[str, Any]:
+    tokens = _content_tokens(query)
+    semantic_query = semantic_tokens(query)
+    startup_hint = bool(tokens & _STARTUP_PROFILE_TERMS or semantic_query & _STARTUP_PROFILE_TERMS)
+    task_hint = bool(tokens & _TASK_PROFILE_TERMS or semantic_query & _TASK_PROFILE_TERMS)
+    if limit >= 8:
+        name = "deep_task"
+        rationale = "higher limit requested, so prepare-context expands deeper task evidence"
+        learned_context_budget = 2
+        startup_budget = min(max(limit, 1), 8)
+    elif startup_hint or (len(tokens) <= 2 and not task_hint):
+        name = "startup"
+        rationale = "query looks like startup orientation, so the output stays pointer-like"
+        learned_context_budget = 0
+        startup_budget = min(max(limit, 1), 4)
+    else:
+        name = "semantic_task"
+        rationale = "query is task-shaped, so prepare-context includes bounded semantic expansion"
+        learned_context_budget = 1
+        startup_budget = min(max(limit, 1), 6)
+    return {
+        "name": name,
+        "rationale": rationale,
+        "learned_context_budget": learned_context_budget,
+        "startup_budget": startup_budget,
+        "pointer_like": name == "startup",
+    }
+
+
+def _score_learned_context(record: dict[str, Any], *, query: str, now: str) -> float:
+    record_text = " ".join(
+        str(record.get(field, ""))
+        for field in ("summary", "details", "assumptions")
+    )
+    record_tokens = _content_tokens(record_text)
+    query_tokens = _content_tokens(query)
+    lexical_score = len(query_tokens & record_tokens) / max(1, len(query_tokens))
+    semantic_score = len(semantic_tokens(query) & semantic_tokens(record_text)) / max(
+        1,
+        len(semantic_tokens(query) | semantic_tokens(record_text)),
+    )
+    score = lexical_score * 3 + semantic_score * 2 + float(record.get("confidence", 0.0))
+    family_tags = {str(item).strip().lower() for item in record.get("query_family_tags", [])}
+    if family_tags & semantic_tokens(query):
+        score += 1.0
+    fresh_until = str(record.get("fresh_until", "") or "")
+    if fresh_until:
+        try:
+            if parse_timestamp(fresh_until) < parse_timestamp(now):
+                score -= 0.3
+        except (TypeError, ValueError):
+            pass
+    if record.get("conflict_state") in {"detected", "overridden"}:
+        score -= 0.5
+    return round(score, 4)
+
+
+def _trim_learned_context_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "record_id": record.get("record_id"),
+        "summary": record.get("summary"),
+        "details": record.get("details", ""),
+        "assumptions": record.get("assumptions", ""),
+        "query_family_tags": record.get("query_family_tags", []),
+        "fresh_until": record.get("fresh_until"),
+        "confidence": record.get("confidence"),
+        "verifier_status": record.get("verifier_status"),
+        "conflict_state": record.get("conflict_state", "none"),
+        "provider_id": record.get("provider_id"),
+        "model_id": record.get("model_id"),
+    }
+
+
+def _representative_text_length(item: dict[str, Any], *, kind: str, pointer_like: bool = False) -> int:
+    if kind == "durable":
+        parts = [str(item.get("title", "")), str(item.get("summary", ""))]
+        if not pointer_like:
+            parts.append(str(item.get("body", "")))
+    elif kind == "learned_context":
+        parts = [str(item.get("summary", "")), str(item.get("details", "")), str(item.get("assumptions", ""))]
+    else:
+        parts = [str(item.get("title", "")), str(item.get("summary", ""))]
+    return len(" ".join(parts).strip())
 
 
 def emit_event(
@@ -331,9 +450,13 @@ def prepare_context(
 ) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
     store_list = [stores] if isinstance(stores, MemoryStore) else sorted(stores, key=store_sort_key)
+    profile = _context_profile(query, limit=limit)
     merged_candidates: list[dict[str, Any]] = []
     startup_entries: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
+    suppressed: list[dict[str, Any]] = []
+    learned_context_candidates: list[dict[str, Any]] = []
+    learned_context_pool: list[dict[str, Any]] = []
     retrieval_run_ids: list[str] = []
 
     for store in store_list:
@@ -379,7 +502,7 @@ def prepare_context(
             )
 
         startup_index = store.load_startup_index()
-        for entry in startup_index.get("entries", [])[: min(4, limit)]:
+        for entry in startup_index.get("entries", [])[: profile["startup_budget"]]:
             startup_entries.append(
                 {
                     "title": entry["title"],
@@ -390,6 +513,93 @@ def prepare_context(
                     "workspace": str(store.workspace),
                 }
             )
+        for record in store.load_learned_context_records():
+            if record.get("status") != "active":
+                suppressed.append(
+                    {
+                        "kind": "learned_context",
+                        "record_id": record.get("record_id"),
+                        "reason": "inactive_learned_context",
+                        "store_id": store.store_id,
+                        "store_kind": store.store_kind,
+                        "workspace": str(store.workspace),
+                    }
+                )
+                continue
+            if record.get("verifier_status") not in {"approved", "review_required"}:
+                suppressed.append(
+                    {
+                        "kind": "learned_context",
+                        "record_id": record.get("record_id"),
+                        "reason": "verifier_not_ready",
+                        "store_id": store.store_id,
+                        "store_kind": store.store_kind,
+                        "workspace": str(store.workspace),
+                    }
+                )
+                continue
+            candidate = {
+                **_trim_learned_context_record(record),
+                "score": _score_learned_context(record, query=query, now=timestamp),
+                "store_id": store.store_id,
+                "store_kind": store.store_kind,
+                "workspace": str(store.workspace),
+            }
+            learned_context_pool.append(candidate)
+            if profile["name"] == "startup":
+                suppressed.append(
+                    {
+                        "kind": "learned_context",
+                        "record_id": record.get("record_id"),
+                        "reason": "startup_profile_keeps_learned_context_pointer_only",
+                        "store_id": store.store_id,
+                        "store_kind": store.store_kind,
+                        "workspace": str(store.workspace),
+                    }
+                )
+                continue
+            if float(candidate["score"]) <= 0:
+                suppressed.append(
+                    {
+                        "kind": "learned_context",
+                        "record_id": record.get("record_id"),
+                        "reason": "weak_match_learned_context",
+                        "store_id": store.store_id,
+                        "store_kind": store.store_kind,
+                        "workspace": str(store.workspace),
+                    }
+                )
+                continue
+            if record.get("conflict_state") in {"detected", "overridden"}:
+                suppressed.append(
+                    {
+                        "kind": "learned_context",
+                        "record_id": record.get("record_id"),
+                        "reason": "conflicted_learned_context",
+                        "store_id": store.store_id,
+                        "store_kind": store.store_kind,
+                        "workspace": str(store.workspace),
+                    }
+                )
+                continue
+            fresh_until = str(record.get("fresh_until", "") or "")
+            if fresh_until:
+                try:
+                    if parse_timestamp(fresh_until) < parse_timestamp(timestamp):
+                        suppressed.append(
+                            {
+                                "kind": "learned_context",
+                                "record_id": record.get("record_id"),
+                                "reason": "stale_learned_context",
+                                "store_id": store.store_id,
+                                "store_kind": store.store_kind,
+                                "workspace": str(store.workspace),
+                            }
+                        )
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            learned_context_candidates.append(candidate)
 
     merged_candidates.sort(
         key=lambda item: (
@@ -440,6 +650,17 @@ def prepare_context(
         )
     )
     selected_automation = automation_candidates[:limit]
+    for item in automation_candidates[limit:]:
+        suppressed.append(
+            {
+                "kind": "automation_projection",
+                "record_id": item["record_id"],
+                "reason": "profile_budget_exceeded",
+                "store_id": item["store_id"],
+                "store_kind": item["store_kind"],
+                "workspace": item["workspace"],
+            }
+        )
 
     startup_lines = ["## Startup Index"]
     startup_entries.sort(
@@ -456,12 +677,39 @@ def prepare_context(
             continue
         startup_seen_keys.add(entry["key"])
         filtered_startup_entries.append(entry)
-        if len(filtered_startup_entries) >= max(limit * 2, 1):
+        if len(filtered_startup_entries) >= profile["startup_budget"]:
             break
 
     for entry in filtered_startup_entries:
-        startup_lines.append(
-            f"- [{entry['store_kind']}] [{entry['type']}] {entry['title']} :: {entry['summary']} ({entry['workspace']})"
+        if profile["pointer_like"]:
+            startup_lines.append(
+                f"- [{entry['store_kind']}] [{entry['type']}] {entry['title']} ({entry['workspace']})"
+            )
+        else:
+            startup_lines.append(
+                f"- [{entry['store_kind']}] [{entry['type']}] "
+                f"{entry['title']} :: {entry['summary']} ({entry['workspace']})"
+            )
+
+    learned_context_candidates.sort(
+        key=lambda item: (
+            STORE_KIND_PRECEDENCE.get(item["store_kind"], 99),
+            -float(item["score"]),
+            str(item.get("summary", "")),
+            item["workspace"],
+        )
+    )
+    selected_learned_context = learned_context_candidates[: profile["learned_context_budget"]]
+    for item in learned_context_candidates[profile["learned_context_budget"]:]:
+        suppressed.append(
+            {
+                "kind": "learned_context",
+                "record_id": item["record_id"],
+                "reason": "profile_budget_exceeded",
+                "store_id": item["store_id"],
+                "store_kind": item["store_kind"],
+                "workspace": item["workspace"],
+            }
         )
 
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -472,6 +720,11 @@ def prepare_context(
     for store_kind, workspace in sorted(grouped, key=lambda item: (STORE_KIND_PRECEDENCE.get(item[0], 99), item[1])):
         selected_sections.extend([f"### {store_kind} store :: {workspace}", ""])
         for item in grouped[(store_kind, workspace)]:
+            if profile["pointer_like"]:
+                selected_sections.append(
+                    f"- [{item['type']}] {item['title']} :: {item['summary']} (score={item['score']})"
+                )
+                continue
             selected_sections.extend(
                 [
                     f"#### {item['title']}",
@@ -484,14 +737,34 @@ def prepare_context(
                 ]
             )
 
+    learned_sections = ["## Learned Context"]
+    if selected_learned_context:
+        for item in selected_learned_context:
+            learned_sections.extend(
+                [
+                    f"### {item['summary']}",
+                    f"- score: {item['score']}",
+                    f"- freshness: {item.get('fresh_until', 'unknown')}",
+                    f"- query_families: {', '.join(item.get('query_family_tags', [])) or 'none'}",
+                    item.get("details", ""),
+                    item.get("assumptions", ""),
+                    "",
+                ]
+            )
+    else:
+        learned_sections.append("- none")
+
     prompt_context = "\n".join(
         [
             "# OpenDream Memory Context",
             f"Query: {query}",
+            f"Profile: {profile['name']}",
             "",
             *startup_lines,
             "",
             *selected_sections,
+            "",
+            *learned_sections,
             "",
             "## Active Automation Projections",
             *(
@@ -507,8 +780,16 @@ def prepare_context(
 
     primary_store = store_list[0]
     selected_ids = [item["memory_id"] for item in selected]
+    selected_learned_ids = [str(item.get("record_id") or "") for item in selected_learned_context]
     omitted = [item for item in excluded if item.get("memory_id") not in selected_ids]
-    context_id = stable_id("context", timestamp, query, ",".join(selected_ids))
+    context_id = stable_id(
+        "context",
+        timestamp,
+        query,
+        profile["name"],
+        ",".join(selected_ids),
+        ",".join(selected_learned_ids),
+    )
     assembly = ContextAssembly(
         context_id=context_id,
         session_id=stable_id("session", query),
@@ -550,13 +831,90 @@ def prepare_context(
         empty_reason = None
         hints = []
 
+    candidate_count = (
+        len(merged_candidates)
+        + len(filtered_startup_entries)
+        + len(learned_context_pool)
+        + len(automation_candidates)
+    )
+    injected_count = (
+        len(selected)
+        + len(filtered_startup_entries)
+        + len(selected_learned_context)
+        + len(selected_automation)
+    )
+    raw_character_count = sum(
+        _representative_text_length(item, kind="durable")
+        for item in merged_candidates
+    ) + sum(
+        _representative_text_length(item, kind="startup", pointer_like=True)
+        for item in filtered_startup_entries
+    ) + sum(
+        _representative_text_length(item, kind="learned_context")
+        for item in learned_context_pool
+    ) + sum(
+        _representative_text_length(item, kind="automation")
+        for item in automation_candidates
+    )
+    injected_character_count = sum(
+        _representative_text_length(item, kind="durable", pointer_like=profile["pointer_like"])
+        for item in selected
+    ) + sum(
+        _representative_text_length(item, kind="startup", pointer_like=True)
+        for item in filtered_startup_entries
+    ) + sum(
+        _representative_text_length(item, kind="learned_context")
+        for item in selected_learned_context
+    ) + sum(
+        _representative_text_length(item, kind="automation")
+        for item in selected_automation
+    )
+    suppression_counts: dict[str, int] = defaultdict(int)
+    for item in [*omitted, *suppressed]:
+        suppression_counts[str(item.get("reason") or "unspecified")] += 1
+
     return {
         "workspace": str(store_list[0].workspace) if len(store_list) == 1 else None,
         "stores": [_store_descriptor(store) for store in store_list],
         "context_id": context_id,
+        "profile": profile,
+        "selection": {
+            "startup_index": {
+                "candidate_count": len(startup_entries),
+                "selected": len(filtered_startup_entries),
+            },
+            "durable_memory": {
+                "candidate_count": len(merged_candidates),
+                "selected": len(selected),
+            },
+            "learned_context": {
+                "candidate_count": len(learned_context_pool),
+                "selected": len(selected_learned_context),
+            },
+            "automation": {
+                "candidate_count": len(automation_candidates),
+                "selected": len(selected_automation),
+            },
+        },
+        "suppressed": [*omitted, *suppressed],
+        "suppression_summary": dict(sorted(suppression_counts.items())),
+        "context_pruning": {
+            "candidate_count": candidate_count,
+            "injected_count": injected_count,
+            "suppressed_count": max(candidate_count - injected_count, 0),
+            "saved_records": max(candidate_count - injected_count, 0),
+            "raw_characters": raw_character_count,
+            "injected_characters": injected_character_count,
+            "saved_characters": max(raw_character_count - injected_character_count, 0),
+            "raw_token_estimate": max(1, raw_character_count // 4) if raw_character_count else 0,
+            "injected_token_estimate": max(1, injected_character_count // 4) if injected_character_count else 0,
+            "saved_token_estimate": max((raw_character_count - injected_character_count) // 4, 0),
+        },
         "selected_memory_ids": selected_ids,
+        "selected_learned_context_ids": selected_learned_ids,
         "selected_automation_record_ids": [item["record_id"] for item in selected_automation],
         "selected_memories": selected,
+        "selected_learned_context_records": selected_learned_context,
         "selected_automation_records": selected_automation,
         "omitted": omitted,
         "why": [

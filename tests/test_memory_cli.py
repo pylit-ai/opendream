@@ -115,6 +115,11 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             args.extend(["--sensitivity", sensitivity])
         return run_cli(*args)
 
+    def write_learned_context_records(self, workspace: Path, *records: dict[str, object]) -> None:
+        store = MemoryStore(workspace)
+        existing = store.load_learned_context_records()
+        store.save_learned_context_records([*existing, *records])
+
     def test_demo_creates_reproducible_artifacts(self) -> None:
         result = run_cli("demo", "--workspace", str(self.workspace), "--now", FIXED_NOW)
         memory_root = self.workspace / DEFAULT_MEMORY_DIR
@@ -608,6 +613,257 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn("Prefer bat for paging output.", context["prompt_context"])
         self.assertTrue(any(item["store_kind"] == "global" for item in context["selected_memories"]))
         self.assertTrue(any(item["store_kind"] == "project" for item in context["selected_memories"]))
+
+    def test_prepare_context_startup_profile_stays_pointer_like(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        self.emit_runtime_event(
+            self.workspace,
+            kind="project_decision",
+            content="Use pnpm for workspace dependencies and keep install scripts deterministic.",
+            message_ref="startup-project-1",
+            tag="key:package-manager",
+        )
+        self.emit_runtime_event(
+            self.workspace,
+            kind="environment_requirement",
+            content="Redis is required for background jobs and local smoke runs.",
+            message_ref="startup-env-1",
+            tag="key:redis",
+        )
+        run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        self.write_learned_context_records(
+            self.workspace,
+            {
+                "record_id": "learned-startup-1",
+                "workspace_id": str(self.workspace),
+                "source_event_ids": ["startup-project-1"],
+                "query_family_tags": ["startup", "overview", "setup"],
+                "summary": "Startup tasks usually need package manager and service pointers only.",
+                "details": "Expand learned context only after a concrete task asks for operational detail.",
+                "assumptions": "Startup context should stay compact.",
+                "provider_id": "codex-local",
+                "model_id": "gpt-5.4",
+                "prompt_version": "v1",
+                "created_at": FIXED_NOW,
+                "fresh_until": "2026-04-26T12:00:00Z",
+                "confidence": 0.87,
+                "verifier_status": "approved",
+                "conflict_state": "none",
+                "promotion_target": "learned_context",
+                "status": "active",
+            },
+        )
+
+        context = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "startup overview",
+            "--now",
+            FIXED_NOW,
+        )
+
+        self.assertEqual(context["profile"]["name"], "startup")
+        self.assertEqual(context["selected_learned_context_records"], [])
+        self.assertEqual(context["selection"]["learned_context"]["selected"], 0)
+        self.assertGreaterEqual(context["selection"]["startup_index"]["selected"], 1)
+        self.assertGreater(context["context_pruning"]["candidate_count"], context["context_pruning"]["injected_count"])
+        self.assertNotIn("####", context["prompt_context"])
+        self.assertNotIn(
+            "Expand learned context only after a concrete task asks for operational detail.",
+            context["prompt_context"],
+        )
+        self.assertTrue(
+            any(
+                item["reason"] == "startup_profile_keeps_learned_context_pointer_only"
+                for item in context["suppressed"]
+            )
+        )
+
+    def test_prepare_context_semantic_task_profile_bounds_learned_context(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        self.emit_runtime_event(
+            self.workspace,
+            kind="project_decision",
+            content="Use pnpm for workspace dependencies and workspace scripts.",
+            message_ref="task-project-1",
+            tag="key:package-manager",
+        )
+        self.emit_runtime_event(
+            self.workspace,
+            kind="environment_requirement",
+            content="Redis is required for background jobs and semantic workers.",
+            message_ref="task-env-1",
+            tag="key:redis",
+        )
+        run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        self.write_learned_context_records(
+            self.workspace,
+            {
+                "record_id": "learned-task-1",
+                "workspace_id": str(self.workspace),
+                "source_event_ids": ["task-project-1"],
+                "query_family_tags": ["workflow", "dependencies", "setup"],
+                "summary": "When updating dependencies, check pnpm workspace constraints first.",
+                "details": "Run pnpm install, then verify Redis-backed jobs against the same lockfile.",
+                "assumptions": "Dependencies and runtime services stay coupled in this repo.",
+                "provider_id": "codex-local",
+                "model_id": "gpt-5.4",
+                "prompt_version": "v1",
+                "created_at": FIXED_NOW,
+                "fresh_until": "2026-04-26T12:00:00Z",
+                "confidence": 0.91,
+                "verifier_status": "approved",
+                "conflict_state": "none",
+                "promotion_target": "learned_context",
+                "status": "active",
+            },
+            {
+                "record_id": "learned-task-2",
+                "workspace_id": str(self.workspace),
+                "source_event_ids": ["task-env-1"],
+                "query_family_tags": ["workflow", "jobs", "redis"],
+                "summary": "Redis checks matter after dependency changes.",
+                "details": "Confirm the worker boots cleanly before treating the dependency task as complete.",
+                "assumptions": "The job runner remains local-first.",
+                "provider_id": "codex-local",
+                "model_id": "gpt-5.4",
+                "prompt_version": "v1",
+                "created_at": FIXED_NOW,
+                "fresh_until": "2026-04-26T12:00:00Z",
+                "confidence": 0.78,
+                "verifier_status": "approved",
+                "conflict_state": "none",
+                "promotion_target": "learned_context",
+                "status": "active",
+            },
+        )
+
+        context = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "how should I update the package manager workflow for redis jobs",
+            "--now",
+            FIXED_NOW,
+        )
+
+        self.assertEqual(context["profile"]["name"], "semantic_task")
+        self.assertEqual(len(context["selected_learned_context_records"]), 1)
+        self.assertEqual(context["selection"]["learned_context"]["selected"], 1)
+        self.assertEqual(context["profile"]["learned_context_budget"], 1)
+        self.assertIn("## Learned Context", context["prompt_context"])
+        self.assertIn(
+            "Run pnpm install, then verify Redis-backed jobs against the same lockfile.",
+            context["prompt_context"],
+        )
+        self.assertTrue(any(item["reason"] == "profile_budget_exceeded" for item in context["suppressed"]))
+
+    def test_prepare_context_deep_task_profile_expands_learned_context_budget(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        self.emit_runtime_event(
+            self.workspace,
+            kind="project_decision",
+            content="Use pnpm for workspace dependencies and workspace scripts.",
+            message_ref="deep-project-1",
+            tag="key:package-manager",
+        )
+        self.emit_runtime_event(
+            self.workspace,
+            kind="environment_requirement",
+            content="Redis is required for background jobs and semantic workers.",
+            message_ref="deep-env-1",
+            tag="key:redis",
+        )
+        run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        self.write_learned_context_records(
+            self.workspace,
+            {
+                "record_id": "learned-deep-1",
+                "workspace_id": str(self.workspace),
+                "source_event_ids": ["deep-project-1"],
+                "query_family_tags": ["workflow", "dependencies", "setup"],
+                "summary": "Dependency changes should preserve pnpm workspace invariants.",
+                "details": "Check workspace filters, lockfile drift, and install hooks before merging.",
+                "assumptions": "The repo keeps one package-manager policy.",
+                "provider_id": "codex-local",
+                "model_id": "gpt-5.4",
+                "prompt_version": "v1",
+                "created_at": FIXED_NOW,
+                "fresh_until": "2026-04-26T12:00:00Z",
+                "confidence": 0.93,
+                "verifier_status": "approved",
+                "conflict_state": "none",
+                "promotion_target": "learned_context",
+                "status": "active",
+            },
+            {
+                "record_id": "learned-deep-2",
+                "workspace_id": str(self.workspace),
+                "source_event_ids": ["deep-env-1"],
+                "query_family_tags": ["workflow", "redis", "jobs"],
+                "summary": "Redis-backed jobs need an explicit smoke pass after dependency work.",
+                "details": "Validate worker boot, queue reachability, and at least one end-to-end job.",
+                "assumptions": "The operator wants deeper task context, not startup pointers.",
+                "provider_id": "codex-local",
+                "model_id": "gpt-5.4",
+                "prompt_version": "v1",
+                "created_at": FIXED_NOW,
+                "fresh_until": "2026-04-26T12:00:00Z",
+                "confidence": 0.86,
+                "verifier_status": "approved",
+                "conflict_state": "none",
+                "promotion_target": "learned_context",
+                "status": "active",
+            },
+            {
+                "record_id": "learned-deep-3",
+                "workspace_id": str(self.workspace),
+                "source_event_ids": ["deep-env-1"],
+                "query_family_tags": ["workflow", "redis", "analysis"],
+                "summary": "Deep investigations should keep one additional Redis troubleshooting note.",
+                "details": "Capture queue inspection commands and worker diagnostics only in the deep profile.",
+                "assumptions": "This note is useful only when the operator explicitly asks for deeper context.",
+                "provider_id": "codex-local",
+                "model_id": "gpt-5.4",
+                "prompt_version": "v1",
+                "created_at": FIXED_NOW,
+                "fresh_until": "2026-04-26T12:00:00Z",
+                "confidence": 0.71,
+                "verifier_status": "approved",
+                "conflict_state": "none",
+                "promotion_target": "learned_context",
+                "status": "active",
+            },
+        )
+
+        context = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "deep analysis for updating the package manager workflow and redis background jobs",
+            "--limit",
+            "8",
+            "--now",
+            FIXED_NOW,
+        )
+
+        self.assertEqual(context["profile"]["name"], "deep_task")
+        self.assertEqual(context["profile"]["learned_context_budget"], 2)
+        self.assertEqual(len(context["selected_learned_context_records"]), 2)
+        self.assertEqual(context["selection"]["learned_context"]["selected"], 2)
+        self.assertIn(
+            "Check workspace filters, lockfile drift, and install hooks before merging.",
+            context["prompt_context"],
+        )
+        self.assertIn(
+            "Validate worker boot, queue reachability, and at least one end-to-end job.",
+            context["prompt_context"],
+        )
+        self.assertGreaterEqual(context["context_pruning"]["saved_characters"], 1)
 
     def test_maintain_supports_store_manifests(self) -> None:
         run_cli("init", "--workspace", str(self.global_workspace), "--store-kind", "global")
@@ -1581,6 +1837,61 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         repair = run_cli("activate", "--workspace", str(self.workspace), "--repair")
         self.assertEqual(repair["status"], "repaired")
         self.assertTrue(damaged.exists())
+
+    def test_repair_shorthand_repairs_drift(self) -> None:
+        codex_config = self.workspace / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+
+        run_cli("activate", "--workspace", str(self.workspace), "--targets", "configured")
+
+        damaged = self.workspace / ".opendream" / "hooks" / "codex-post-task.sh"
+        damaged.unlink()
+
+        repair = run_cli("repair", "--workspace", str(self.workspace))
+        self.assertEqual(repair["status"], "repaired")
+        self.assertTrue(damaged.exists())
+
+    def test_workspace_upgrade_repairs_and_refreshes_catalog(self) -> None:
+        previous_catalog_home = os.environ.get("OPENDREAM_CATALOG_HOME")
+        catalog_home = Path(self.temp_dir.name) / "catalog"
+        os.environ["OPENDREAM_CATALOG_HOME"] = str(catalog_home)
+        try:
+            codex_config = self.workspace / ".codex" / "config.toml"
+            codex_config.parent.mkdir(parents=True, exist_ok=True)
+            codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+
+            run_cli("init", "--workspace", str(self.workspace), "--activate-configured")
+            run_cli("workspace", "forget", "--workspace", str(self.workspace))
+
+            damaged = self.workspace / ".opendream" / "hooks" / "codex-post-task.sh"
+            damaged.unlink()
+
+            upgraded = run_cli("workspace", "upgrade", "--workspace", str(self.workspace))
+            self.assertEqual(upgraded["status"], "completed")
+            self.assertEqual(upgraded["workspace_count"], 1)
+            self.assertEqual(upgraded["upgraded_count"], 1)
+            self.assertEqual(upgraded["skipped_count"], 0)
+            self.assertEqual(len(upgraded["workspaces"]), 1)
+            self.assertEqual(upgraded["workspaces"][0]["status"], "completed")
+            self.assertEqual(upgraded["workspaces"][0]["activation_repair_status"], "repaired")
+            self.assertEqual(upgraded["workspaces"][0]["catalog_status_kind"], "ok")
+            self.assertTrue(damaged.exists())
+
+            refreshed = run_cli("workspace", "inspect", "--workspace", str(self.workspace))
+            self.assertEqual(refreshed["status"], "ok")
+            self.assertEqual(refreshed["entry"]["status_kind"], "ok")
+        finally:
+            if previous_catalog_home is None:
+                os.environ.pop("OPENDREAM_CATALOG_HOME", None)
+            else:
+                os.environ["OPENDREAM_CATALOG_HOME"] = previous_catalog_home
+
+    def test_top_level_upgrade_error_points_to_installer_and_workspace_refresh(self) -> None:
+        completed = run_cli_raw("upgrade", "--workspace", str(self.workspace), check=False)
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("uv tool upgrade opendream", completed.stderr)
+        self.assertIn('opendream workspace upgrade --workspace "$PWD"', completed.stderr)
 
     def test_init_activate_configured_returns_activation_report(self) -> None:
         codex_config = self.workspace / ".codex" / "config.toml"

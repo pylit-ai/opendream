@@ -171,11 +171,11 @@ def semantic_setup(
     elif recommended == "direct-provider":
         next_actions.append(
             "Set ANTHROPIC_API_KEY or OPENAI_API_KEY,"
-            " then run: opendream semantic bootstrap --workspace ."
+            " then run: opendream semantic setup --workspace . --prefer direct-provider --apply"
         )
     elif recommended in BUILTIN_MANIFESTS:
         next_actions.append(
-            f"Run: opendream semantic adapters scaffold --workspace . --adapter {recommended}"
+            f"Run: opendream semantic setup --workspace . --prefer {preference} --apply"
         )
         next_actions.append("Run: opendream semantic bootstrap --workspace .")
 
@@ -220,6 +220,8 @@ def apply_setup_recommendation(
     preference = report.get("preference", "no-extra-key")
 
     config = store.load_semantic_config()
+    if strategy != "deterministic":
+        config["mode"] = "semantic"
     config["execution_strategy"] = strategy
     config["preferred_auth_mode"] = preference
 

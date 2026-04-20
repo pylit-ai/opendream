@@ -7,9 +7,12 @@ contracts, CLI inspection, and tests for missing credentials / fallback policy.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from .models import ProviderEntry
+from .semantic_adapters import BUILTIN_MANIFESTS
+from .semantic_setup import semantic_setup
 from .storage import MemoryStore
 from .util import to_iso, utc_now
 
@@ -132,22 +135,100 @@ def get_provider_for_role(store: MemoryStore, role: str) -> dict[str, Any] | Non
 
 
 def semantic_mode_available(store: MemoryStore) -> dict[str, Any]:
-    """Check if semantic mode is available (providers configured and healthy)."""
+    """Check semantic capability truthfully for provider and adapter paths."""
     config = store.load_semantic_config()
-    mode = config.get("mode", "deterministic")
+    mode = str(config.get("mode", "deterministic") or "deterministic")
+    preference = str(config.get("preferred_auth_mode", "no-extra-key") or "no-extra-key")
+    execution_strategy = str(config.get("execution_strategy", "deterministic") or "deterministic")
+    active_adapter = config.get("active_adapter")
+    setup_report = semantic_setup(store.workspace, preference=preference)
+    supported_candidates = [
+        str(candidate["strategy"])
+        for candidate in setup_report.get("candidates", [])
+        if candidate.get("supported")
+    ]
+    supported_non_deterministic = [
+        strategy for strategy in supported_candidates if strategy != "deterministic"
+    ]
+    recommended_strategy = str(setup_report.get("recommended_strategy", "deterministic") or "deterministic")
+    result: dict[str, Any] = {
+        "mode": mode,
+        "execution_strategy": execution_strategy,
+        "active_adapter": active_adapter,
+        "preferred_auth_mode": preference,
+        "candidate_strategies": supported_candidates,
+        "recommended_strategy": recommended_strategy,
+        "detected_tools": list(setup_report.get("detected_tools", [])),
+    }
+
     if mode == "deterministic":
         return {
+            **result,
             "available": False,
-            "mode": mode,
+            "semantic_capability_state": "disabled_by_choice",
             "reason": "mode is deterministic",
+            "next_action": "re-enable semantic mode when you want semantic memory value",
+        }
+
+    if execution_strategy == "deterministic":
+        reason = (
+            f"recommended strategy {recommended_strategy} is available but has not been applied"
+            if recommended_strategy != "deterministic"
+            else "no runnable semantic path is configured yet"
+        )
+        next_action = (
+            "apply the recommended semantic strategy"
+            if recommended_strategy != "deterministic"
+            else "configure a semantic provider or delegated adapter"
+        )
+        return {
+            **result,
+            "available": False,
+            "semantic_capability_state": "setup_required",
+            "reason": reason,
+            "next_action": next_action,
+        }
+
+    if execution_strategy in BUILTIN_MANIFESTS:
+        manifest_path = (
+            Path(store.workspace)
+            / ".opendream"
+            / "semantic-adapters"
+            / execution_strategy
+            / "manifest.json"
+        )
+        if execution_strategy not in supported_non_deterministic:
+            return {
+                **result,
+                "available": False,
+                "semantic_capability_state": "degraded",
+                "reason": f"applied strategy {execution_strategy} is no longer detected in this environment",
+                "next_action": "repair the semantic path and re-run setup",
+            }
+        if not manifest_path.exists():
+            return {
+                **result,
+                "available": False,
+                "semantic_capability_state": "degraded",
+                "reason": f"adapter scaffold for {execution_strategy} is missing",
+                "next_action": "repair the semantic path and re-run setup",
+            }
+        return {
+            **result,
+            "available": True,
+            "semantic_capability_state": "ready",
+            "reason": None,
+            "next_action": "none",
         }
 
     providers = store.load_provider_registry()
     if not providers:
         return {
+            **result,
             "available": False,
-            "mode": mode,
+            "semantic_capability_state": "degraded",
             "reason": "no providers registered",
+            "next_action": "configure a semantic provider or delegated adapter",
         }
 
     # Check required roles
@@ -161,15 +242,20 @@ def semantic_mode_available(store: MemoryStore) -> dict[str, Any]:
     if missing_roles:
         fallback = config.get("fallback_policy", "fallback_to_deterministic")
         return {
+            **result,
             "available": False,
-            "mode": mode,
+            "semantic_capability_state": "degraded",
             "reason": f"missing provider roles: {', '.join(sorted(missing_roles))}",
             "fallback_policy": fallback,
+            "next_action": "repair the semantic path and re-run setup",
         }
 
     return {
+        **result,
         "available": True,
-        "mode": mode,
+        "semantic_capability_state": "ready",
+        "reason": None,
+        "next_action": "none",
         "healthy_providers": sum(1 for p in providers if p.get("health_status") == "healthy"),
         "available_roles": sorted(available_roles),
     }

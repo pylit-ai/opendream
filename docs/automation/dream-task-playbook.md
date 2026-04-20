@@ -8,6 +8,8 @@ Canonical guide for wiring **recurring automation dreams** in OpenDream: capture
 
 **Clarification:** **Transcript `dream`** (episodes → consolidation / optional semantic pipeline) and **automation radar** (`automation register|run` projecting durable memory) are different subsystems. Feature mining uses **automation** + Layer A capture; see the setup guide above.
 
+**Semantic-first posture note:** this playbook assumes OpenDream prefers a semantic-first posture, but that posture is not a promise that semantic execution is currently ready. If the semantic path is unavailable, operators should see an explicit **degraded** state, a concrete reason, and one next action rather than a misleading "semantic" label.
+
 If you maintain repo-local agent skills or commands for this workflow, keep them aligned with this playbook rather than duplicating policy here.
 
 ---
@@ -30,6 +32,7 @@ Automation is the **radar**: it surfaces what already exists in durable memory u
 2. **Active memory root:** run `opendream doctor --surface memory` and use `memory_layout.active_memory_root` as the only store you reason about.
 3. **Initialized store** with ingest + `maintain` working (durable memories exist) before automation jobs return useful rows.
 4. **Operators:** use `opendream tick` for maintenance **and** due automation jobs; use `opendream automation tick` for automation only. Reserve `--now` for **tests and repros**, not production cron.
+5. **Truthful status:** before calling a workflow semantic-ready, confirm that `opendream status`, `workspace doctor`, or `/overview` reports readiness rather than degraded fallback.
 
 ---
 
@@ -97,6 +100,7 @@ When you have an explicit API key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) or u
    - recent `opendream prepare-context` output for the same workspace,
    - short **git diff** or dependency manifest delta,
    - optional research notes with citations.
+   - inspect the context metadata, not just the prompt body: the active profile, suppressed items, and pruning deltas should show whether progressive disclosure is actually working
 3. **Outputs:** only **`emit-event`** calls (or edits to repo-native canonical file **plus** mirroring events). Prefer events such as: supersede, defer, `obsolete_reason`, merge-with-id — whatever your Layer A taxonomy defines.
 4. **Abstention:** if evidence is weak, emit a **single** `review_requested` (or equivalent) instead of mass-updating.
 5. **Follow-up:** `opendream maintain --workspace "$PWD"` then `opendream tick --workspace "$PWD"` so projections refresh.
@@ -112,6 +116,8 @@ When using `claude-scheduled-task` or `cursor-automation`, the vendor runtime ow
 5. **Follow-up:** same as 6a step 5.
 
 **Key distinction:** In delegated mode, OpenDream does not directly call the model. The vendor runtime owns execution; OpenDream owns memory, validation, and promotion. Docs and status surfaces must reflect this accurately.
+
+**Quality expectation:** semantic refresh is only differentiated if it improves context quality. If `prepare-context` keeps returning flat, homogeneous memory or no measurable pruning advantage, treat that as a memory-quality warning to investigate, not as a healthy semantic result.
 
 ---
 
@@ -169,6 +175,8 @@ Automation behavior is covered by integration tests under `tests/test_memory_cli
 | Everything goes `stale` too fast | `stale_after_runs` too low or selectors too narrow | Widen types or raise N. |
 | Wrong backlog promoted | Treating projections as SoT | Promote only via explicit events/specs; keep playbook §3 in team docs. |
 | Stale ideas never leave | Only Layer B in use | Add Layer C; Layer B alone cannot infer “framework X obsolete.” |
+| Workspace says semantic but acts deterministic | `mode=semantic` configured without a runnable semantic path | Treat as degraded semantic-first, run `semantic setup` / inspect status, and surface the next action instead of claiming readiness. |
+| Context previews stay bloated | Progressive disclosure not pruning enough candidates | Check `prepare-context` metadata for profile, candidate counts, injected counts, and suppression reasons; tune selectors or semantic setup before trusting the output. |
 
 ---
 

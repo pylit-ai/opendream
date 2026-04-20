@@ -113,6 +113,17 @@
           "type": "object"
         }
       }
+    },
+    "semantic_read_model_contract": {
+      "type": "object",
+      "required": ["required_fields"],
+      "additionalProperties": false,
+      "properties": {
+        "required_fields": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
     }
   }
 }

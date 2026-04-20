@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .semantic_readiness import SEMANTIC_READ_MODEL_FIELDS
 from .util import CLI_JSON_VERSION, SCHEMA_ROOT
 
 
@@ -129,4 +130,7 @@ def build_contract_export(_workspace: Path) -> dict[str, Any]:
         "semantic_adapter_inventory": adapter_inventory,
         "semantic_auth_matrix": auth_matrix,
         "execution_ownership": execution_ownership,
+        "semantic_read_model_contract": {
+            "required_fields": SEMANTIC_READ_MODEL_FIELDS,
+        },
     }

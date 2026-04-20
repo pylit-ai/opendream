@@ -415,13 +415,17 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
     return {
         "mode": config.get("mode", "deterministic"),
         "available": availability.get("available", False),
+        "semantic_capability_state": availability.get("semantic_capability_state", "unknown"),
         "availability_reason": availability.get("reason", ""),
         "fallback_policy": config.get("fallback_policy", "fallback_to_deterministic"),
         "execution_strategy": execution_strategy,
         "preferred_auth_mode": preferred_auth_mode,
         "active_adapter": active_adapter,
         "auth_source": auth_source_map.get(execution_strategy, "none"),
-        "candidate_strategies": candidate_strategies,
+        "candidate_strategies": availability.get("candidate_strategies", candidate_strategies),
+        "recommended_strategy": availability.get("recommended_strategy"),
+        "detected_tools": availability.get("detected_tools", []),
+        "next_action": availability.get("next_action", "none"),
         "learned_context": {
             "total": len(learned_records),
             "active": len(active_learned),

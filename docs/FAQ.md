@@ -61,9 +61,11 @@ A: Not always. If you have Codex, Claude, or Cursor installed, `opendream semant
 
 Semantic mode adds an extended **learned-context pipeline** (anticipation, proposal synthesis, verification, promotion) on top of dreaming and retrieval. Configuration uses providers and execution strategies (API key, Codex account, or vendor-delegated Claude/Cursor). **In the current stdlib-only core, transcript `dream run --mode hybrid|semantic` still uses in-process heuristics for synthesis/verification**; providers mainly gate availability and health until outbound transports land. **Live model work** for backlog refresh is expected in **Layer C** (your agent session or delegated `semantic ingest`). See [complete-operator-workflow.md](automation/complete-operator-workflow.md) §1 and §3–4 for the exact split.
 
+Semantic-first is the default **posture**, but posture and readiness are different. Setting `mode=semantic` does **not** by itself mean the workspace is semantic-ready. If the semantic path has not been applied yet, the truthful state is **setup required**. If a previously applied path is no longer runnable, the truthful state is **degraded semantic-first** with a reason and a next action, while deterministic capture remains available as an explicit fallback.
+
 Semantic mode is optional. Without `semantic_config.json` (or with `"mode": "deterministic"`), the store behaves like deterministic-only for semantic **availability**. Use `opendream semantic config --workspace "$PWD"` and `opendream semantic status --workspace "$PWD"` to inspect configuration; see [semantic-mode-and-feature-radar-setup.md](automation/semantic-mode-and-feature-radar-setup.md) for file paths and a full setup sequence.
 
-Use `opendream semantic setup --workspace "$PWD"` to detect available execution strategies and get a clear recommendation.
+Use `opendream semantic setup --workspace "$PWD" --apply` to detect available execution strategies, apply the recommendation, and scaffold the path it needs.
 
 ## What is learned context?
 
@@ -77,7 +79,22 @@ OpenDream's benchmark suite has three tiers:
 2. **MemoryAgentBench-style adapters**: Clean-room implementations measuring Accurate Retrieval (AR), Test-Time Learning (TTL), Long-Range Understanding (LRU), and Conflict Resolution (CR).
 3. **Coding-task evals**: Repeated task evaluations measuring pass rate, retrieval latency, irrelevant recall, contradiction recovery, procedural reuse, and memory-hurt rate.
 
-Run with `opendream eval semantic-benchmark --workspace .tmp/eval --mode hybrid`. See [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for provenance of benchmark concepts.
+Run with `opendream eval semantic-benchmark --workspace .tmp/eval --mode hybrid`. The semantic-first contract is not just "LLM mode ran": release evidence is expected to compare degraded fallback, unpruned baseline behavior, and semantic-ready progressive disclosure. See [docs/benchmarks/semantic-mode.md](benchmarks/semantic-mode.md) for the pruning and repeated-task proof expectations, and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for provenance of benchmark concepts.
+
+## What does progressive disclosure mean in practice?
+
+It means `prepare-context` should not dump broad history into every prompt. Startup context should stay pointer-like, task context should expand only when relevance warrants it, and the JSON/UI evidence should show what was selected, what was suppressed, and how much budget was saved by pruning.
+
+## What counts as poor semantic memory quality?
+
+OpenDream treats some failure modes as warnings, not hidden implementation details. Examples include:
+
+- semantic-first posture with no runnable semantic path
+- durable memory dominated by one low-signal type such as `semantic_fact`
+- little or no learned-context activity across the observation window
+- ephemera-heavy promoted memory with weak pruning benefit
+
+Those warnings belong in status/doctor/UI surfaces because a workspace that looks semantic on paper can still be low-signal in practice.
 
 ## How do I see all my OpenDream workspaces?
 
@@ -110,14 +127,13 @@ upgrade. After installing the new version:
 
 ```bash
 pip install -U opendream
-opendream status --workspace "$PWD"            # lazy schema migration
-opendream workspace doctor --workspace "$PWD"  # register + refresh catalog entry
+opendream workspace upgrade --workspace "$PWD"
 ```
 
-`workspace doctor` re-probes the workspace and upserts its catalog entry so
-the upgraded repo shows up in `opendream workspace list` and the
-`/workspaces` dashboard. The workspace directory is never rewritten by
-catalog operations.
+`workspace upgrade` repairs managed surfaces when needed, re-probes the
+workspace, and upserts its catalog entry so the upgraded repo shows up in
+`opendream workspace list` and the `/workspaces` dashboard. The workspace
+directory is never rewritten by catalog operations.
 
 ## I have existing workspaces that aren't showing up in `workspace list` — how do I add them?
 

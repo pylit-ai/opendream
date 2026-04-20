@@ -17,6 +17,7 @@ from opendream.util import sha256_path, write_json
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT_ROOT = REPO_ROOT / ".tmp" / "release-check"
 LOCK_PATH = ARTIFACT_ROOT / "release-check.lock"
+SEMANTIC_RELEASE_PROOF_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "semantic_release_proof.json"
 
 
 def run_stage(name: str, command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, Any]:
@@ -82,6 +83,98 @@ def preferred_release_blockers() -> list[str]:
     if all((REPO_ROOT / "specs" / spec_id / "tasks.md").exists() for spec_id in next_gen):
         return next_gen
     return ["410-truthful-verification", "411-autodream-fidelity", "412-memory-quality"]
+
+
+def load_semantic_release_proof_fixture(path: Path = SEMANTIC_RELEASE_PROOF_FIXTURE) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("semantic release proof fixture must be a JSON object")
+    scenarios = payload.get("scenarios", {})
+    required = {"unpruned_baseline", "degraded_semantic_first", "semantic_ready_progressive"}
+    missing = sorted(required - set(scenarios))
+    if missing:
+        raise ValueError(f"semantic release proof fixture missing scenarios: {', '.join(missing)}")
+    return payload
+
+
+def _truthful_degraded_labeling(degraded: dict[str, Any]) -> bool:
+    return (
+        degraded.get("product_posture") == "semantic-first"
+        and degraded.get("semantic_capability_state") == "degraded"
+        and bool(str(degraded.get("semantic_unavailability_reason") or "").strip())
+        and bool(str(degraded.get("next_action") or "").strip())
+    )
+
+
+def _pruning_advantage(baseline: dict[str, Any], ready: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    baseline_pruning = baseline.get("context_pruning", {})
+    ready_pruning = ready.get("context_pruning", {})
+    evidence = {
+        "baseline_saved_characters": int(baseline_pruning.get("saved_characters", 0) or 0),
+        "ready_saved_characters": int(ready_pruning.get("saved_characters", 0) or 0),
+        "baseline_injected_count": int(baseline_pruning.get("injected_count", 0) or 0),
+        "ready_injected_count": int(ready_pruning.get("injected_count", 0) or 0),
+        "baseline_candidate_count": int(baseline_pruning.get("candidate_count", 0) or 0),
+        "ready_candidate_count": int(ready_pruning.get("candidate_count", 0) or 0),
+    }
+    passed = (
+        evidence["ready_saved_characters"] > evidence["baseline_saved_characters"]
+        and evidence["ready_injected_count"] < evidence["baseline_injected_count"]
+        and evidence["ready_candidate_count"] >= evidence["baseline_candidate_count"]
+    )
+    return passed, evidence
+
+
+def _repeated_task_improvements(baseline: dict[str, Any], ready: dict[str, Any]) -> dict[str, float]:
+    baseline_task = baseline.get("repeated_task", {})
+    ready_task = ready.get("repeated_task", {})
+    improvements: dict[str, float] = {}
+    success_delta = round(
+        float(ready_task.get("success_rate", 0.0) or 0.0) - float(baseline_task.get("success_rate", 0.0) or 0.0),
+        4,
+    )
+    if success_delta > 0:
+        improvements["success_rate_delta"] = success_delta
+    reuse_delta = int(ready_task.get("procedural_reuse_hits", 0) or 0) - int(
+        baseline_task.get("procedural_reuse_hits", 0) or 0
+    )
+    if reuse_delta > 0:
+        improvements["procedural_reuse_delta"] = reuse_delta
+    latency_delta = int(baseline_task.get("resolution_latency_ms", 0) or 0) - int(
+        ready_task.get("resolution_latency_ms", 0) or 0
+    )
+    if latency_delta > 0:
+        improvements["resolution_latency_improvement_ms"] = latency_delta
+    return improvements
+
+
+def semantic_release_proof_stage(fixture: dict[str, Any]) -> dict[str, Any]:
+    scenarios = fixture["scenarios"]
+    baseline = scenarios["unpruned_baseline"]
+    degraded = scenarios["degraded_semantic_first"]
+    ready = scenarios["semantic_ready_progressive"]
+
+    truthful_degraded = _truthful_degraded_labeling(degraded)
+    pruning_advantage, pruning_evidence = _pruning_advantage(baseline, ready)
+    repeated_task_improvements = _repeated_task_improvements(baseline, ready)
+    repeated_task_benefit = bool(repeated_task_improvements)
+
+    checks = {
+        "truthful_degraded_labeling": truthful_degraded,
+        "pruning_advantage": pruning_advantage,
+        "repeated_task_benefit": repeated_task_benefit,
+    }
+    return {
+        "name": "semantic-release-proof",
+        "status": "PASS" if all(checks.values()) else "FAIL",
+        "checks": checks,
+        "evidence": {
+            "pruning": pruning_evidence,
+            "repeated_task_improvements": repeated_task_improvements,
+            "degraded_reason": degraded.get("semantic_unavailability_reason"),
+            "degraded_next_action": degraded.get("next_action"),
+        },
+    }
 
 
 def release_manifest(timeout_seconds: int) -> dict[str, Any]:
@@ -385,6 +478,7 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
             timeout_seconds=timeout_seconds,
         )
         stages.append(semantic_result)
+        stages.append(semantic_release_proof_stage(load_semantic_release_proof_fixture()))
         stages.append(
             run_stage(
                 "verify-clean-venv",

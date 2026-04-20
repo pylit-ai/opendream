@@ -782,3 +782,37 @@ specs:
       - /api/health reports startup, readiness, liveness, reasons, and freshness without inventing state
       - live check proves append plus reindex without producing durable memory artifacts
       - overview makes health evidence and live-check results visible
+  - id: 443-semantic-first-memory-ux
+    title: semantic-first posture, progressive memory disclosure, and pruning proof
+    status: active
+    owner: platform
+    created: 2026-04-19
+    touched_surfaces:
+      - cli
+      - memory-runtime
+      - observability
+      - observability-ui
+      - api
+      - docs
+      - verification
+      - benchmarks
+      - tests
+    depends_on:
+      - 440-advanced-memory-platform-release-bundle
+      - 442-observe-health-and-live-check
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/integration.py
+      - opendream/observability.py
+      - opendream/webapp.py
+      - opendream/static/observe-ui.js
+      - docs/automation/dream-task-playbook.md
+      - docs/benchmarks/semantic-mode.md
+      - README.md
+      - docs/FAQ.md
+    verification:
+      - top-level status and observe UI distinguish semantic-ready, degraded, and deterministic-by-choice states
+      - homogeneous-memory fixtures trigger memory-quality warnings instead of a healthy semantic verdict
+      - prepare-context emits progressive-disclosure and pruning metadata
+      - release-check proves a pruning advantage over an unpruned baseline without repeated-task regression

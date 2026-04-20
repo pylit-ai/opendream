@@ -65,6 +65,9 @@
       "name": "reconcile"
     },
     {
+      "name": "repair"
+    },
+    {
       "name": "retrieve"
     },
     {
@@ -301,6 +304,16 @@
     ],
     "unsupported": [
       "gemini-oauth-reuse"
+    ]
+  },
+  "semantic_read_model_contract": {
+    "required_fields": [
+      "product_posture",
+      "semantic_capability_state",
+      "semantic_unavailability_reason",
+      "memory_quality",
+      "context_pruning",
+      "next_action"
     ]
   },
   "supported_engine_ids": [

@@ -160,16 +160,16 @@ catalog is derived rather than canonical.
 When you upgrade OpenDream in a repo that already has `.opendream/` state:
 
 ```bash
-pip install -U opendream         # or pipx upgrade opendream
-opendream status --workspace "$PWD"    # workspace-local state migrates lazily
-opendream workspace doctor --workspace "$PWD"   # register + refresh catalog entry
+pip install -U opendream                 # or uv tool upgrade / pipx upgrade
+opendream workspace upgrade --workspace "$PWD"
 ```
 
 Your workspace `.opendream/` directory is canonical and is never rewritten by
-catalog operations. `workspace doctor` re-probes activation, service, and
-semantic state and upserts the catalog entry so the upgraded workspace appears
-in `opendream workspace list` and the `/workspaces` dashboard. If the CLI
-complains about stale schemas, run `opendream repair --workspace "$PWD"` first.
+catalog operations. `workspace upgrade` runs the safe refresh path for one
+workspace: repair managed activation surfaces, re-probe activation/service/
+semantic state, and upsert the catalog entry so the upgraded workspace appears
+in `opendream workspace list` and the `/workspaces` dashboard. `opendream repair --workspace "$PWD"` remains a shorthand for `activate --repair` when you only
+need surface repair.
 
 ### Backfilling existing workspaces into the index
 
@@ -206,6 +206,7 @@ opendream observe serve --workspace "$PWD" --port 8000
 
 Then open `http://127.0.0.1:8000/overview` on the same machine. `observe serve` blocks until Ctrl+C.
 The observe server also exposes `GET /api/health` for startup/readiness/liveness evidence and `POST /api/health/live-check` for a synthetic end-to-end probe that verifies append plus index refresh without creating durable memory.
+For semantic-first workspaces, `/overview` and `/settings` should expose the same truth as CLI status: readiness, setup-required vs degraded state, state reason, next action, memory-quality warnings, and pruning evidence, with raw JSON still available behind disclosure.
 
 <details>
 <summary><strong>What the observability app exposes</strong></summary>
@@ -314,10 +315,9 @@ opendream dream run --workspace "$PWD" --mode hybrid --episodes tests/fixtures/t
 Semantic execution adapters — prefer no-extra-key when possible:
 
 ```bash
-opendream semantic setup --workspace "$PWD" --prefer no-extra-key
+opendream semantic setup --workspace "$PWD" --prefer no-extra-key --apply
+opendream semantic status --workspace "$PWD"
 opendream semantic adapters list
-opendream semantic adapters detect --workspace "$PWD"
-opendream semantic adapters scaffold --workspace "$PWD" --adapter codex-account
 opendream semantic adapters status --workspace "$PWD"
 opendream semantic ingest --workspace "$PWD" --scan-inbox
 ```
@@ -334,12 +334,16 @@ Supported execution strategies: `deterministic` (always available), `direct-prov
 | `claude-scheduled-task` | Claude (vendor runtime) | Claude account | No |
 | `cursor-automation` | Cursor (vendor runtime) | Cursor account | No |
 
-Run `opendream semantic setup --workspace .` to get a recommendation for your environment.
+Run `opendream semantic setup --workspace . --apply` to detect, apply, and scaffold the recommended path for your environment.
 Gemini CLI OAuth reuse is explicitly unsupported.
+
+Semantic-first is the default **product posture**, not an automatic readiness claim. If semantic posture is selected but the recommended path has not been applied yet, OpenDream should report **setup required**. If a previously applied path stops being runnable, it should report **degraded** semantic-first, explain why, keep deterministic capture explicit, and recommend one concrete next action instead of implying that `mode=semantic` is already ready.
 
 **Feature / bug / fix radar** uses **`opendream automation`** (projection jobs), not `dream run`. Full walkthrough, file layouts, and how this differs from transcript dreaming: [`docs/automation/semantic-mode-and-feature-radar-setup.md`](./docs/automation/semantic-mode-and-feature-radar-setup.md).
 
 **Note:** The repo is stdlib-only; hybrid/semantic mode runs the full **pipeline and audits** with **in-process heuristic** synthesis/verification today. Provider registry + API keys gate **availability** and health checks; outbound LLM calls are not implemented in this package yet (see guide).
+
+The retrieval story is also semantic-first. `prepare-context` is expected to use **progressive disclosure** so startup context stays pointer-like, task context expands only when relevance justifies it, and machine-readable outputs can show **pruning evidence** such as raw candidate counts, injected counts, suppression reasons, and budget savings.
 
 Eval:
 

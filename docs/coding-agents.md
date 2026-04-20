@@ -105,12 +105,12 @@ Semantic mode runs through one of five **execution strategies**:
 
 ```bash
 # Detect tools and get a recommendation
-opendream semantic setup --workspace "$PWD" --prefer no-extra-key
+opendream semantic setup --workspace "$PWD" --prefer no-extra-key --apply
 
-# Scaffold adapter artifacts
-opendream semantic adapters scaffold --workspace "$PWD" --adapter codex-account
+# Check semantic readiness truth
+opendream semantic status --workspace "$PWD"
 
-# Check adapter status
+# Inspect adapter inventory and status
 opendream semantic adapters status --workspace "$PWD"
 
 # Ingest delegated results (for Claude/Cursor adapters)

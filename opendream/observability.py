@@ -7,7 +7,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from .memory_quality import analyze_memory_quality
 from .models import Annotation, ObservabilityConsolidationOp, PhaseTrace, ReviewDecision
+from .semantic_readiness import empty_context_pruning
 from .storage import MemoryStore
 from .util import read_json, sha256_path, stable_id, to_iso, utc_now
 
@@ -711,6 +713,7 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
             explicit_events += 1
     # Execution ownership (440 bundle)
     semantic_config = store.load_semantic_config()
+    semantic_surface = _semantic_quality_surface(store, now=timestamp)
     overview: dict[str, Any] = {
         "generated_at": timestamp,
         "store_health": {
@@ -769,6 +772,8 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
             "active_adapter": semantic_config.get("active_adapter"),
             "candidate_strategies": semantic_config.get("candidate_strategies", []),
         },
+        **semantic_surface,
+        "context_pruning": empty_context_pruning(),
     }
     return overview
 
@@ -808,6 +813,21 @@ def _build_memory_excellence_overview(store: MemoryStore, records: list[dict[str
     }
 
 
+def _semantic_quality_surface(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+    report = analyze_memory_quality(store, now=now)
+    posture_map = {
+        "semantic_first": "semantic-first",
+        "deterministic_only": "deterministic-by-choice",
+    }
+    return {
+        "product_posture": posture_map.get(report["product_posture"], str(report["product_posture"])),
+        "semantic_capability_state": report["semantic_capability_state"],
+        "semantic_unavailability_reason": report["semantic_unavailability_reason"],
+        "memory_quality": report["memory_quality"],
+        "next_action": report["next_action"],
+    }
+
+
 def _build_entities(store: MemoryStore) -> dict[str, Any]:
     memories = _build_memory_entities(store)
     runs = _load_run_records(store)
@@ -819,8 +839,8 @@ def _build_entities(store: MemoryStore) -> dict[str, Any]:
     evals = _build_eval_entities(store)
     exports = store.load_export_records()
     health = _build_health(memories, retrievals, runs, reviews)
-    graph = _build_graph_entities(memories, retrievals, runs, annotations, reviews)
     relation_edges = read_json(store.relation_edges_path, [])
+    graph = _build_graph_entities(memories, retrievals, runs, annotations, reviews, relation_edges)
     verification_reports = _load_json_records(store.audit_claim_verification_dir)
     probe_reports = _load_json_records(store.audit_transcript_probe_dir)
     reconciliation_reports = _load_json_records(store.audit_reconciliation_dir)
@@ -1296,10 +1316,12 @@ def _build_graph_entities(
     runs: list[dict[str, Any]],
     annotations: list[dict[str, Any]],
     reviews: list[dict[str, Any]],
+    relation_edges: list[dict[str, Any]],
 ) -> dict[str, Any]:
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     seen_nodes: set[str] = set()
+    seen_edges: set[tuple[str, str, str]] = set()
 
     def add_node(node_id: str, node_type: str, label: str, raw: dict[str, Any]) -> None:
         if node_id in seen_nodes:
@@ -1307,34 +1329,49 @@ def _build_graph_entities(
         seen_nodes.add(node_id)
         nodes.append({"id": node_id, "type": node_type, "label": label, "raw": raw})
 
+    def add_edge(source: str, target: str, edge_type: str) -> None:
+        key = (source, target, edge_type)
+        if key in seen_edges:
+            return
+        seen_edges.add(key)
+        edges.append({"source": source, "target": target, "type": edge_type})
+
     for memory in memories:
         add_node(memory["memory_id"], "memory", memory["title"], memory)
+    memory_ids = {str(memory["memory_id"]) for memory in memories}
+    for edge in relation_edges:
+        source = str(edge.get("from_id", ""))
+        target = str(edge.get("to_id", ""))
+        edge_type = str(edge.get("kind", ""))
+        if source in memory_ids and target in memory_ids and edge_type:
+            add_edge(source, target, edge_type)
+    for memory in memories:
         for source_id in memory.get("source_event_ids", []):
             add_node(source_id, "event", source_id, {"event_id": source_id})
-            edges.append({"source": source_id, "target": memory["memory_id"], "type": "consolidated_into"})
+            add_edge(str(source_id), memory["memory_id"], "consolidated_into")
         for superseded_id in memory.get("supersedes", []):
-            edges.append({"source": memory["memory_id"], "target": superseded_id, "type": "supersedes"})
+            add_edge(memory["memory_id"], str(superseded_id), "supersedes")
         for conflict_id in memory.get("conflicts_with", []):
-            edges.append({"source": memory["memory_id"], "target": conflict_id, "type": "conflicts_with"})
+            add_edge(memory["memory_id"], str(conflict_id), "conflicts_with")
     for retrieval in retrievals:
         retrieval_id = str(retrieval["id"])
         add_node(retrieval_id, "retrieval", retrieval_id, retrieval)
         for memory_id in retrieval.get("selected_memory_ids", []):
-            edges.append({"source": retrieval_id, "target": str(memory_id), "type": "selected_by"})
+            add_edge(retrieval_id, str(memory_id), "selected_by")
     for run in runs:
         add_node(run["run_id"], "run", run["run_id"], run)
         for op in run.get("operations", []):
             target_id = op.get("target_memory_id")
             if target_id:
-                edges.append({"source": run["run_id"], "target": target_id, "type": "applied_to"})
+                add_edge(run["run_id"], str(target_id), "applied_to")
     for annotation in annotations:
         annotation_id = str(annotation.get("id", stable_id("annotation", annotation)))
         add_node(annotation_id, "annotation", annotation.get("label", annotation_id), annotation)
-        edges.append({"source": annotation_id, "target": str(annotation.get("object_id")), "type": "annotated_by"})
+        add_edge(annotation_id, str(annotation.get("object_id")), "annotated_by")
     for review in reviews:
         review_id = str(review.get("id", stable_id("review", review)))
         add_node(review_id, "review", review.get("action", review_id), review)
-        edges.append({"source": review_id, "target": str(review.get("queue_item_id")), "type": "reviewed"})
+        add_edge(review_id, str(review.get("queue_item_id")), "reviewed")
     return {"nodes": nodes, "edges": edges}
 
 

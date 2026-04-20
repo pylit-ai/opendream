@@ -8,6 +8,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from opendream.integration import emit_event, maintain
 from opendream.observability import index_observability
@@ -19,6 +20,11 @@ _OBSERVE_UI_JS = (
 ).read_text(encoding="utf-8")
 
 FIXED_NOW = "2026-04-10T12:00:00Z"
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
 
 
 class GraphRouteTests(unittest.TestCase):
@@ -98,6 +104,11 @@ class GraphRouteTests(unittest.TestCase):
         self.assertIn("link", sh)
         self.assertIsInstance(sh.get("link"), str)
         self.assertTrue(str(sh.get("link", "")).startswith("/"))
+        self.assertEqual(payload.get("product_posture"), "deterministic-by-choice")
+        self.assertEqual(payload.get("semantic_capability_state"), "disabled_by_choice")
+        self.assertIn("memory_quality", payload)
+        self.assertIn("context_pruning", payload)
+        self.assertIn("last_semantic_run", payload)
 
     def test_api_ui_context_semantic_summary_from_disk_config(self) -> None:
         cfg = self.store.memory_root / "state" / "semantic_config.json"
@@ -106,6 +117,49 @@ class GraphRouteTests(unittest.TestCase):
         self.assertEqual(payload.get("semantic_state_summary"), "semantic:hybrid")
         self.assertEqual(payload.get("workspace_probe_status"), "ok")
         self.assertEqual(payload.get("dream_mode"), "hybrid")
+
+    def test_api_ui_context_marks_semantic_setup_required_truthfully(self) -> None:
+        self.store.save_semantic_config(
+            {
+                **self.store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "deterministic",
+                "candidate_strategies": ["codex-account", "deterministic"],
+            }
+        )
+        payload = self.get_json("/api/ui-context")
+        self.assertEqual(payload.get("product_posture"), "semantic-first")
+        self.assertEqual(payload.get("semantic_capability_state"), "setup_required")
+        self.assertIsInstance(payload.get("semantic_unavailability_reason"), str)
+        self.assertEqual(payload["scope_health"]["label"], "Semantic setup required")
+        self.assertEqual(payload["scope_health"]["link"], "/settings")
+
+    def test_api_ui_context_marks_semantic_ready(self) -> None:
+        self.store.save_semantic_config(
+            {
+                **self.store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "direct-provider",
+                "candidate_strategies": ["direct-provider", "deterministic"],
+                "preferred_auth_mode": "direct-provider",
+            }
+        )
+        self.store.save_provider_registry(
+            [
+                {
+                    "provider_id": "openai-main",
+                    "transport": "openai",
+                    "model_id": "gpt-5.4",
+                    "roles": ["synthesis", "verification"],
+                    "health_status": "healthy",
+                }
+            ]
+        )
+        payload = self.get_json("/api/ui-context")
+        self.assertEqual(payload.get("product_posture"), "semantic-first")
+        self.assertEqual(payload.get("semantic_capability_state"), "ready")
+        self.assertEqual(payload["scope_health"]["label"], "Semantic ready")
+        self.assertEqual(payload["scope_health"]["link"], "/overview")
 
     def test_post_semantic_dream_mode_persists(self) -> None:
         status, out = self.post_json("/api/semantic-dream-mode", {"mode": "hybrid"})
@@ -133,6 +187,30 @@ class GraphRouteTests(unittest.TestCase):
         if payload["nodes"]:
             self.assertIn("x", payload["nodes"][0])
             self.assertIn("y", payload["nodes"][0])
+
+    def test_api_graph_defaults_to_latest_memory_focus_and_depth_two(self) -> None:
+        latest_memory = self.get_json("/api/memories")["items"][0]["memory_id"]
+        payload = self.get_json("/api/graph")
+        self.assertEqual(payload["focus"], latest_memory)
+        self.assertEqual(payload["depth"], 2)
+
+    def test_graph_route_redirects_to_default_focus_query(self) -> None:
+        latest_memory = self.get_json("/api/memories")["items"][0]["memory_id"]
+        opener = urllib.request.build_opener(_NoRedirectHandler())
+        req = urllib.request.Request(f"{self.base_url}/graph", method="GET")
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            opener.open(req)
+        try:
+            self.assertEqual(ctx.exception.code, 302)
+            location = ctx.exception.headers["Location"]
+            self.assertIsNotNone(location)
+            parsed = urlparse(location)
+            self.assertEqual(parsed.path, "/graph")
+            params = parse_qs(parsed.query)
+            self.assertEqual(params.get("focus"), [latest_memory])
+            self.assertEqual(params.get("depth"), ["2"])
+        finally:
+            ctx.exception.close()
 
     def test_force_layout_omits_positions(self) -> None:
         payload = self.get_json("/api/graph?layout=forceatlas2")
@@ -191,6 +269,13 @@ class GraphRouteTests(unittest.TestCase):
             "Snapshot APIs",
             "odCopyCurrentViewUrl",
             "About this dashboard",
+            "Semantic readiness card",
+            "Memory-quality warnings",
+            "Context pruning evidence",
+            "Last semantic run",
+            "Semantic setup control center",
+            "Advanced semantic controls",
+            "Changing this selector updates configuration, but readiness is still derived",
             "od-dream-mode-select",
             "semantic-dream-mode",
             "sidebar-mobile-open",

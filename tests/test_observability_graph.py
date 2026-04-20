@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from opendream.observability import _layered_positions, _select_subgraph, build_graph
+from opendream.observability import (
+    _build_graph_entities,
+    _layered_positions,
+    _select_subgraph,
+    build_graph,
+)
 from tests.fixtures.graph_fixture import (
     chain_fixture,
     cycle_fixture,
@@ -128,3 +133,54 @@ class BuildGraphIntegrationTests(unittest.TestCase):
         result = build_graph(index, focus="X", depth=2)
         self.assertEqual(len(result["nodes"]), 1)
         self.assertEqual(result["edges"], [])
+
+
+class GraphEntityAssemblyTests(unittest.TestCase):
+    def test_relation_edges_are_projected_without_duplicate_inline_edges(self) -> None:
+        memories = [
+            {
+                "memory_id": "A",
+                "title": "A",
+                "source_event_ids": [],
+                "supersedes": ["B"],
+                "conflicts_with": [],
+            },
+            {
+                "memory_id": "B",
+                "title": "B",
+                "source_event_ids": [],
+                "supersedes": [],
+                "conflicts_with": [],
+            },
+            {
+                "memory_id": "C",
+                "title": "C",
+                "source_event_ids": [],
+                "supersedes": [],
+                "conflicts_with": [],
+            },
+        ]
+        relation_edges = [
+            {"from_id": "A", "to_id": "B", "kind": "supersedes"},
+            {"from_id": "C", "to_id": "A", "kind": "derived_from"},
+        ]
+
+        graph = _build_graph_entities(
+            memories,
+            [],
+            [],
+            [],
+            [],
+            relation_edges,
+        )
+        edge_tuples = {(edge["source"], edge["target"], edge["type"]) for edge in graph["edges"]}
+
+        self.assertIn(("C", "A", "derived_from"), edge_tuples)
+        self.assertEqual(
+            sum(
+                1
+                for edge in graph["edges"]
+                if (edge["source"], edge["target"], edge["type"]) == ("A", "B", "supersedes")
+            ),
+            1,
+        )

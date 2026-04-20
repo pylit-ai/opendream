@@ -161,7 +161,8 @@ Use this when the **backlog must change** because the repo or world changed (Lay
 ### 4.1 Pick execution strategy (optional but recommended)
 
 ```bash
-opendream semantic setup --workspace "$WORKSPACE" --prefer no-extra-key
+opendream semantic setup --workspace "$WORKSPACE" --prefer no-extra-key --apply
+opendream semantic status --workspace "$WORKSPACE"
 opendream semantic adapters status --workspace "$WORKSPACE"
 ```
 

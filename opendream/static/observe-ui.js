@@ -73,24 +73,103 @@
     document.querySelectorAll('.sidebar-nav a').forEach((a) => {
       if (pathMatchesNav(a.getAttribute('href'), route)) a.classList.add('active');
     });
-    (function themeUi(){
-      var KEY='opendream-ui-theme';
-      function sync(){
-        var t=document.documentElement.getAttribute('data-theme')||'dark';
-        document.querySelectorAll('.theme-toggle button[data-theme]').forEach(function(b){
-          b.classList.toggle('theme-btn-active', b.getAttribute('data-theme')===t);
-          b.setAttribute('aria-pressed', b.getAttribute('data-theme')===t ? 'true' : 'false');
-        });
+    var OD_THEME_KEY = 'opendream-ui-theme';
+    var OD_PALETTE_KEY = 'opendream-ui-palette';
+    function resolveUiTheme(pref) {
+      if (pref === 'light') return 'light';
+      if (pref === 'dark') return 'dark';
+      try {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      } catch (e) {
+        return 'light';
       }
-      function set(t){
-        document.documentElement.setAttribute('data-theme', t);
-        try { localStorage.setItem(KEY, t); } catch(e) {}
-        sync();
+    }
+    function getUiThemePreference() {
+      var a = document.documentElement.getAttribute('data-theme-pref');
+      if (a === 'light' || a === 'dark' || a === 'system') return a;
+      try {
+        var s = localStorage.getItem(OD_THEME_KEY);
+        if (s === 'light' || s === 'dark' || s === 'system') return s;
+      } catch (e) {}
+      return 'system';
+    }
+    var odSystemThemeMql = null;
+    function uiSystemThemeListener() {
+      if (getUiThemePreference() !== 'system') return;
+      document.documentElement.setAttribute('data-theme', resolveUiTheme('system'));
+    }
+    function uiAttachSystemThemeListener() {
+      if (odSystemThemeMql) {
+        try {
+          if (odSystemThemeMql.removeEventListener) odSystemThemeMql.removeEventListener('change', uiSystemThemeListener);
+          else if (odSystemThemeMql.removeListener) odSystemThemeMql.removeListener(uiSystemThemeListener);
+        } catch (e) {}
+        odSystemThemeMql = null;
       }
-      document.querySelectorAll('.theme-toggle button[data-theme]').forEach(function(btn){
-        btn.addEventListener('click', function(){ set(btn.getAttribute('data-theme')); });
+      if (getUiThemePreference() !== 'system') return;
+      try {
+        odSystemThemeMql = window.matchMedia('(prefers-color-scheme: dark)');
+        if (odSystemThemeMql.addEventListener) odSystemThemeMql.addEventListener('change', uiSystemThemeListener);
+        else if (odSystemThemeMql.addListener) odSystemThemeMql.addListener(uiSystemThemeListener);
+      } catch (e2) {}
+    }
+    function applyUiThemePreference(pref) {
+      var p = pref === 'light' || pref === 'dark' || pref === 'system' ? pref : 'system';
+      document.documentElement.setAttribute('data-theme-pref', p);
+      document.documentElement.setAttribute('data-theme', resolveUiTheme(p));
+      try {
+        localStorage.setItem(OD_THEME_KEY, p);
+      } catch (e) {}
+      syncUiThemeToggle();
+      syncUiThemeSettingsSegmented();
+      uiAttachSystemThemeListener();
+    }
+    function syncUiThemeToggle() {
+      var pref = getUiThemePreference();
+      document.querySelectorAll('.theme-toggle button[data-theme-pref]').forEach(function (b) {
+        var on = b.getAttribute('data-theme-pref') === pref;
+        b.classList.toggle('theme-btn-active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
-      sync();
+    }
+    function syncUiThemeSettingsSegmented() {
+      var pref = getUiThemePreference();
+      document.querySelectorAll('.od-settings-theme button[data-theme-pref]').forEach(function (b) {
+        var on = b.getAttribute('data-theme-pref') === pref;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    function applyUiPalette(id) {
+      var p = id === 'violet' || id === 'teal' || id === 'rose' || id === 'emerald' ? id : 'default';
+      document.documentElement.setAttribute('data-palette', p);
+      try {
+        localStorage.setItem(OD_PALETTE_KEY, p);
+      } catch (e) {}
+      syncUiPaletteSettingsButtons();
+    }
+    function getUiPalette() {
+      var a = document.documentElement.getAttribute('data-palette');
+      if (a === 'violet' || a === 'teal' || a === 'rose' || a === 'emerald') return a;
+      return 'default';
+    }
+    function syncUiPaletteSettingsButtons() {
+      var cur = getUiPalette();
+      document.querySelectorAll('.od-settings-palette button[data-palette]').forEach(function (b) {
+        var pid = b.getAttribute('data-palette') || 'default';
+        var on = pid === cur;
+        b.classList.toggle('od-palette-btn--active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    (function themeUi(){
+      document.querySelectorAll('.theme-toggle button[data-theme-pref]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          applyUiThemePreference(btn.getAttribute('data-theme-pref'));
+        });
+      });
+      syncUiThemeToggle();
+      uiAttachSystemThemeListener();
     })();
     (function sidebarUi(){
       var KEY='opendream-sidebar';
@@ -774,7 +853,14 @@
         if (!pill || !sh) return;
         pill.textContent = sh.label || 'Status';
         pill.className = 'od-scope-health-pill od-scope-health-pill--' + (sh.level || 'ok');
+        if (sh.product_posture) {
+          pill.setAttribute('data-product-posture', String(sh.product_posture));
+        }
         var tip = 'Memories: ' + (sh.memory_total != null ? sh.memory_total : '—');
+        if (sh.product_posture) tip += ', posture: ' + sh.product_posture;
+        if (sh.semantic_capability_state) tip += ', semantic: ' + sh.semantic_capability_state;
+        if (sh.semantic_unavailability_reason) tip += ', reason: ' + sh.semantic_unavailability_reason;
+        if (sh.next_action && sh.next_action !== 'none') tip += ', next: ' + sh.next_action;
         if (sh.contested != null) tip += ', contested: ' + sh.contested;
         if (sh.pending_events != null) tip += ', pending events: ' + sh.pending_events;
         if (sh.last_event_at) tip += ', last event: ' + sh.last_event_at;
@@ -1731,11 +1817,133 @@
       }
     }
 
+    function odTitleCaseToken(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '—';
+      return raw
+        .split(/[_-]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+    }
+
+    function odSemanticTone(state) {
+      const normalized = String(state || '').toLowerCase();
+      if (normalized === 'ready') return 'good';
+      if (normalized === 'setup_required') return 'warn';
+      if (normalized === 'degraded') return 'warn';
+      if (normalized === 'disabled_by_choice') return 'neutral';
+      return 'neutral';
+    }
+
+    function odSemanticStory(data) {
+      const posture = String((data && data.product_posture) || 'deterministic-by-choice');
+      const state = String((data && data.semantic_capability_state) || 'unknown');
+      const reason = data && data.semantic_unavailability_reason ? String(data.semantic_unavailability_reason) : '';
+      const nextAction = data && data.next_action ? String(data.next_action) : 'none';
+      const execution = (data && data.execution_ownership) || {};
+      const memoryQuality = (data && data.memory_quality) || {};
+      const warnings = Array.isArray(memoryQuality.warnings) ? memoryQuality.warnings : [];
+      let headline = 'Semantic status unavailable';
+      let summary = 'The observe server did not provide a semantic readiness summary.';
+      if (state === 'ready') {
+        headline = 'Semantic ready';
+        summary = 'Semantic-first posture is active and a runnable semantic path is available.';
+      } else if (state === 'setup_required') {
+        headline = 'Semantic setup required';
+        summary = reason
+          ? 'Semantic-first posture is preferred, but the semantic path still needs to be applied: ' + reason + '.'
+          : 'Semantic-first posture is preferred, but the semantic path still needs to be applied.';
+      } else if (state === 'degraded') {
+        headline = 'Semantic degraded';
+        summary = reason
+          ? 'Semantic-first posture is active, but the semantic path is not currently runnable: ' + reason + '.'
+          : 'Semantic-first posture is active, but the semantic path is not currently runnable.';
+      } else if (state === 'disabled_by_choice') {
+        headline = 'Deterministic by choice';
+        summary = 'This workspace is intentionally running without semantic expansion.';
+      }
+      return {
+        posture: posture,
+        state: state,
+        headline: headline,
+        summary: summary,
+        nextAction: nextAction,
+        warningCount: warnings.length,
+        warnings: warnings,
+        memoryQualityState: String(memoryQuality.state || 'unknown'),
+        execution: {
+          activeStrategy: String(execution.active_strategy || 'deterministic'),
+          preferredAuthMode: String(execution.preferred_auth_mode || 'no-extra-key'),
+          activeAdapter: execution.active_adapter ? String(execution.active_adapter) : '',
+          candidateStrategies: Array.isArray(execution.candidate_strategies) ? execution.candidate_strategies : [],
+        },
+      };
+    }
+
+    function odSemanticWarningItems(warnings) {
+      const usable = Array.isArray(warnings) ? warnings : [];
+      if (!usable.length) {
+        return '<p class="muted" style="margin:0">No memory-quality warnings are active.</p>';
+      }
+      return '<ul style="margin:0;padding-left:1.1rem;line-height:1.6">' + usable.map((warning) => {
+        const item = warning && typeof warning === 'object' ? warning : {};
+        const message = escapeHtml(String(item.message || item.code || 'Warning'));
+        const remediation = item.remediation ? escapeHtml(String(item.remediation)) : '';
+        const code = item.code ? `<code>${escapeHtml(String(item.code))}</code>` : '';
+        return `<li><strong>${message}</strong>${code ? ' ' + code : ''}${remediation ? `<div class="muted" style="margin-top:4px">${remediation}</div>` : ''}</li>`;
+      }).join('') + '</ul>';
+    }
+
+    function odSemanticPruningMarkup(pruning) {
+      const info = pruning && typeof pruning === 'object' ? pruning : {};
+      const status = String(info.status || 'not_available');
+      const profile = info.profile ? String(info.profile) : 'not available';
+      const rawCount = Number(info.raw_candidate_count || 0);
+      const injectedCount = Number(info.injected_count || 0);
+      const suppressedCount = Number(info.suppressed_count || 0);
+      const savings = rawCount > 0 ? Math.max(rawCount - injectedCount, 0) : 0;
+      return `
+        <div class="mem-detail-meta">
+          <div class="mem-detail-field"><span class="mem-detail-label">Profile</span><span class="mem-detail-val">${escapeHtml(profile)}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Status</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(status))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Raw candidates</span><span class="mem-detail-val">${escapeHtml(String(rawCount))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Injected</span><span class="mem-detail-val">${escapeHtml(String(injectedCount))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Suppressed</span><span class="mem-detail-val">${escapeHtml(String(suppressedCount))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Pruned away</span><span class="mem-detail-val">${escapeHtml(String(savings))}</span></div>
+        </div>
+      `;
+    }
+
+    function odLastSemanticRunMarkup(detail) {
+      const run = detail && typeof detail === 'object' ? detail : {};
+      const learned = (run.learned_context && typeof run.learned_context === 'object') ? run.learned_context : {};
+      return `
+        <div class="mem-detail-meta">
+          <div class="mem-detail-field"><span class="mem-detail-label">Last mode</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(run.mode || 'not_recorded'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Execution owner</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(run.execution_strategy || 'deterministic'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Trust boundary</span><span class="mem-detail-val">${escapeHtml(String(run.trust_boundary || '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Auth source</span><span class="mem-detail-val">${escapeHtml(String(run.auth_source || '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Active learned context</span><span class="mem-detail-val">${escapeHtml(String(learned.active != null ? learned.active : '—'))}</span></div>
+        </div>
+      `;
+    }
+
     async function renderOverview() {
       const data = await fetchJson('/api/overview');
       const health = await fetchJson('/api/health');
+      const ctx = await fetchJson('/api/ui-context');
       const contestedN = Number(data.contested_memories) || 0;
       const memTotal = Number(data.memory_counts && data.memory_counts.total) || 0;
+      const semantic = odSemanticStory(data);
+      const pruning = data.context_pruning || {};
+      const pruningProfile = String(pruning.profile || 'not available');
+      const pruningStatus = String(pruning.status || 'not_available');
+      const pruningRaw = Number(pruning.raw_candidate_count || 0);
+      const pruningInjected = Number(pruning.injected_count || 0);
+      const pruningSuppressed = Number(pruning.suppressed_count || 0);
+      const pruningSavings = pruningRaw > 0 ? Math.max(pruningRaw - pruningInjected, 0) : 0;
+      const warningCount = semantic.warningCount;
       const recentLiveCheck = odReadLiveCheckResult();
       const contestedCallout =
         contestedN > 0
@@ -1792,6 +2000,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const freshness = data.freshness || {};
       const healthEvidence = health.evidence || {};
       const liveCheck = health.live_check || {};
+      const lastSemanticRun = (ctx && ctx.last_semantic_run) || {};
       const evTotal = (Number(sig.transcript_events) || 0) + (Number(sig.explicit_events) || 0);
       const contestedClass = contestedN > 0 ? ' od-strip-card--warn' : '';
       const memoryRoot = escapeHtml(String((data.store_health && data.store_health.memory_root) || '—'));
@@ -1830,6 +2039,45 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           <div class="od-snapshot-group-grid">${items.join('')}</div>
         </section>
       `;
+      const readinessPanel = `
+        <div class="od-semantic-readiness" data-semantic-state="${escapeHtml(semantic.state)}">
+          <div class="od-overview-strip" role="region" aria-label="Semantic readiness overview">
+            <div class="od-strip-card od-strip-card--info">
+              <span class="od-strip-value">${escapeHtml(semantic.headline)}</span>
+              <span class="od-strip-label">Semantic readiness</span>
+            </div>
+            <div class="od-strip-card">
+              <span class="od-strip-value">${escapeHtml(odTitleCaseToken(semantic.posture))}</span>
+              <span class="od-strip-label">Product posture</span>
+            </div>
+            <div class="od-strip-card">
+              <span class="od-strip-value">${escapeHtml(odTitleCaseToken(semantic.execution.activeStrategy))}</span>
+              <span class="od-strip-label">Execution owner</span>
+            </div>
+            <div class="od-strip-card${warningCount > 0 ? ' od-strip-card--warn' : ''}">
+              <span class="od-strip-value">${escapeHtml(String(warningCount))}</span>
+              <span class="od-strip-label">Quality warnings</span>
+            </div>
+            <div class="od-strip-card">
+              <span class="od-strip-value">${escapeHtml(String(pruningSavings))}</span>
+              <span class="od-strip-label">Pruned away</span>
+            </div>
+          </div>
+          <div class="od-overview-snapshot">
+            ${snapshotGroup('Semantic readiness card', [
+              snapshotMetric('State', escapeHtml(semantic.headline), { tone: odSemanticTone(semantic.state) }),
+              snapshotMetric('Memory quality', escapeHtml(odTitleCaseToken(semantic.memoryQualityState)), { tone: warningCount > 0 ? 'warn' : 'good' }),
+              snapshotMetric('Preferred auth', escapeHtml(odTitleCaseToken(semantic.execution.preferredAuthMode)), { kind: 'meta' }),
+              snapshotMetric('Next action', escapeHtml(semantic.nextAction === 'none' ? 'None' : semantic.nextAction), { kind: 'meta' }),
+            ], { featured: true })}
+            ${snapshotGroup('Truthful status', [
+              snapshotMetric('Summary', escapeHtml(semantic.summary), { kind: 'meta' }),
+              snapshotMetric('State reason', escapeHtml(String(data.semantic_unavailability_reason || '—')), { kind: 'meta' }),
+              snapshotMetric('Active adapter', escapeHtml(semantic.execution.activeAdapter || '—'), { kind: 'meta' }),
+              snapshotMetric('Candidate strategies', escapeHtml(String(semantic.execution.candidateStrategies.length || 0)), { kind: 'meta' }),
+            ])}
+          </div>
+        </div>`;
       const liveCheckNotice =
         recentLiveCheck && recentLiveCheck.probe
           ? `<div class="od-empty-nextsteps glossary-hint" role="status"><strong>Live check completed.</strong> Probe <code>${escapeHtml(recentLiveCheck.probe.event_id || '—')}</code> was observed at <strong>${escapeHtml(formatInstantLocal(recentLiveCheck.probe.timestamp) || '—')}</strong>. <button type="button" class="icon-btn" onclick="odClearLiveCheckResult(); void runRender('Overview', renderOverview)" aria-label="Dismiss live check result" title="Dismiss">Dismiss</button></div>`
@@ -1865,6 +2113,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           <p class="muted od-snapshot-contract">Machine-readable workspace contract (schemas in repo): <code>opendream contract export --workspace &lt;path&gt; --format json</code>. See <code>AGENTS.md</code> in the OpenDream repository for <code>cli_output_version</code> and contract fields.</p>
         </div>`;
       if (liveCheckNotice) parts.push(panel('Live Check Result', liveCheckNotice, true));
+      parts.push(panel('Semantic readiness card', readinessPanel, true));
       parts.push(
         '<div class="full od-overview-strip" role="region" aria-label="At a glance">' +
           `<a class="od-strip-card" href="/memories"><span class="od-strip-value">${memTotal}</span><span class="od-strip-label">Memories</span></a>` +
@@ -1904,6 +2153,16 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             ${contestedCallout}
             ${snapshotApiFooter}
           </div>
+        `, true),
+        panel('Memory-quality warnings', odSemanticWarningItems(semantic.warnings), true),
+        panel('Context pruning evidence', `
+          <p class="muted" style="margin-top:0;line-height:1.6">Progressive disclosure is part of the product contract. This panel shows the current context profile, how many raw candidates were considered, and how much was pruned before prompt injection.</p>
+          ${odSemanticPruningMarkup(pruning)}
+          <p class="muted" style="margin:12px 0 0 0">Profile <code>${escapeHtml(pruningProfile)}</code> with status <code>${escapeHtml(pruningStatus)}</code>. Raw candidates: <strong>${escapeHtml(String(pruningRaw))}</strong>. Injected: <strong>${escapeHtml(String(pruningInjected))}</strong>. Suppressed: <strong>${escapeHtml(String(pruningSuppressed))}</strong>.</p>
+        `, true),
+        panel('Last semantic run', `
+          <p class="muted" style="margin-top:0;line-height:1.6">This reflects the last recorded semantic execution summary, not just the configured mode.</p>
+          ${odLastSemanticRunMarkup(lastSemanticRun)}
         `, true),
         panel('Fidelity Diagnostics', `<div class="split"><div>${pretty(data.signal_coverage)}</div><div>${pretty({ activation_diagnostics: data.activation_diagnostics, health_evidence: healthEvidence })}</div></div>`, true),
         panel('Recent Runs', `<table><caption class="sr-only">Recent consolidation runs</caption><thead><tr><th scope="col">ID</th><th scope="col">Status</th><th scope="col">Type</th></tr></thead><tbody>${data.recent_runs.map(run => `<tr><td><a href="/runs/${run.run_id}">${run.run_id}</a></td><td>${run.status || ''}</td><td>${run.type}</td></tr>`).join('')}</tbody></table>`, true),
@@ -2707,10 +2966,14 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
 
     async function renderSettings() {
       const data = await fetchJson('/api/overview');
+      const ctx = await fetchJson('/api/ui-context');
       let meta = {};
       try {
         meta = await fetchJson('/api/ui-meta');
       } catch (_m) {}
+      const semantic = odSemanticStory(data);
+      const lastSemanticRun = (ctx && ctx.last_semantic_run) || {};
+      const pruning = data.context_pruning || {};
       const metaVer = meta.cli_json_version != null ? String(meta.cli_json_version) : '—';
       const assets = (meta.observe_ui && meta.observe_ui.static_assets) || [];
       const assetsLine = assets.length
@@ -2719,8 +2982,93 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const odDensity = document.documentElement.getAttribute('data-density') || 'comfortable';
       const densComfort = odDensity === 'comfortable' ? 'active' : '';
       const densCompact = odDensity === 'compact' ? 'active' : '';
+      const themePref = getUiThemePreference();
+      const thLight = themePref === 'light' ? 'active' : '';
+      const thDark = themePref === 'dark' ? 'active' : '';
+      const thSystem = themePref === 'system' ? 'active' : '';
+      const pal = getUiPalette();
+      const palDef = pal === 'default' ? 'od-palette-btn--active' : '';
+      const palV = pal === 'violet' ? 'od-palette-btn--active' : '';
+      const palT = pal === 'teal' ? 'od-palette-btn--active' : '';
+      const palR = pal === 'rose' ? 'od-palette-btn--active' : '';
+      const palE = pal === 'emerald' ? 'od-palette-btn--active' : '';
+      const dreamMode = (ctx && ctx.dream_mode) || 'deterministic';
+      const selectorDisabled = ctx && ctx.workspace_probe_status && ctx.workspace_probe_status !== 'ok';
       odSetMainHtml(
         [
+          panel(
+            'Semantic setup control center',
+            `<p class="muted" style="margin-top:0;line-height:1.6">This page leads with semantic readiness truth, then exposes advanced controls and raw JSON behind disclosure. A selected semantic mode alone does not prove readiness.</p>
+          <div class="od-overview-snapshot">
+            <section class="od-snapshot-group od-snapshot-group--featured">
+              <div class="od-snapshot-group-title">Semantic readiness</div>
+              <div class="od-snapshot-group-grid">
+                <div class="od-snapshot-metric">
+                  <div class="od-snapshot-label">State</div>
+                  <div class="od-snapshot-value od-snapshot-value--${odSemanticTone(semantic.state)}">${escapeHtml(semantic.headline)}</div>
+                </div>
+                <div class="od-snapshot-metric">
+                  <div class="od-snapshot-label">Posture</div>
+                  <div class="od-snapshot-value od-snapshot-value--neutral">${escapeHtml(odTitleCaseToken(semantic.posture))}</div>
+                </div>
+                <div class="od-snapshot-metric od-snapshot-metric--meta">
+                  <div class="od-snapshot-label">State reason</div>
+                  <div class="od-snapshot-value od-snapshot-value--neutral">${escapeHtml(String(data.semantic_unavailability_reason || '—'))}</div>
+                </div>
+                <div class="od-snapshot-metric od-snapshot-metric--meta">
+                  <div class="od-snapshot-label">Next action</div>
+                  <div class="od-snapshot-value od-snapshot-value--neutral">${escapeHtml(semantic.nextAction === 'none' ? 'None' : semantic.nextAction)}</div>
+                </div>
+              </div>
+            </section>
+          </div>
+          <h3 class="mem-detail-h" style="margin-top:18px">Execution and trust</h3>
+          <div class="mem-detail-meta">
+            <div class="mem-detail-field"><span class="mem-detail-label">Execution owner</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(semantic.execution.activeStrategy))}</span></div>
+            <div class="mem-detail-field"><span class="mem-detail-label">Preferred auth</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(semantic.execution.preferredAuthMode))}</span></div>
+            <div class="mem-detail-field"><span class="mem-detail-label">Active adapter</span><span class="mem-detail-val">${escapeHtml(semantic.execution.activeAdapter || '—')}</span></div>
+            <div class="mem-detail-field"><span class="mem-detail-label">Candidate strategies</span><span class="mem-detail-val">${escapeHtml(semantic.execution.candidateStrategies.join(', ') || '—')}</span></div>
+          </div>
+          <h3 class="mem-detail-h" style="margin-top:18px">Last semantic run</h3>
+          ${odLastSemanticRunMarkup(lastSemanticRun)}
+          <h3 class="mem-detail-h" style="margin-top:18px">Memory-quality warnings</h3>
+          ${odSemanticWarningItems(semantic.warnings)}
+          <h3 class="mem-detail-h" style="margin-top:18px">Context pruning evidence</h3>
+          ${odSemanticPruningMarkup(pruning)}`,
+            true,
+          ),
+          panel(
+            'Advanced semantic controls',
+            `<p class="muted" style="margin-top:0;line-height:1.6">Advanced controls stay available, but they sit behind disclosure so the primary story remains readiness, state reason, and next action.</p>
+          <details class="mem-detail-details" open>
+            <summary>Dream mode and raw mode controls</summary>
+            <div style="margin-top:12px">
+              <div id="od-dream-mode-row" class="row" style="align-items:center;gap:10px;flex-wrap:wrap">
+                <label for="od-dream-mode-select"><strong>Dream mode</strong></label>
+                <select id="od-dream-mode-select" ${selectorDisabled ? 'disabled' : ''} aria-describedby="od-dream-mode-help">
+                  <option value="deterministic"${dreamMode === 'deterministic' ? ' selected' : ''}>deterministic</option>
+                  <option value="semantic"${dreamMode === 'semantic' ? ' selected' : ''}>semantic</option>
+                  <option value="hybrid"${dreamMode === 'hybrid' ? ' selected' : ''}>hybrid</option>
+                </select>
+                <span id="od-dream-mode-sparkle" aria-hidden="true"${dreamMode === 'hybrid' || dreamMode === 'semantic' ? '' : ' hidden'}></span>
+                <span id="od-dream-mode-status" class="muted" aria-live="polite"></span>
+              </div>
+              <p id="od-dream-mode-help" class="muted" style="margin:10px 0 0 0">Changing this selector updates configuration, but readiness is still derived from runnable execution and return-path evidence.</p>
+            </div>
+          </details>
+          <details class="mem-detail-details" style="margin-top:14px"><summary>Raw JSON and advanced diagnostics</summary>
+            <div style="margin-top:10px">${pretty({
+              ui_context: ctx,
+              store_health: data.store_health,
+              startup_index: data.startup_index,
+              activation_diagnostics: data.activation_diagnostics,
+              execution_ownership: data.execution_ownership,
+              memory_quality: data.memory_quality,
+              context_pruning: data.context_pruning,
+            })}</div>
+          </details>`,
+            true,
+          ),
           panel(
             'UI version',
             `<p class="muted" style="margin-top:0;line-height:1.55">This dashboard is served by the in-repo <code>opendream observe serve</code> static bundle. <strong>CLI JSON schema version</strong> (contract field <code>cli_output_version</code> / <code>CLI_JSON_VERSION</code>): <code>${escapeHtml(metaVer)}</code>.</p>
@@ -2730,8 +3078,23 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           ),
           panel(
             'Display',
-            `<p class="muted" style="margin-top:0;line-height:1.55">Table and panel spacing for this dashboard. Saved in your browser only (<code>localStorage</code> key <code>${escapeHtml(OD_DENSITY_KEY)}</code>).</p>
-          <div class="graph-segmented od-settings-density" role="group" aria-label="Display density" style="margin-top:12px">
+            `<p class="muted" style="margin-top:0;line-height:1.55">Appearance for this dashboard. Saved in your browser only (<code>localStorage</code> keys <code>${escapeHtml(OD_THEME_KEY)}</code>, <code>${escapeHtml(OD_PALETTE_KEY)}</code>, <code>${escapeHtml(OD_DENSITY_KEY)}</code>).</p>
+          <p class="muted" style="margin:12px 0 0 0;font-size:12px"><strong>Theme</strong> — light, dark, or match the OS (updates instantly when system appearance changes).</p>
+          <div class="graph-segmented od-settings-theme" role="group" aria-label="Color theme" style="margin-top:8px">
+            <button type="button" data-theme-pref="light" class="${thLight}" aria-pressed="${themePref === 'light' ? 'true' : 'false'}">Light</button>
+            <button type="button" data-theme-pref="dark" class="${thDark}" aria-pressed="${themePref === 'dark' ? 'true' : 'false'}">Dark</button>
+            <button type="button" data-theme-pref="system" class="${thSystem}" aria-pressed="${themePref === 'system' ? 'true' : 'false'}">System</button>
+          </div>
+          <p class="muted" style="margin:14px 0 0 0;font-size:12px"><strong>Accent</strong> — highlight color for links, focus rings, and active controls.</p>
+          <div class="od-settings-palette" role="group" aria-label="Accent color">
+            <button type="button" class="od-palette-btn ${palDef}" data-palette="default" aria-pressed="${pal === 'default' ? 'true' : 'false'}"><span class="od-palette-swatch od-palette-swatch--default" aria-hidden="true"></span> Blue</button>
+            <button type="button" class="od-palette-btn ${palV}" data-palette="violet" aria-pressed="${pal === 'violet' ? 'true' : 'false'}"><span class="od-palette-swatch od-palette-swatch--violet" aria-hidden="true"></span> Violet</button>
+            <button type="button" class="od-palette-btn ${palT}" data-palette="teal" aria-pressed="${pal === 'teal' ? 'true' : 'false'}"><span class="od-palette-swatch od-palette-swatch--teal" aria-hidden="true"></span> Teal</button>
+            <button type="button" class="od-palette-btn ${palR}" data-palette="rose" aria-pressed="${pal === 'rose' ? 'true' : 'false'}"><span class="od-palette-swatch od-palette-swatch--rose" aria-hidden="true"></span> Rose</button>
+            <button type="button" class="od-palette-btn ${palE}" data-palette="emerald" aria-pressed="${pal === 'emerald' ? 'true' : 'false'}"><span class="od-palette-swatch od-palette-swatch--emerald" aria-hidden="true"></span> Emerald</button>
+          </div>
+          <p class="muted" style="margin:14px 0 0 0;font-size:12px"><strong>Density</strong> — table and panel spacing.</p>
+          <div class="graph-segmented od-settings-density" role="group" aria-label="Display density" style="margin-top:8px">
             <button type="button" data-density="comfortable" class="${densComfort}" aria-pressed="${odDensity === 'comfortable' ? 'true' : 'false'}">Comfortable</button>
             <button type="button" data-density="compact" class="${densCompact}" aria-pressed="${odDensity === 'compact' ? 'true' : 'false'}">Compact</button>
           </div>`,
@@ -2739,7 +3102,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           ),
           panel(
             'Store metadata (read-only)',
-            `<p class="muted" style="margin-top:0;line-height:1.55">This page is the <strong>raw store snapshot</strong>: lock state, memory root, startup index, and activation diagnostics as returned by the server. Use <a href="/overview">Overview</a> for counts, recent runs/sessions, and contested memory at a glance.</p>
+            `<p class="muted" style="margin-top:0;line-height:1.55">This remains the <strong>raw store snapshot</strong>: lock state, memory root, startup index, and activation diagnostics as returned by the server. Use <a href="/overview">Overview</a> for the readiness-first summary, warnings, pruning evidence, and last semantic run.</p>
           <h3 class="mem-detail-h" style="margin-top:16px">Structured fields</h3>
           <div class="mem-detail-meta">
             <div class="mem-detail-field"><span class="mem-detail-label">Memory root</span><span class="mem-detail-val">${escapeHtml(
@@ -2756,15 +3119,34 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             true,
           ),
         ].join(''),
-        function bindSettingsDensity() {
+        function bindSettingsDisplay() {
           var densSeg = document.querySelector('.od-settings-density');
-          if (!densSeg) return;
-          densSeg.addEventListener('click', function (ev) {
-            var btn = ev.target.closest('button[data-density]');
-            if (!btn || !densSeg.contains(btn)) return;
-            applyUiDensity(btn.getAttribute('data-density'));
-          });
+          if (densSeg) {
+            densSeg.addEventListener('click', function (ev) {
+              var btn = ev.target.closest('button[data-density]');
+              if (!btn || !densSeg.contains(btn)) return;
+              applyUiDensity(btn.getAttribute('data-density'));
+            });
+          }
           syncUiDensitySettingsSegmented();
+          var themeSeg = document.querySelector('.od-settings-theme');
+          if (themeSeg) {
+            themeSeg.addEventListener('click', function (ev) {
+              var btn = ev.target.closest('button[data-theme-pref]');
+              if (!btn || !themeSeg.contains(btn)) return;
+              applyUiThemePreference(btn.getAttribute('data-theme-pref'));
+            });
+          }
+          syncUiThemeSettingsSegmented();
+          var palHost = document.querySelector('.od-settings-palette');
+          if (palHost) {
+            palHost.addEventListener('click', function (ev) {
+              var btn = ev.target.closest('button[data-palette]');
+              if (!btn || !palHost.contains(btn)) return;
+              applyUiPalette(btn.getAttribute('data-palette'));
+            });
+          }
+          syncUiPaletteSettingsButtons();
         },
       );
     }

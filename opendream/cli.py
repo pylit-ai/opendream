@@ -87,11 +87,13 @@ TOP_LEVEL_EXAMPLES = """Examples:
   opendream init --workspace "$PWD" --activate-configured
   opendream status --workspace "$PWD"
   opendream activate --workspace "$PWD" --repair
+  opendream repair --workspace "$PWD"
   opendream deactivate --workspace "$PWD"
+  opendream workspace upgrade --workspace "$PWD"
   opendream reconcile --workspace "$PWD"
   opendream eval memory-excellence --workspace "$PWD"
   opendream eval advanced-runtime --workspace "$PWD"
-  opendream semantic setup --workspace "$PWD" --prefer no-extra-key
+  opendream semantic setup --workspace "$PWD" --prefer no-extra-key --apply
   opendream automation scaffold-dream --workspace "$PWD" --adapter claude-scheduled-task --kind feature-radar
   opendream contract export --workspace "$PWD" --format json
 """
@@ -141,6 +143,11 @@ def _error_hint(prog: str, message: str) -> str | None:
             "try `opendream init --workspace \"$PWD\" --activate-configured` or "
             "`opendream status --workspace \"$PWD\"`; use `opendream -h` "
             "for the full command tree"
+        )
+    if prog == "opendream" and "invalid choice: 'upgrade'" in message:
+        return (
+            "upgrade the installed CLI with `uv tool upgrade opendream` (or your installer equivalent), "
+            'then refresh a workspace with `opendream workspace upgrade --workspace "$PWD"`'
         )
     if prog == "opendream dream" and "required: dream_command" in message:
         return "try `opendream dream status --workspace .tmp/ws` or `opendream dream worker --workspace .tmp/ws --once`"
@@ -312,6 +319,16 @@ def command_activate(args: argparse.Namespace) -> dict[str, Any]:
     if not store.is_initialized():
         store.initialize(store_kind="project", compat_mode=args.compat_mode)
     result = activate_agents(store, targets=args.targets, repair=args.repair)
+    if isinstance(result, dict):
+        result["catalog_update"] = workspace_catalog.safe_update(store.workspace, discovered_by="activate")
+    return result
+
+
+def command_repair(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = activate_agents(store, targets=args.targets, repair=True)
     if isinstance(result, dict):
         result["catalog_update"] = workspace_catalog.safe_update(store.workspace, discovered_by="activate")
     return result
@@ -1222,6 +1239,53 @@ def command_workspace_doctor(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def command_workspace_upgrade(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.workspace and not args.all_workspaces:
+        raise ValueError("workspace upgrade requires --workspace or --all")
+
+    workspaces: list[str]
+    if args.workspace:
+        workspaces = [str(Path(args.workspace).expanduser().resolve())]
+    else:
+        workspaces = [
+            str(entry.get("workspace_path"))
+            for entry in workspace_catalog.list_entries()
+            if isinstance(entry, dict) and entry.get("workspace_path")
+        ]
+
+    results: list[dict[str, Any]] = []
+    for workspace_path in workspaces:
+        store = build_store(workspace_path, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+        if not store.is_initialized():
+            results.append(
+                {
+                    "workspace": str(store.workspace),
+                    "status": "skipped",
+                    "reason": "workspace is not initialized",
+                }
+            )
+            continue
+        activate_result = activate_agents(store, targets="configured", repair=True)
+        catalog_result = workspace_catalog.doctor(workspace=str(store.workspace))
+        entry = catalog_result["entries"][0] if catalog_result.get("entries") else {}
+        results.append(
+            {
+                "workspace": str(store.workspace),
+                "status": "completed",
+                "activation_repair_status": activate_result.get("status", "unknown"),
+                "catalog_status_kind": entry.get("status_kind"),
+            }
+        )
+
+    return {
+        "status": "completed",
+        "workspace_count": len(workspaces),
+        "upgraded_count": sum(1 for item in results if item["status"] == "completed"),
+        "skipped_count": sum(1 for item in results if item["status"] == "skipped"),
+        "workspaces": results,
+    }
+
+
 def command_service_start(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
     return start_service(store)
@@ -1328,8 +1392,23 @@ def command_semantic_bootstrap(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def command_semantic_setup(args: argparse.Namespace) -> dict[str, Any]:
-    from .semantic_setup import semantic_setup
-    return semantic_setup(Path(args.workspace), preference=args.prefer)
+    from .semantic_dreamer import dream_status_semantic
+    from .semantic_setup import apply_setup_recommendation, semantic_setup
+
+    report = semantic_setup(Path(args.workspace), preference=args.prefer)
+    if not args.apply:
+        return report
+
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    applied = apply_setup_recommendation(store, report)
+    return {
+        **report,
+        "status": "applied",
+        "applied": applied,
+        "readiness": dream_status_semantic(store),
+    }
 
 
 def command_semantic_adapters_list(args: argparse.Namespace) -> dict[str, Any]:
@@ -1405,6 +1484,15 @@ def build_parser() -> argparse.ArgumentParser:
     activate_parser.add_argument("--repair", action="store_true")
     add_layout_arguments(activate_parser)
     activate_parser.set_defaults(func=command_activate)
+
+    repair_parser = subparsers.add_parser(
+        "repair",
+        help="Primary: shorthand for `activate --repair` on configured targets",
+    )
+    repair_parser.add_argument("--workspace", required=True)
+    repair_parser.add_argument("--targets", default="configured", metavar="SELECTOR", help=ACTIVATION_TARGETS_HELP)
+    add_layout_arguments(repair_parser)
+    repair_parser.set_defaults(func=command_repair)
 
     activation_plan_parser = subparsers.add_parser(
         "activation-plan",
@@ -1914,6 +2002,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="no-extra-key",
         help="Execution preference: no-extra-key (default) or direct-provider",
     )
+    semantic_setup_parser.add_argument("--apply", action="store_true")
+    add_layout_arguments(semantic_setup_parser)
     semantic_setup_parser.set_defaults(func=command_semantic_setup)
 
     semantic_adapters_parser = semantic_subparsers.add_parser(
@@ -2127,6 +2217,14 @@ def build_parser() -> argparse.ArgumentParser:
     ws_doctor_parser.add_argument("--workspace", help="Specific workspace to diagnose")
     ws_doctor_parser.add_argument("--all", dest="all_workspaces", action="store_true")
     ws_doctor_parser.set_defaults(func=command_workspace_doctor)
+
+    ws_upgrade_parser = workspace_subparsers.add_parser(
+        "upgrade", help="Refresh one or more workspaces after upgrading the CLI"
+    )
+    ws_upgrade_parser.add_argument("--workspace", help="Specific workspace to refresh")
+    ws_upgrade_parser.add_argument("--all", dest="all_workspaces", action="store_true")
+    add_layout_arguments(ws_upgrade_parser)
+    ws_upgrade_parser.set_defaults(func=command_workspace_upgrade)
 
     return parser
 
