@@ -165,6 +165,9 @@ class ContextAssembly:
     character_count: int
     token_estimate: int
     created_at: str
+    profile: dict[str, Any] = field(default_factory=dict)
+    selection: dict[str, Any] = field(default_factory=dict)
+    context_pruning: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -392,6 +395,7 @@ class SemanticDreamReport:
     proposals_rejected: int = 0
     learned_context_created: int = 0
     learned_context_superseded: int = 0
+    promoted_record_ids: list[str] = field(default_factory=list)
     tokens_used: int = 0
     cost_usd: float = 0.0
     duration_ms: int = 0
@@ -410,6 +414,8 @@ class SemanticDreamReport:
             payload.pop("semantic_summary")
         if not self.verifier_summary:
             payload.pop("verifier_summary")
+        if not self.promoted_record_ids:
+            payload.pop("promoted_record_ids")
         return payload
 
 

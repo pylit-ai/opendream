@@ -166,10 +166,14 @@ opendream workspace upgrade --workspace "$PWD"
 
 Your workspace `.opendream/` directory is canonical and is never rewritten by
 catalog operations. `workspace upgrade` runs the safe refresh path for one
-workspace: repair managed activation surfaces, re-probe activation/service/
-semantic state, and upsert the catalog entry so the upgraded workspace appears
-in `opendream workspace list` and the `/workspaces` dashboard. `opendream repair --workspace "$PWD"` remains a shorthand for `activate --repair` when you only
-need surface repair.
+workspace: repair managed activation surfaces, ensure the managed background
+runtime for project workspaces unless you have explicitly disabled it, re-probe
+activation/service/semantic state, and upsert the catalog entry so the upgraded
+workspace appears in `opendream workspace list` and the `/workspaces`
+dashboard. `opendream repair --workspace "$PWD"` remains a shorthand for
+`activate --repair` when you only need surface repair. Use
+`opendream service disable --workspace "$PWD"` if a workspace should stay
+manual.
 
 ### Backfilling existing workspaces into the index
 
@@ -207,6 +211,9 @@ opendream observe serve --workspace "$PWD" --port 8000
 Then open `http://127.0.0.1:8000/overview` on the same machine. `observe serve` blocks until Ctrl+C.
 The observe server also exposes `GET /api/health` for startup/readiness/liveness evidence and `POST /api/health/live-check` for a synthetic end-to-end probe that verifies append plus index refresh without creating durable memory.
 For semantic-first workspaces, `/overview` and `/settings` should expose the same truth as CLI status: readiness, setup-required vs degraded state, state reason, next action, memory-quality warnings, and pruning evidence, with raw JSON still available behind disclosure.
+The same UI also exposes background-runtime controls and digestible summaries of
+the current memory surface plus the latest runtime mutation effects, so you can
+see what OpenDream is changing without dropping straight into raw JSON.
 
 <details>
 <summary><strong>What the observability app exposes</strong></summary>
@@ -288,11 +295,17 @@ opendream dream enqueue --workspace "$PWD" --episodes tests/fixtures/transcript_
 opendream dream worker --workspace "$PWD" --once
 opendream dream daemon --workspace "$PWD" --interval-seconds 30 --max-polls 20
 opendream install-service --workspace "$PWD" --interval-seconds 30
+opendream service enable --workspace "$PWD"
+opendream service disable --workspace "$PWD"
 opendream service status --workspace "$PWD"
 opendream service doctor --workspace "$PWD"
 ```
 
 Use `dream worker --once` for a single queue drain inside hooks, scripts, or CI. Use `dream daemon` when a supervisor should keep polling over time. `install-service` renders launchd or systemd manifests, persists worker heartbeat state under the memory root, and exposes `service start|stop|restart|status|doctor` as a first-party lifecycle path. The default backend stays managed for portable verification; use `--backend native` when you want best-effort launchd or systemd activation.
+For project workspaces, `workspace upgrade` and `semantic setup --apply` now
+ensure the managed background runtime by default so memory improvement does not
+depend on manual runs. Use `service enable|disable` or the observe UI
+(`/overview`, `/settings`) to manage that runtime explicitly.
 
 For supported configured agents, the standard operator path is:
 
@@ -334,7 +347,7 @@ Supported execution strategies: `deterministic` (always available), `direct-prov
 | `claude-scheduled-task` | Claude (vendor runtime) | Claude account | No |
 | `cursor-automation` | Cursor (vendor runtime) | Cursor account | No |
 
-Run `opendream semantic setup --workspace . --apply` to detect, apply, and scaffold the recommended path for your environment.
+Run `opendream semantic setup --workspace . --apply` to detect, apply, scaffold, and immediately validate the recommended path for your environment. If you need a manual nudge later, use `opendream dream worker --workspace . --once --mode auto`.
 Gemini CLI OAuth reuse is explicitly unsupported.
 
 Semantic-first is the default **product posture**, not an automatic readiness claim. If semantic posture is selected but the recommended path has not been applied yet, OpenDream should report **setup required**. If a previously applied path stops being runnable, it should report **degraded** semantic-first, explain why, keep deterministic capture explicit, and recommend one concrete next action instead of implying that `mode=semantic` is already ready.

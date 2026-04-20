@@ -540,7 +540,7 @@ class TestSemanticStatus(unittest.TestCase):
         self.assertEqual(status["recommended_strategy"], "codex-account")
         self.assertIn("codex-account", status["candidate_strategies"])
 
-    def test_status_reports_ready_for_applied_codex_adapter_without_providers(self) -> None:
+    def test_status_reports_degraded_for_applied_codex_adapter_without_learning_evidence(self) -> None:
         from opendream.semantic_dreamer import dream_status_semantic
 
         scaffold_adapter(self.workspace, "codex-account")
@@ -572,8 +572,79 @@ class TestSemanticStatus(unittest.TestCase):
             status = dream_status_semantic(self.store)
 
         self.assertTrue(status["available"])
-        self.assertEqual(status["semantic_capability_state"], "ready")
+        self.assertEqual(status["semantic_capability_state"], "degraded")
+        self.assertEqual(
+            status["availability_reason"],
+            "semantic path is configured, but learned-context activity has not materialized yet",
+        )
+        self.assertEqual(
+            status["next_action"],
+            "run a semantic dream cycle so learned-context starts materializing",
+        )
         self.assertEqual(status["active_adapter"], "codex-account")
+
+    def test_semantic_dream_run_uses_recent_events_when_no_transcript_episodes_exist(self) -> None:
+        from opendream.integration import emit_event
+        from opendream.semantic_dreamer import semantic_dream_run
+
+        self.store.save_semantic_config(
+            {
+                **self.store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "direct-provider",
+                "active_adapter": None,
+                "candidate_strategies": ["direct-provider", "deterministic"],
+                "preferred_auth_mode": "direct-provider",
+            }
+        )
+        self.store.save_provider_registry(
+            [
+                {
+                    "provider_id": "openai-primary",
+                    "transport": "openai",
+                    "model_id": "gpt-5.4",
+                    "roles": ["synthesis", "verification"],
+                    "health_status": "healthy",
+                }
+            ]
+        )
+        emit_event(
+            self.store,
+            kind="task_outcome",
+            content=(
+                "Workflow to reproduce the failure: run pytest tests/test_worker.py "
+                "because Redis is required locally."
+            ),
+            scope="project",
+            channel="cli",
+            message_ref="semantic-event-1",
+            timestamp="2026-03-31T11:55:00Z",
+        )
+        emit_event(
+            self.store,
+            kind="task_outcome",
+            content=(
+                "The tests failed because the local Redis service was missing; "
+                "the working command sequence is docker compose up redis then pytest."
+            ),
+            scope="project",
+            channel="cli",
+            message_ref="semantic-event-2",
+            timestamp="2026-03-31T11:56:00Z",
+        )
+
+        result = semantic_dream_run(
+            self.store,
+            episode_paths=[],
+            mode="semantic",
+            now=FIXED_NOW,
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertGreater(result["query_families_selected"], 0)
+        self.assertGreaterEqual(result["learned_context_created"], 1)
+        self.assertGreaterEqual(len(self.store.load_learned_context_records()), 1)
+        self.assertGreaterEqual(len(self.store.load_query_families()), 1)
 
 
 class TestSecurityPolicy(unittest.TestCase):
@@ -671,9 +742,17 @@ class TestCLICommands(unittest.TestCase):
             ws.mkdir()
             store = MemoryStore(ws)
             store.initialize(store_kind="project")
-            result = run_cli_json("semantic", "setup", "--workspace", str(ws), "--apply")
-            self.assertIn("applied", result)
-            self.assertIn("readiness", result)
+            try:
+                result = run_cli_json("semantic", "setup", "--workspace", str(ws), "--apply")
+                self.assertIn("applied", result)
+                self.assertIn("readiness", result)
+                self.assertIn("runtime_management", result)
+                runtime = result["runtime_management"]
+                self.assertIsInstance(runtime, dict)
+                self.assertEqual(runtime.get("policy", {}).get("management_mode"), "managed")
+                self.assertTrue(runtime.get("service", {}).get("running"))
+            finally:
+                run_cli("service", "disable", "--workspace", str(ws), check=False)
 
     def test_semantic_adapters_detect_cli(self) -> None:
         with tempfile.TemporaryDirectory() as td:

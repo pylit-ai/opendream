@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from .memory_quality import analyze_memory_quality
+from .memory_quality import LOW_SIGNAL_TYPES, analyze_memory_quality
 from .models import Annotation, ObservabilityConsolidationOp, PhaseTrace, ReviewDecision
 from .semantic_readiness import empty_context_pruning
 from .storage import MemoryStore
@@ -63,6 +63,11 @@ def _iter_observability_source_paths(store: MemoryStore) -> list[Path]:
         store.memory_md_path,
         store.relation_edges_path,
         store.semantic_config_path,
+        store.learned_context_path,
+        store.provider_registry_path,
+        store.worker_health_path,
+        store.service_manifest_path,
+        store.service_runtime_path,
     ]
     for path in explicit_files:
         if path.exists():
@@ -714,6 +719,9 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
     # Execution ownership (440 bundle)
     semantic_config = store.load_semantic_config()
     semantic_surface = _semantic_quality_surface(store, now=timestamp)
+    runtime_management = _build_runtime_management_overview(store, timestamp)
+    memory_surface = _build_memory_surface(store, records)
+    last_runtime_effects = _build_last_runtime_effects(runs)
     overview: dict[str, Any] = {
         "generated_at": timestamp,
         "store_health": {
@@ -772,10 +780,35 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
             "active_adapter": semantic_config.get("active_adapter"),
             "candidate_strategies": semantic_config.get("candidate_strategies", []),
         },
+        "runtime_management": runtime_management,
+        "memory_surface": memory_surface,
+        "last_runtime_effects": last_runtime_effects,
         **semantic_surface,
-        "context_pruning": empty_context_pruning(),
+        "context_pruning": _latest_context_pruning(store),
     }
     return overview
+
+
+def _latest_context_pruning(store: MemoryStore) -> dict[str, Any]:
+    contexts = store.load_context_assemblies()
+    if not contexts:
+        return empty_context_pruning()
+    latest = max(contexts, key=lambda item: str(item.get("created_at", "")))
+    pruning = latest.get("context_pruning")
+    if not isinstance(pruning, dict) or not pruning:
+        return empty_context_pruning()
+    profile = latest.get("profile")
+    profile_name = profile.get("name") if isinstance(profile, dict) else profile
+    return {
+        "status": "available",
+        "profile": str(profile_name or pruning.get("profile") or ""),
+        "raw_candidate_count": int(pruning.get("candidate_count", pruning.get("raw_candidate_count", 0)) or 0),
+        "injected_count": int(pruning.get("injected_count", 0) or 0),
+        "suppressed_count": int(pruning.get("suppressed_count", 0) or 0),
+        "saved_characters": int(pruning.get("saved_characters", 0) or 0),
+        "saved_token_estimate": int(pruning.get("saved_token_estimate", 0) or 0),
+        "observed_at": latest.get("created_at"),
+    }
 
 
 def _build_memory_excellence_overview(store: MemoryStore, records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -811,6 +844,198 @@ def _build_memory_excellence_overview(store: MemoryStore, records: list[dict[str
         ),
         "probe_reports": len(probe_reports),
     }
+
+
+def _build_runtime_management_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
+    from .service import service_status
+
+    status = service_status(store, now=timestamp) if store.is_initialized() else {
+        "installed": False,
+        "running": False,
+        "health": "not-installed",
+        "backlog": 0,
+        "active_phase": None,
+        "last_success_at": None,
+        "semantic_runtime": {
+            "state": "awaiting_signal",
+            "work_mode": "deterministic",
+            "summary": "semantic runtime is not available because the workspace is not initialized",
+            "reason": "workspace is not initialized",
+            "has_pending_signal": False,
+            "latest_signal_source": None,
+            "latest_signal_timestamp": None,
+            "signal_row_count": 0,
+            "active_learned_context": 0,
+            "last_semantic_run": None,
+        },
+        "policy": {"management_mode": "disabled", "auto_ensure": False, "source": "default"},
+    }
+    policy = status.get("policy") or {}
+    semantic_runtime = status.get("semantic_runtime") or {}
+    return {
+        "policy_mode": policy.get("management_mode", "unknown"),
+        "auto_ensure": bool(policy.get("auto_ensure", False)),
+        "policy_source": policy.get("source", "unknown"),
+        "installed": bool(status.get("installed", False)),
+        "running": bool(status.get("running", False)),
+        "health": str(status.get("health", "unknown")),
+        "backlog": int(status.get("backlog", 0) or 0),
+        "active_phase": status.get("active_phase"),
+        "last_success_at": status.get("last_success_at"),
+        "semantic_runtime": semantic_runtime,
+        "summary": _runtime_management_summary(status, semantic_runtime),
+    }
+
+
+def _runtime_management_summary(status: dict[str, Any], semantic_runtime: dict[str, Any]) -> str:
+    policy = status.get("policy") or {}
+    mode = str(policy.get("management_mode", "unknown"))
+    if mode == "disabled":
+        return "background runtime is disabled by operator choice"
+    if not status.get("installed"):
+        return "background runtime is managed but not installed yet"
+    semantic_state = str(semantic_runtime.get("state") or "")
+    semantic_summary = str(semantic_runtime.get("summary") or "")
+    if status.get("running"):
+        if semantic_state in {"awaiting_materialization", "no_materialization", "blocked"} and semantic_summary:
+            return semantic_summary
+        return f"background runtime is running with health {status.get('health', 'unknown')}"
+    return "background runtime is installed but not currently running"
+
+
+def _build_memory_surface(store: MemoryStore, records: list[dict[str, Any]]) -> dict[str, Any]:
+    active_durable = [record for record in records if record.get("status") == "active"]
+    contested = [record for record in records if record.get("status") == "contested"]
+    learned_context = [
+        record for record in store.load_learned_context_records() if record.get("status") == "active"
+    ]
+    type_counts = Counter(str(record.get("type", "unknown")) for record in active_durable)
+    type_mix = [
+        {"type": memory_type, "count": count}
+        for memory_type, count in sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    recent_highlights = [
+        {
+            "memory_id": record.get("memory_id"),
+            "title": record.get("title"),
+            "type": record.get("type"),
+            "status": record.get("status"),
+            "updated_at": record.get("updated_at") or record.get("created_at"),
+            "summary": record.get("summary"),
+        }
+        for record in sorted(
+            active_durable,
+            key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""),
+            reverse=True,
+        )[:5]
+    ]
+    startup_entries = store.load_startup_index().get("entries", [])
+    low_signal_count = sum(1 for record in active_durable if str(record.get("type", "")) in LOW_SIGNAL_TYPES)
+    return {
+        "durable_active_total": len(active_durable),
+        "durable_contested_total": len(contested),
+        "learned_context_active_total": len(learned_context),
+        "low_signal_share": round(low_signal_count / max(len(active_durable), 1), 3) if active_durable else 0.0,
+        "type_mix": type_mix,
+        "recent_highlights": recent_highlights,
+        "startup_highlights": [
+            {
+                "memory_id": entry.get("memory_id"),
+                "title": entry.get("title"),
+                "type": entry.get("type"),
+                "summary": entry.get("summary"),
+            }
+            for entry in startup_entries[:5]
+        ],
+    }
+
+
+def _build_last_runtime_effects(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    if not runs:
+        return {
+            "status": "not_available",
+            "run_id": None,
+            "run_type": None,
+            "ended_at": None,
+            "summary_line": "no runtime mutations recorded yet",
+            "change_counts": {},
+            "target_memory_ids": [],
+            "target_paths": [],
+        }
+
+    latest = runs[0]
+    summary = latest.get("summary", {}) if isinstance(latest.get("summary"), dict) else {}
+    run_type = str(latest.get("type") or "unknown")
+    change_counts: dict[str, Any]
+    if run_type == "consolidation":
+        change_counts = {
+            "created": int(summary.get("created", 0) or 0),
+            "updated": int(summary.get("updated", 0) or 0),
+            "superseded": int(summary.get("superseded", 0) or 0),
+            "contested": int(summary.get("contested", 0) or 0),
+            "quarantined": int(summary.get("quarantined", 0) or 0),
+        }
+    elif run_type == "dream":
+        maintain = summary.get("maintain", {}) if isinstance(summary.get("maintain"), dict) else {}
+        change_counts = {
+            "appended_events": int(summary.get("appended_events", 0) or 0),
+            "gathered_rows": int(summary.get("gathered_rows", 0) or 0),
+            "created": int(maintain.get("consolidate", {}).get("created", 0) or 0),
+            "updated": int(maintain.get("consolidate", {}).get("updated", 0) or 0),
+            "superseded": int(maintain.get("consolidate", {}).get("superseded", 0) or 0),
+        }
+    else:
+        semantic_summary = (
+            summary.get("semantic_summary", {})
+            if isinstance(summary.get("semantic_summary"), dict)
+            else {}
+        )
+        change_counts = {
+            "learned_context_created": int(summary.get("learned_context_created", 0) or 0),
+            "families_selected": int(
+                summary.get("query_families_selected", 0) or semantic_summary.get("families_selected", 0) or 0
+            ),
+            "proposals_generated": int(
+                summary.get("proposals_generated", 0) or semantic_summary.get("proposals_generated", 0) or 0
+            ),
+            "proposals_approved": int(
+                summary.get("proposals_approved", 0) or semantic_summary.get("proposals_approved", 0) or 0
+            ),
+        }
+    target_memory_ids = [
+        str(op.get("target_memory_id"))
+        for op in latest.get("operations", [])
+        if op.get("target_memory_id")
+    ]
+    return {
+        "status": "available",
+        "run_id": latest.get("run_id"),
+        "run_type": run_type,
+        "ended_at": latest.get("ended_at"),
+        "summary_line": _runtime_effect_summary(run_type, change_counts),
+        "change_counts": change_counts,
+        "target_memory_ids": sorted(set(target_memory_ids)),
+        "target_paths": latest.get("target_paths", []),
+        "diff_available": bool(latest.get("diff_text")),
+    }
+
+
+def _runtime_effect_summary(run_type: str, change_counts: dict[str, Any]) -> str:
+    if run_type == "consolidation":
+        return (
+            f"consolidation created {change_counts.get('created', 0)}, "
+            f"updated {change_counts.get('updated', 0)}, "
+            f"and superseded {change_counts.get('superseded', 0)} memories"
+        )
+    if run_type == "dream":
+        return (
+            f"dream appended {change_counts.get('appended_events', 0)} events and "
+            f"created {change_counts.get('created', 0)} durable memories"
+        )
+    return (
+        f"semantic dream created {change_counts.get('learned_context_created', 0)} learned-context records "
+        f"from {change_counts.get('proposals_generated', 0)} proposals"
+    )
 
 
 def _semantic_quality_surface(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
@@ -1110,6 +1335,31 @@ def _load_run_records(store: MemoryStore) -> list[dict[str, Any]]:
                 "reporting_agent_label": "OpenDream",
                 "phase_traces": _phase_traces_for_dream(run_id, dream_summary, summary.get("target_paths", [])),
                 "warnings": [dream_summary["reason"]] if "reason" in dream_summary else [],
+                "source_paths": [str(summary_path), str(diff_path)],
+            }
+        )
+    for summary_path in sorted(store.audit_semantic_dream_dir.glob("*-summary.json"), reverse=True):
+        summary = read_json(summary_path, {})
+        run_id = str(summary.get("run_id") or summary_path.stem.replace("-summary", ""))
+        diff_path = store.audit_semantic_dream_dir / f"{run_id}.diff"
+        semantic_summary = summary.get("summary", {})
+        runs.append(
+            {
+                "id": run_id,
+                "run_id": run_id,
+                "type": "semantic_dream",
+                "started_at": semantic_summary.get("started_at"),
+                "ended_at": semantic_summary.get("ended_at"),
+                "status": semantic_summary.get("status", summary.get("action", "completed")),
+                "summary": semantic_summary,
+                "target_paths": summary.get("target_paths", []),
+                "diff_path": str(diff_path) if diff_path.exists() else None,
+                "diff_text": diff_path.read_text(encoding="utf-8") if diff_path.exists() else "",
+                "operations": [],
+                "source_reporting_agents": [{"agent_id": "opendream", "agent_label": "OpenDream"}],
+                "reporting_agent_label": "OpenDream",
+                "phase_traces": _phase_traces_for_dream(run_id, semantic_summary, summary.get("target_paths", [])),
+                "warnings": [semantic_summary["reason"]] if "reason" in semantic_summary else [],
                 "source_paths": [str(summary_path), str(diff_path)],
             }
         )

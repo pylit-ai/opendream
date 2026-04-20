@@ -101,6 +101,10 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["memory_counts"]["total"], 2)
         self.assertIn("recent_runs", payload)
         self.assertIn("freshness", payload)
+        self.assertIn("runtime_management", payload)
+        self.assertIn("memory_surface", payload)
+        self.assertIn("last_runtime_effects", payload)
+        self.assertIn("semantic_runtime", payload["runtime_management"])
         self.assertEqual(payload["freshness"]["last_event_at"], FIXED_NOW)
         self.assertEqual(payload["freshness"]["last_session_activity_at"], FIXED_NOW)
         self.assertEqual(payload["freshness"]["last_retrieval_at"], FIXED_NOW)
@@ -121,6 +125,19 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["evidence"]["pending_candidates"], 0)
         self.assertTrue(payload["live_check"]["supported"])
         self.assertIsNone(payload["live_check"]["last_probe_at"])
+
+    def test_overview_uses_latest_context_pruning_evidence(self) -> None:
+        payload = self.get_json("/api/overview")
+        pruning = payload["context_pruning"]
+        self.assertEqual(pruning["status"], "available")
+        self.assertEqual(pruning["profile"], self.context["profile"]["name"])
+        self.assertEqual(pruning["raw_candidate_count"], self.context["context_pruning"]["candidate_count"])
+        self.assertEqual(pruning["injected_count"], self.context["context_pruning"]["injected_count"])
+        self.assertEqual(pruning["suppressed_count"], self.context["context_pruning"]["suppressed_count"])
+        self.assertEqual(payload["memory_surface"]["durable_active_total"], 2)
+        self.assertTrue(payload["memory_surface"]["type_mix"])
+        self.assertTrue(payload["memory_surface"]["recent_highlights"])
+        self.assertIn(payload["last_runtime_effects"]["run_type"], {"consolidation", "dream", "semantic_dream"})
 
     def test_memories_api_pagination_limit_cap_and_range_query(self) -> None:
         page0 = self.get_json("/api/memories?limit=1&offset=0&sort=memory_id&sort_dir=asc")

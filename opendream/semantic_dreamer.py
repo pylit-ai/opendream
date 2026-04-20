@@ -19,6 +19,7 @@ from typing import Any
 from .dream import _gather_recent_signal, _orient, _rows_to_events, dream_run
 from .episodes import latest_episode_timestamp, load_episode_rows
 from .integration import maintain
+from .memory_quality import derive_semantic_product_state, next_action_for_semantic_state
 from .models import SemanticDreamReport
 from .provider_registry import semantic_mode_available
 from .query_families import plan_anticipation
@@ -47,6 +48,7 @@ def semantic_dream_run(
     timestamp = now or to_iso(utc_now())
     run_id = stable_id("semantic-dream", timestamp, store.store_id)
     started_at = time.monotonic()
+    before_snapshot = store.snapshot_store_text()
 
     if mode == "deterministic":
         return dream_run(
@@ -115,7 +117,16 @@ def semantic_dream_run(
                 max_recent_episodes=max_recent_episodes,
                 min_episode_signals=min_episode_signals,
             )
-            rows = load_episode_rows(episode_paths, tail_limit=policy["max_recent_episodes"])
+            signal_status = semantic_signal_status(
+                store,
+                episode_paths=episode_paths,
+                limit=policy["max_recent_episodes"],
+            )
+            rows = _load_semantic_signal_rows(
+                store,
+                episode_paths=episode_paths,
+                limit=policy["max_recent_episodes"],
+            )
             orientation_tokens = _orient(store)
             gathered = _gather_recent_signal(rows, orientation_tokens, policy["max_recent_episodes"])
             phases.append("gather_recent_signal")
@@ -155,9 +166,12 @@ def semantic_dream_run(
             phases.append("promote")
             promoted = 0
             rejected = 0
+            promoted_record_ids: list[str] = []
             for proposal, vresult in zip(proposals, verification_results, strict=False):
                 if vresult.get("combined_verdict") in ("approve", "review_required"):
-                    promote_proposal(store, proposal, vresult, now=timestamp)
+                    promotion = promote_proposal(store, proposal, vresult, now=timestamp)
+                    if promotion.get("record_id"):
+                        promoted_record_ids.append(str(promotion["record_id"]))
                     promoted += 1
                 else:
                     rejected += 1
@@ -189,13 +203,22 @@ def semantic_dream_run(
                 proposals_approved=promoted,
                 proposals_rejected=rejected,
                 learned_context_created=promoted,
+                promoted_record_ids=promoted_record_ids,
                 duration_ms=duration_ms,
                 deterministic_summary=deterministic_summary,
                 semantic_summary=semantic_summary,
             )
 
             summary = report.to_dict()
-            store.write_semantic_dream_audit(run_id, summary)
+            summary["latest_signal_source"] = signal_status["latest_signal_source"]
+            summary["latest_signal_timestamp"] = signal_status["latest_signal_timestamp"]
+            summary["signal_row_count"] = signal_status["signal_row_count"]
+            summary["audit"] = store.write_semantic_dream_audit(
+                run_id,
+                summary,
+                before_snapshot=before_snapshot,
+                target_paths=[store.learned_context_path, store.dream_state_path],
+            )
             store.save_dream_state({
                 "state": "idle",
                 "last_ran_at": timestamp,
@@ -206,6 +229,8 @@ def semantic_dream_run(
                 "last_run_duration_ms": duration_ms,
                 "last_episode_timestamp": latest_episode_timestamp(episode_paths),
                 "semantic_mode": mode,
+                "last_semantic_signal_timestamp": signal_status["latest_signal_timestamp"],
+                "last_semantic_signal_source": signal_status["latest_signal_source"],
             })
             return summary
 
@@ -283,6 +308,8 @@ def _synthesize_proposals(
             break
 
         family_tokens = set[str]()
+        family_tokens.update(semantic_tokens(str(family.get("title", ""))))
+        family_tokens.update(semantic_tokens(str(family.get("description", ""))))
         for example in family.get("examples", []):
             family_tokens.update(semantic_tokens(example))
 
@@ -293,7 +320,7 @@ def _synthesize_proposals(
             row_tokens = semantic_tokens(text)
             if row_tokens and family_tokens:
                 overlap = len(row_tokens & family_tokens) / max(1, len(row_tokens | family_tokens))
-                if overlap > 0.15:
+                if overlap >= 0.1:
                     relevant_rows.append(row)
 
         if not relevant_rows:
@@ -366,6 +393,250 @@ def _extract_summary(content: str, family: dict[str, Any]) -> str:
     return summary[:500]
 
 
+def _load_semantic_signal_rows(
+    store: MemoryStore,
+    *,
+    episode_paths: list[Path],
+    limit: int,
+) -> list[dict[str, Any]]:
+    signal = semantic_signal_status(store, episode_paths=episode_paths, limit=limit)
+    if signal["latest_signal_source"] == "transcript_episodes":
+        rows = load_episode_rows(episode_paths, tail_limit=limit)
+        if rows:
+            return rows
+    event_rows: list[dict[str, Any]] = []
+    for event in store.load_events()[-limit:]:
+        content = str(event.get("content") or "").strip()
+        timestamp = str(event.get("timestamp") or "")
+        if not content or not timestamp:
+            continue
+        event_rows.append(
+            {
+                "id": str(event.get("event_id") or ""),
+                "event_id": str(event.get("event_id") or ""),
+                "session_id": str(event.get("session_id") or ""),
+                "timestamp": timestamp,
+                "text": content,
+                "message": content,
+                "source_path": f"event:{event.get('event_id', '')}",
+                "source_kind": "explicit_event",
+            }
+        )
+    return event_rows
+
+
+def resolve_semantic_work_mode(store: MemoryStore, requested_mode: str = "auto") -> str:
+    requested = str(requested_mode or "auto")
+    if requested in {"deterministic", "semantic", "hybrid"}:
+        return requested
+    configured = str(store.load_semantic_config().get("mode", "deterministic") or "deterministic")
+    return configured if configured in {"deterministic", "semantic", "hybrid"} else "deterministic"
+
+
+def semantic_signal_status(
+    store: MemoryStore,
+    *,
+    episode_paths: list[Path] | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    paths = episode_paths if episode_paths is not None else sorted(store.transcripts_dir.glob("*.jsonl"))
+    tail_limit = int(limit or store.dream_policy()["max_recent_episodes"])
+    latest_episode = latest_episode_timestamp(paths)
+    events = store.load_events()
+    latest_event = _latest_explicit_event_timestamp(events)
+    latest_source = _select_latest_signal_source(latest_episode, latest_event)
+
+    if latest_source == "transcript_episodes":
+        signal_rows = load_episode_rows(paths, tail_limit=tail_limit)
+        latest_timestamp = latest_episode
+    elif latest_source == "explicit_events":
+        signal_rows = events[-tail_limit:]
+        latest_timestamp = latest_event
+    else:
+        signal_rows = []
+        latest_timestamp = None
+
+    return {
+        "has_signal": bool(latest_timestamp),
+        "latest_signal_source": latest_source,
+        "latest_signal_timestamp": latest_timestamp,
+        "signal_row_count": len(signal_rows),
+    }
+
+
+def semantic_dream_tick(
+    store: MemoryStore,
+    *,
+    episode_paths: list[Path],
+    now: str | None = None,
+    mode: str = "semantic",
+    max_recent_episodes: int | None = None,
+    min_episode_signals: int | None = None,
+    min_interval_seconds: int = 0,
+) -> dict[str, Any]:
+    timestamp = now or to_iso(utc_now())
+    policy = store.dream_policy(
+        max_recent_episodes=max_recent_episodes,
+        min_episode_signals=min_episode_signals,
+    )
+    signal = semantic_signal_status(store, episode_paths=episode_paths, limit=policy["max_recent_episodes"])
+    state = store.load_dream_state()
+    last_ran_at = state.get("last_ran_at")
+    if last_ran_at and min_interval_seconds > 0:
+        elapsed = (parse_timestamp(timestamp) - parse_timestamp(str(last_ran_at))).total_seconds()
+        if elapsed < min_interval_seconds:
+            return {
+                "status": "skipped",
+                "reason": "min-interval",
+                "mode": mode,
+                "phases": ["orient"],
+                "policy": policy,
+                "trigger_class": "semantic-backlog",
+                **signal,
+            }
+
+    if not signal["has_signal"]:
+        return {
+            "status": "skipped",
+            "reason": "no-signal",
+            "mode": mode,
+            "phases": ["orient"],
+            "policy": policy,
+            "trigger_class": "semantic-backlog",
+            **signal,
+        }
+
+    last_seen_signal = state.get("last_semantic_signal_timestamp")
+    if last_seen_signal and (
+        parse_timestamp(str(signal["latest_signal_timestamp"])) <= parse_timestamp(str(last_seen_signal))
+    ):
+        return {
+            "status": "skipped",
+            "reason": "no-backlog",
+            "mode": mode,
+            "phases": ["orient"],
+            "policy": policy,
+            "trigger_class": "semantic-backlog",
+            **signal,
+        }
+
+    signal_episode_paths = (
+        episode_paths
+        if signal["latest_signal_source"] == "transcript_episodes"
+        else []
+    )
+    result = semantic_dream_run(
+        store,
+        episode_paths=signal_episode_paths,
+        mode=mode,
+        now=timestamp,
+        max_recent_episodes=max_recent_episodes,
+        min_episode_signals=min_episode_signals,
+        trigger_class="semantic-backlog",
+    )
+    result.setdefault("mode", mode)
+    result.setdefault("latest_signal_source", signal["latest_signal_source"])
+    result.setdefault("latest_signal_timestamp", signal["latest_signal_timestamp"])
+    result.setdefault("signal_row_count", signal["signal_row_count"])
+    if result.get("status") == "completed" and not result.get("semantic_fallback"):
+        updated_state = {
+            **store.load_dream_state(),
+            "last_semantic_signal_timestamp": signal["latest_signal_timestamp"],
+            "last_semantic_signal_source": signal["latest_signal_source"],
+        }
+        store.save_dream_state(updated_state)
+    return result
+
+
+def semantic_runtime_diagnosis(
+    store: MemoryStore,
+    *,
+    now: str | None = None,
+    requested_mode: str = "auto",
+) -> dict[str, Any]:
+    _ = now or to_iso(utc_now())
+    work_mode = resolve_semantic_work_mode(store, requested_mode=requested_mode)
+    availability = semantic_mode_available(store)
+    semantic_status = dream_status_semantic(store)
+    dream_state = store.load_dream_state()
+    signal = semantic_signal_status(store, episode_paths=sorted(store.transcripts_dir.glob("*.jsonl")))
+    last_seen_signal = dream_state.get("last_semantic_signal_timestamp")
+    has_pending_signal = bool(signal["latest_signal_timestamp"]) and (
+        not last_seen_signal
+        or parse_timestamp(str(signal["latest_signal_timestamp"])) > parse_timestamp(str(last_seen_signal))
+    )
+    active_learned = int(semantic_status.get("learned_context", {}).get("active", 0) or 0)
+    last_semantic_run = semantic_status.get("last_semantic_run")
+
+    if work_mode == "deterministic":
+        state = "deterministic_only"
+        summary = "background runtime is operating in deterministic mode"
+        reason = "semantic work mode is not currently selected"
+    elif not availability.get("available", False):
+        state = "blocked"
+        reason = str(availability.get("reason") or "semantic path is not runnable")
+        summary = f"semantic runtime is blocked: {reason}"
+    elif active_learned > 0 and has_pending_signal:
+        state = "materialized_with_pending_signal"
+        reason = "learned context is active and newer signal is waiting to be processed"
+        summary = "semantic runtime has materialized learned context and is waiting on newer signal"
+    elif active_learned > 0:
+        state = "materialized"
+        reason = "learned context is active"
+        summary = "semantic runtime has materialized learned context and is waiting for more signal"
+    elif has_pending_signal:
+        state = "awaiting_materialization"
+        reason = "semantic signal is available but learned-context activity has not materialized yet"
+        summary = "semantic runtime has runnable signal and is waiting to materialize learned context"
+    elif last_semantic_run in {"semantic", "hybrid"}:
+        state = "no_materialization"
+        reason = "a semantic cycle ran but did not leave active learned-context records"
+        summary = "semantic runtime consumed recent signal but did not materialize active learned context"
+    else:
+        state = "awaiting_signal"
+        reason = "no transcript or explicit-event signal is available yet"
+        summary = "semantic runtime is ready but waiting for transcript or explicit-event signal"
+
+    return {
+        "work_mode": work_mode,
+        "state": state,
+        "summary": summary,
+        "reason": reason,
+        "runnable": bool(availability.get("available", False)),
+        "has_pending_signal": has_pending_signal,
+        "latest_signal_source": signal["latest_signal_source"],
+        "latest_signal_timestamp": signal["latest_signal_timestamp"],
+        "signal_row_count": signal["signal_row_count"],
+        "last_semantic_run": last_semantic_run,
+        "active_learned_context": active_learned,
+    }
+
+
+def _latest_explicit_event_timestamp(events: list[dict[str, Any]]) -> str | None:
+    latest: str | None = None
+    for event in events:
+        timestamp = str(event.get("timestamp") or "")
+        if not timestamp:
+            continue
+        if latest is None or parse_timestamp(timestamp) > parse_timestamp(latest):
+            latest = timestamp
+    return latest
+
+
+def _select_latest_signal_source(latest_episode: str | None, latest_event: str | None) -> str | None:
+    if latest_episode and latest_event:
+        return (
+            "explicit_events"
+            if parse_timestamp(latest_event) > parse_timestamp(latest_episode)
+            else "transcript_episodes"
+        )
+    if latest_episode:
+        return "transcript_episodes"
+    if latest_event:
+        return "explicit_events"
+    return None
+
+
 def _strategy_trust_boundary(strategy: str) -> str:
     """Map execution strategy to its trust boundary."""
     mapping = {
@@ -411,12 +682,17 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
         "claude-scheduled-task": "claude-account-task",
         "cursor-automation": "cursor-account-automation",
     }
+    capability_state, reason = derive_semantic_product_state(
+        config,
+        availability,
+        active_learned_context_count=len(active_learned),
+    )
 
     return {
         "mode": config.get("mode", "deterministic"),
         "available": availability.get("available", False),
-        "semantic_capability_state": availability.get("semantic_capability_state", "unknown"),
-        "availability_reason": availability.get("reason", ""),
+        "semantic_capability_state": capability_state,
+        "availability_reason": reason,
         "fallback_policy": config.get("fallback_policy", "fallback_to_deterministic"),
         "execution_strategy": execution_strategy,
         "preferred_auth_mode": preferred_auth_mode,
@@ -425,7 +701,7 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
         "candidate_strategies": availability.get("candidate_strategies", candidate_strategies),
         "recommended_strategy": availability.get("recommended_strategy"),
         "detected_tools": availability.get("detected_tools", []),
-        "next_action": availability.get("next_action", "none"),
+        "next_action": next_action_for_semantic_state(capability_state, reason, availability),
         "learned_context": {
             "total": len(learned_records),
             "active": len(active_learned),

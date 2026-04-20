@@ -37,6 +37,7 @@ CLAUDE_POST_TASK_COMMAND = (
     'env OPENDREAM_WORKSPACE="$CLAUDE_PROJECT_DIR" '
     'sh "$CLAUDE_PROJECT_DIR"/.opendream/hooks/claude-post-task.sh'
 )
+_MANAGED_PROCESS_HANDLES: dict[str, subprocess.Popen[bytes]] = {}
 
 
 def detect_supervisor() -> str:
@@ -66,6 +67,34 @@ def default_install_root(supervisor_kind: str, service_mode: str) -> Path:
     return Path.home() / ".config" / "systemd" / "user"
 
 
+def _managed_install_root(store: MemoryStore) -> Path:
+    return store.state_dir / "service" / "managed"
+
+
+def _default_management_mode(store: MemoryStore) -> str:
+    return "managed" if store.store_kind == "project" else "disabled"
+
+
+def _service_policy_payload(store: MemoryStore, runtime: dict[str, Any]) -> dict[str, Any]:
+    default_mode = _default_management_mode(store)
+    configured = str(runtime.get("management_mode") or default_mode)
+    management_mode = configured if configured in {"managed", "disabled"} else default_mode
+    return {
+        "management_mode": management_mode,
+        "auto_ensure": management_mode == "managed",
+        "source": "workspace-state" if "management_mode" in runtime else "default",
+    }
+
+
+def set_service_management_mode(store: MemoryStore, management_mode: str) -> dict[str, Any]:
+    if management_mode not in {"managed", "disabled"}:
+        raise ValueError("management_mode must be `managed` or `disabled`")
+    runtime = store.load_service_runtime()
+    runtime["management_mode"] = management_mode
+    store.save_service_runtime(runtime)
+    return _service_policy_payload(store, runtime)
+
+
 def worker_command(store: MemoryStore, *, interval_seconds: float) -> list[str]:
     command = [
         sys.executable,
@@ -79,6 +108,8 @@ def worker_command(store: MemoryStore, *, interval_seconds: float) -> list[str]:
         _format_interval(interval_seconds),
         "--max-polls",
         "0",
+        "--mode",
+        "auto",
         "--memory-dir",
         store.memory_dir_name,
     ]
@@ -121,7 +152,15 @@ def install_service(
     _validate_service_paths(store)
     supervisor_kind = detect_supervisor()
     label = service_label(store)
-    install_base = install_root.expanduser() if install_root else default_install_root(supervisor_kind, service_mode)
+    install_base = (
+        install_root.expanduser()
+        if install_root
+        else (
+            _managed_install_root(store)
+            if backend_mode == "managed"
+            else default_install_root(supervisor_kind, service_mode)
+        )
+    )
     command = worker_command(store, interval_seconds=interval_seconds)
     log_path = store.audit_service_dir / f"{label}.log"
     rendered_dir = store.state_dir / "service"
@@ -168,6 +207,7 @@ def install_service(
     runtime = store.load_service_runtime()
     runtime.setdefault("start_count", 0)
     runtime.setdefault("restart_count", 0)
+    runtime.setdefault("management_mode", _default_management_mode(store))
     runtime["service_name"] = label
     runtime["backend_mode"] = backend_mode
     runtime["enabled"] = True
@@ -281,6 +321,7 @@ def update_service(
 def uninstall_service(store: MemoryStore, *, purge: bool) -> dict[str, Any]:
     manifest = store.load_service_manifest()
     runtime = store.load_service_runtime()
+    management_mode = str(runtime.get("management_mode") or _default_management_mode(store))
     warnings: list[str] = []
     stop_result: dict[str, Any] | None = None
     if runtime.get("pid") or runtime.get("running"):
@@ -313,7 +354,7 @@ def uninstall_service(store: MemoryStore, *, purge: bool) -> dict[str, Any]:
                 removed_paths.append(str(path))
     else:
         store.save_service_manifest({})
-        store.save_service_runtime({"enabled": False})
+        store.save_service_runtime({"enabled": False, "management_mode": management_mode})
 
     report = {
         "report_id": stable_id("service-install", service_label(store), to_iso(utc_now()), "uninstall"),
@@ -353,6 +394,7 @@ def start_service(store: MemoryStore) -> dict[str, Any]:
     if str(manifest.get("backend_mode", "managed")) == "native":
         native = _native_start(manifest)
         runtime = store.load_service_runtime()
+        runtime.setdefault("management_mode", _default_management_mode(store))
         runtime["enabled"] = True
         runtime["running"] = bool(native.get("ok"))
         runtime["last_start_at"] = to_iso(utc_now())
@@ -365,6 +407,7 @@ def start_service(store: MemoryStore) -> dict[str, Any]:
         }
 
     runtime = store.load_service_runtime()
+    runtime.setdefault("management_mode", _default_management_mode(store))
     current_pid = _coerce_pid(runtime.get("pid"))
     if current_pid and _pid_running(current_pid):
         return {"status": "already-running", "running": True, "pid": current_pid, "warnings": []}
@@ -381,6 +424,7 @@ def start_service(store: MemoryStore) -> dict[str, Any]:
             start_new_session=True,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
+    _MANAGED_PROCESS_HANDLES[str(store.workspace.resolve())] = process
     runtime["pid"] = process.pid
     runtime["running"] = True
     runtime["enabled"] = True
@@ -395,6 +439,8 @@ def start_service(store: MemoryStore) -> dict[str, Any]:
 def stop_service(store: MemoryStore, *, timeout_seconds: float = 5.0) -> dict[str, Any]:
     manifest = store.load_service_manifest()
     runtime = store.load_service_runtime()
+    handle = _MANAGED_PROCESS_HANDLES.get(str(store.workspace.resolve()))
+    runtime.setdefault("management_mode", _default_management_mode(store))
     warnings: list[str] = []
     if manifest and str(manifest.get("backend_mode", "managed")) == "native":
         native = _native_stop(manifest)
@@ -413,6 +459,10 @@ def stop_service(store: MemoryStore, *, timeout_seconds: float = 5.0) -> dict[st
         runtime["last_stop_at"] = to_iso(utc_now())
         store.save_service_runtime(runtime)
         _mark_worker_stopped(store)
+        if handle is not None:
+            with suppress(Exception):
+                handle.wait(timeout=0.1)
+            _MANAGED_PROCESS_HANDLES.pop(str(store.workspace.resolve()), None)
         return {"status": "already-stopped", "running": False, "warnings": []}
 
     _terminate_pid(pid, timeout_seconds=timeout_seconds)
@@ -422,11 +472,16 @@ def stop_service(store: MemoryStore, *, timeout_seconds: float = 5.0) -> dict[st
     runtime["last_error"] = None
     store.save_service_runtime(runtime)
     _mark_worker_stopped(store)
+    if handle is not None:
+        with suppress(Exception):
+            handle.wait(timeout=0.2)
+        _MANAGED_PROCESS_HANDLES.pop(str(store.workspace.resolve()), None)
     return {"status": "stopped", "running": False, "warnings": warnings}
 
 
 def restart_service(store: MemoryStore) -> dict[str, Any]:
     runtime = store.load_service_runtime()
+    runtime.setdefault("management_mode", _default_management_mode(store))
     runtime["restart_count"] = int(runtime.get("restart_count", 0)) + 1
     store.save_service_runtime(runtime)
     stop_result = stop_service(store)
@@ -442,9 +497,12 @@ def restart_service(store: MemoryStore) -> dict[str, Any]:
 
 
 def service_status(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+    from .semantic_dreamer import semantic_runtime_diagnosis
+
     timestamp = now or to_iso(utc_now())
     manifest = store.load_service_manifest()
     runtime = store.load_service_runtime()
+    runtime.setdefault("management_mode", _default_management_mode(store))
     worker_health = store.load_worker_health()
     queue = store.load_dream_queue()
     queue_backlog = len([job for job in queue if job.get("status") == "queued"])
@@ -458,6 +516,9 @@ def service_status(store: MemoryStore, *, now: str | None = None) -> dict[str, A
     runtime["pid"] = pid
     if runtime_changed:
         store.save_service_runtime(runtime)
+    if not running:
+        _MANAGED_PROCESS_HANDLES.pop(str(store.workspace.resolve()), None)
+    policy = _service_policy_payload(store, runtime)
 
     heartbeat_age = _heartbeat_age_seconds(worker_health, timestamp)
     health = _health_state(
@@ -469,6 +530,7 @@ def service_status(store: MemoryStore, *, now: str | None = None) -> dict[str, A
         heartbeat_age_seconds=heartbeat_age,
         restart_count=int(runtime.get("restart_count", 0)),
     )
+    semantic_runtime = semantic_runtime_diagnosis(store, now=timestamp, requested_mode="auto")
     return {
         "workspace": str(store.workspace),
         "memory_root": str(store.memory_root),
@@ -492,6 +554,8 @@ def service_status(store: MemoryStore, *, now: str | None = None) -> dict[str, A
         "restart_count": int(runtime.get("restart_count", 0)),
         "start_count": int(runtime.get("start_count", 0)),
         "recent_failures": worker_health.get("recent_failures", []),
+        "policy": policy,
+        "semantic_runtime": semantic_runtime,
         "runtime": runtime,
         "worker_health": worker_health,
     }
@@ -533,14 +597,19 @@ def service_doctor(store: MemoryStore, *, now: str | None = None) -> dict[str, A
 
 
 def format_service_status(payload: dict[str, Any]) -> str:
+    semantic_runtime = payload.get("semantic_runtime") or {}
     parts = [
         f"service={payload.get('service_name') or 'unknown'}",
+        f"policy={payload.get('policy', {}).get('management_mode', 'unknown')}",
         f"installed={payload['installed']}",
         f"enabled={payload['enabled']}",
         f"running={payload['running']}",
         f"health={payload['health']}",
         f"backlog={payload['backlog']}",
     ]
+    if semantic_runtime:
+        parts.append(f"semantic_state={semantic_runtime.get('state', 'unknown')}")
+        parts.append(f"semantic_mode={semantic_runtime.get('work_mode', 'unknown')}")
     if payload.get("heartbeat_age_seconds") is not None:
         parts.append(f"heartbeat_age_seconds={payload['heartbeat_age_seconds']}")
     if payload.get("last_success_at"):
@@ -567,6 +636,162 @@ def autowire_adapters(
     from .activation import autowire_adapters_compat
 
     return autowire_adapters_compat(store, target=target, force=force, uninstall=uninstall)
+
+
+def ensure_background_runtime(
+    store: MemoryStore,
+    *,
+    interval_seconds: float = 30.0,
+    backend_mode: str = "managed",
+    service_mode: str = "user",
+    install_root: Path | None = None,
+) -> dict[str, Any]:
+    policy = _service_policy_payload(store, store.load_service_runtime())
+    if policy["management_mode"] == "disabled":
+        return {
+            "status": "disabled",
+            "policy": policy,
+            "service": service_status(store),
+            "steps": [],
+        }
+
+    steps: list[str] = []
+    install_result: dict[str, Any] | None = None
+    start_result: dict[str, Any] | None = None
+    status = service_status(store)
+
+    if status["installed"] and _service_manifest_requires_refresh(
+        store,
+        interval_seconds=interval_seconds,
+        backend_mode=backend_mode,
+        service_mode=service_mode,
+        install_root=install_root,
+    ):
+        update_result = update_service(
+            store,
+            interval_seconds=interval_seconds,
+            backend_mode=backend_mode,
+            service_mode=service_mode,
+            install_root=install_root,
+            restart=status["running"],
+        )
+        steps.append("updated")
+        restart_result = update_result.get("restart_result")
+        if isinstance(restart_result, dict) and restart_result.get("running"):
+            steps.append("restarted")
+        status = service_status(store)
+
+    if not status["installed"]:
+        install_result = install_service(
+            store,
+            interval_seconds=interval_seconds,
+            backend_mode=backend_mode,
+            service_mode=service_mode,
+            install_root=install_root,
+            start=False,
+        )
+        steps.append("installed")
+        status = service_status(store)
+
+    if not status["running"]:
+        start_result = start_service(store)
+        steps.append("started" if start_result.get("running") else "failed")
+
+    final_status = service_status(store)
+    if not steps and final_status["running"]:
+        status_label = "already-running"
+    elif "failed" in steps or not final_status["running"]:
+        status_label = "failed"
+    elif steps == ["started"]:
+        status_label = "started"
+    else:
+        status_label = "ensured"
+
+    return {
+        "status": status_label,
+        "policy": final_status["policy"],
+        "service": final_status,
+        "steps": steps,
+        "install_result": install_result,
+        "start_result": start_result,
+    }
+
+
+def enable_background_runtime(
+    store: MemoryStore,
+    *,
+    interval_seconds: float = 30.0,
+    backend_mode: str = "managed",
+    service_mode: str = "user",
+    install_root: Path | None = None,
+) -> dict[str, Any]:
+    policy = set_service_management_mode(store, "managed")
+    ensured = ensure_background_runtime(
+        store,
+        interval_seconds=interval_seconds,
+        backend_mode=backend_mode,
+        service_mode=service_mode,
+        install_root=install_root,
+    )
+    return {
+        "status": "enabled",
+        "policy": policy,
+        "ensure_status": ensured["status"],
+        "service": ensured["service"],
+        "steps": ensured.get("steps", []),
+        "install_result": ensured.get("install_result"),
+        "start_result": ensured.get("start_result"),
+    }
+
+
+def disable_background_runtime(store: MemoryStore) -> dict[str, Any]:
+    policy = set_service_management_mode(store, "disabled")
+    stop_result: dict[str, Any] | None = None
+    status = service_status(store)
+    if status["running"]:
+        stop_result = stop_service(store)
+        status = service_status(store)
+    return {
+        "status": "disabled",
+        "policy": policy,
+        "service": status,
+        "stop_result": stop_result,
+    }
+
+
+def _service_manifest_requires_refresh(
+    store: MemoryStore,
+    *,
+    interval_seconds: float,
+    backend_mode: str,
+    service_mode: str,
+    install_root: Path | None,
+) -> bool:
+    manifest = store.load_service_manifest()
+    if not manifest:
+        return False
+    desired_backend = backend_mode or str(manifest.get("backend_mode", "managed"))
+    desired_service_mode = service_mode or str(manifest.get("service_mode", "user"))
+    desired_root = (
+        install_root.expanduser()
+        if install_root
+        else (
+            _managed_install_root(store)
+            if desired_backend == "managed"
+            else default_install_root(detect_supervisor(), desired_service_mode)
+        )
+    )
+    desired_install_path = desired_root / service_filename(detect_supervisor(), service_label(store))
+    desired_command = worker_command(store, interval_seconds=interval_seconds)
+    current_command = [str(item) for item in manifest.get("command", [])]
+    current_interval = float(manifest.get("interval_seconds", interval_seconds) or interval_seconds)
+    return (
+        current_command != desired_command
+        or current_interval != float(interval_seconds)
+        or str(manifest.get("backend_mode", "managed")) != desired_backend
+        or str(manifest.get("service_mode", "user")) != desired_service_mode
+        or str(manifest.get("install_path", "")) != str(desired_install_path)
+    )
 
 
 def _autowire_claude(workspace: Path, *, force: bool, uninstall: bool) -> dict[str, Any]:
@@ -1040,13 +1265,19 @@ def _terminate_pid(pid: int, *, timeout_seconds: float) -> None:
 
 def _mark_worker_stopped(store: MemoryStore) -> None:
     worker_health = store.load_worker_health()
+    queue_backlog = len([job for job in store.load_dream_queue() if job.get("status") == "queued"])
     worker_health.update(
         {
             "state": "stopped",
             "active_job_id": None,
             "active_phase": None,
             "pid": None,
+            "started_at": worker_health.get("started_at"),
             "last_loop_at": worker_health.get("last_loop_at") or to_iso(utc_now()),
+            "last_success_at": worker_health.get("last_success_at"),
+            "queue_backlog": max(0, int(worker_health.get("queue_backlog", queue_backlog))),
+            "restart_count": int(worker_health.get("restart_count", 0)),
+            "recent_failures": list(worker_health.get("recent_failures", [])),
         }
     )
     if worker_health:

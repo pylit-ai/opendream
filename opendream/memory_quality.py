@@ -21,6 +21,9 @@ HOMOGENEOUS_SHARE_THRESHOLD = 0.8
 EPHEMERA_RATIO_THRESHOLD = 0.6
 DEFAULT_OBSERVATION_WINDOW_DAYS = 14
 MIN_RECORDS_FOR_TYPE_WARNING = 5
+LEARNING_EVIDENCE_MISSING_REASON = (
+    "semantic path is configured, but learned-context activity has not materialized yet"
+)
 
 
 def analyze_memory_quality(
@@ -65,13 +68,14 @@ def assess_memory_quality_snapshot(
 
     product_posture = _product_posture(semantic_config)
     availability = semantic_availability or _availability_from_snapshot(semantic_config, providers)
-    capability_state, unavailable_reason = _semantic_capability_state(
+    capability_state, unavailable_reason = derive_semantic_product_state(
         semantic_config,
         availability,
+        active_learned_context_count=len(active_learned_context),
     )
 
     warnings: list[dict[str, Any]] = []
-    if capability_state == "degraded":
+    if capability_state == "degraded" and _is_semantic_path_unavailable(unavailable_reason):
         warnings.append(
             _warning(
                 "semantic_unavailable",
@@ -150,7 +154,7 @@ def assess_memory_quality_snapshot(
         "semantic_unavailability_reason": unavailable_reason,
         "active_execution_strategy": semantic_config.get("execution_strategy", "deterministic"),
         "learned_context_count": len(active_learned_context),
-        "next_action": _next_action(capability_state, unavailable_reason, availability),
+        "next_action": next_action_for_semantic_state(capability_state, unavailable_reason, availability),
         "memory_quality": {
             "state": memory_quality_state,
             "warnings": warnings,
@@ -194,29 +198,41 @@ def _product_posture(semantic_config: dict[str, Any]) -> str:
     return "deterministic_only" if mode == "deterministic" else "semantic_first"
 
 
-def _semantic_capability_state(
+def derive_semantic_product_state(
     semantic_config: dict[str, Any],
     availability: dict[str, Any],
+    *,
+    active_learned_context_count: int,
 ) -> tuple[str, str | None]:
     if _product_posture(semantic_config) == "deterministic_only":
         return "disabled_by_choice", None
     explicit_state = availability.get("semantic_capability_state")
     if isinstance(explicit_state, str) and explicit_state:
         if explicit_state == "ready":
+            if active_learned_context_count <= 0:
+                return "degraded", LEARNING_EVIDENCE_MISSING_REASON
             return "ready", None
         return explicit_state, str(availability.get("reason", "semantic capability unavailable"))
     if availability.get("available"):
+        if active_learned_context_count <= 0:
+            return "degraded", LEARNING_EVIDENCE_MISSING_REASON
         return "ready", None
     return "degraded", str(availability.get("reason", "semantic capability unavailable"))
 
 
-def _next_action(
+def next_action_for_semantic_state(
     capability_state: str,
     unavailable_reason: str | None,
     availability: dict[str, Any] | None = None,
 ) -> str:
     if availability and isinstance(availability.get("next_action"), str):
-        return str(availability["next_action"])
+        next_action = str(availability["next_action"])
+        if capability_state == "degraded" and unavailable_reason == LEARNING_EVIDENCE_MISSING_REASON:
+            return "run a semantic dream cycle so learned-context starts materializing"
+        if next_action:
+            return next_action
+    if capability_state == "degraded" and unavailable_reason == LEARNING_EVIDENCE_MISSING_REASON:
+        return "run a semantic dream cycle so learned-context starts materializing"
     if capability_state == "ready":
         return "none"
     if capability_state == "disabled_by_choice":
@@ -224,6 +240,19 @@ def _next_action(
     if unavailable_reason and "provider" in unavailable_reason:
         return "configure a semantic provider or delegated adapter"
     return "repair the semantic path and re-run setup"
+
+
+def _is_semantic_path_unavailable(unavailable_reason: str | None) -> bool:
+    if not unavailable_reason:
+        return False
+    normalized = unavailable_reason.lower()
+    return (
+        "provider" in normalized
+        or "adapter" in normalized
+        or "recommended strategy" in normalized
+        or "runnable semantic path" in normalized
+        or "missing" in normalized
+    )
 
 
 def _recent_records(

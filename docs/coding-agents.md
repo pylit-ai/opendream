@@ -29,8 +29,12 @@ filesystem:
   `activation_state_summary`, `service_state_summary`).
 - **Inspect:** `opendream workspace inspect --workspace "$WORKSPACE"` —
   one entry with full status.
-- **Refresh:** `opendream workspace doctor --workspace "$WORKSPACE"`
-  re-probes a known workspace; `--all` re-probes every entry.
+- **Refresh after a CLI upgrade:** `opendream workspace upgrade --workspace "$WORKSPACE"`
+  repairs managed surfaces if needed, ensures the managed background runtime for
+  project workspaces unless explicitly disabled, and re-probes a known
+  workspace; `--all` refreshes every catalog entry.
+- **Catalog-only re-probe:** `opendream workspace doctor --workspace "$WORKSPACE"`
+  updates the catalog view without the repair step; `--all` re-probes every entry.
 - **Discover:** `opendream workspace scan --root <path>` or
   `--all-roots` (roots are managed via
   `opendream workspace roots add --path <path>`). Scans are strictly
@@ -51,9 +55,8 @@ write was intentionally declined. Set `OPENDREAM_CATALOG_DISABLE=1` to
 turn off catalog writes entirely.
 
 **Upgrading an existing workspace:** after `pip install -U opendream`,
-run `opendream status --workspace "$PWD"` (lazy schema migration) and
-then `opendream workspace doctor --workspace "$PWD"` to re-probe and
-refresh the catalog entry for the upgraded repo. Agents backfilling
+run `opendream workspace upgrade --workspace "$PWD"` to repair and
+refresh the upgraded repo. Agents backfilling
 existing repos that pre-date the catalog should prefer
 `opendream workspace scan --all-roots` (after
 `opendream workspace roots add --path <dir>`) or explicit
@@ -67,7 +70,11 @@ For **multi-layer automation** (durable capture, deterministic automation projec
 1. **Pre-task:** `opendream prepare-context --workspace "$WORKSPACE" --query "<task>"` → JSON with `prompt_context`, `selected_memory_ids`, `empty_reason`, and `hints`. When [automations](../README.md) have produced projections, the same payload also includes `selected_automation_record_ids` / `selected_automation_records`, and `prompt_context` adds an **Active Automation Projections** section (separate from durable memory).
 2. **Post-task:** `opendream emit-event --workspace "$WORKSPACE" --kind task_outcome --content "<summary>" --message-ref "<ref>"` (plus required flags; see `emit-event -h`).
 3. **Maintenance:** `opendream maintain --workspace "$WORKSPACE"` (often chained after emit in hooks).
-4. **Dream worker (optional):** `opendream dream worker --workspace "$WORKSPACE" --once` — transcript-driven; **`agent_summary`** explains skips such as **`no-episodes`**.
+4. **Background runtime (primary for ongoing improvement):**
+   `opendream service enable --workspace "$WORKSPACE"` keeps dream polling and
+   semantic improvement moving in the background; `service disable|status` and
+   the observe UI (`/overview`, `/settings`) manage the same runtime.
+5. **Dream worker (bounded/manual):** `opendream dream worker --workspace "$WORKSPACE" --once` — transcript-driven; **`agent_summary`** explains skips such as **`no-episodes`**.
 
 If the repo uses automations:
 
@@ -136,8 +143,8 @@ The payload validates against `opendream/schema/contract-export.schema.json`. **
 
 ## Direct-provider vs delegated execution
 
-- **Direct-provider**: Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, then run `opendream semantic bootstrap --workspace .`
-- **Codex account**: Install Codex CLI and sign in. Run `opendream semantic setup --prefer no-extra-key` on trusted infrastructure.
+- **Direct-provider**: Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, then run `opendream semantic setup --workspace . --prefer direct-provider --apply`
+- **Codex account**: Install Codex CLI and sign in. Run `opendream semantic setup --workspace . --prefer no-extra-key --apply` on trusted infrastructure.
 - **Claude scheduled-task**: Run `opendream semantic adapters scaffold --workspace . --adapter claude-scheduled-task` to generate task templates.
 - **Cursor automation**: Run `opendream semantic adapters scaffold --workspace . --adapter cursor-automation` to generate automation prompts.
 - **Deterministic**: Always available. No model call, no API key needed.

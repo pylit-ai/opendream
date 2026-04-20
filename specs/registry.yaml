@@ -816,3 +816,37 @@ specs:
       - homogeneous-memory fixtures trigger memory-quality warnings instead of a healthy semantic verdict
       - prepare-context emits progressive-disclosure and pruning metadata
       - release-check proves a pruning advantage over an unpruned baseline without repeated-task regression
+  - id: 444-managed-runtime-and-memory-surface-overview
+    title: managed background runtime and digestible memory-surface introspection
+    status: active
+    owner: platform
+    created: 2026-04-20
+    touched_surfaces:
+      - cli
+      - service
+      - memory-runtime
+      - observability
+      - observability-ui
+      - api
+      - docs
+      - tests
+      - specs-lifecycle
+    depends_on:
+      - 432-first-party-service-lifecycle
+      - 442-observe-health-and-live-check
+      - 443-semantic-first-memory-ux
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/service.py
+      - opendream/cli.py
+      - opendream/observability.py
+      - opendream/webapp.py
+      - opendream/static/observe-ui.js
+      - docs/architecture/overview.md
+      - README.md
+    verification:
+      - primary commands can ensure a background runtime without requiring separate service archaeology
+      - CLI and observe UI expose service policy, current runtime state, and reversible start-stop-restart controls
+      - overview exposes digestible memory-surface summaries and last dream mutation effects in addition to detailed evidence
+      - make verify and make release-check remain green with new runtime and UI coverage

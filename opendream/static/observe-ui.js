@@ -698,6 +698,39 @@
       if (!bodyText.trim()) return {};
       return JSON.parse(bodyText);
     };
+    function odBroadcastServiceActionStatus(message, tone) {
+      document.querySelectorAll('[data-service-action-status]').forEach(function (el) {
+        el.textContent = message || '';
+        el.dataset.tone = tone || 'neutral';
+      });
+    }
+    window.odServiceAction = async function (action) {
+      var label = String(action || '').trim();
+      if (!label) return;
+      odBroadcastServiceActionStatus('Applying ' + label + '…', 'neutral');
+      try {
+        var out = await fetchJson('/api/service/control', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: label }),
+        });
+        var runtime = out && out.service && typeof out.service === 'object' ? out.service : {};
+        var state = runtime.running
+          ? 'running'
+          : (runtime.policy && runtime.policy.management_mode === 'disabled' ? 'disabled' : 'stopped');
+        odBroadcastServiceActionStatus('Background runtime ' + label + ' complete: ' + state + '.', 'good');
+        if (location.pathname === '/' || location.pathname === '/overview') {
+          await runRender('Overview', renderOverview);
+        } else if (location.pathname === '/settings') {
+          await runRender('Settings', renderSettings);
+        } else {
+          void refreshScopeContext();
+        }
+      } catch (err) {
+        var msg = err && err.message ? err.message : String(err);
+        odBroadcastServiceActionStatus('Background runtime action failed: ' + msg, 'warn');
+      }
+    };
     function odCsvEscape(v) {
       if (v === null || v === undefined) return '';
       if (typeof v === 'object') return odCsvEscape(JSON.stringify(v));
@@ -1929,6 +1962,143 @@
       `;
     }
 
+    function odRuntimeManagementMarkup(detail, opts) {
+      const runtime = detail && typeof detail === 'object' ? detail : {};
+      const options = opts && typeof opts === 'object' ? opts : {};
+      const installed = !!runtime.installed;
+      const running = !!runtime.running;
+      const policyMode = String(runtime.policy_mode || 'disabled');
+      const health = String(runtime.health || 'unknown');
+      const backlog = Number(runtime.backlog || 0);
+      const summary = runtime.summary ? String(runtime.summary) : 'Background runtime status is not available.';
+      const tone = policyMode === 'disabled' ? 'neutral' : (running ? 'good' : 'warn');
+      const enableDisabled = policyMode === 'managed' ? ' disabled' : '';
+      const disableDisabled = policyMode === 'disabled' ? ' disabled' : '';
+      const startDisabled = installed && !running ? '' : ' disabled';
+      const stopDisabled = running ? '' : ' disabled';
+      const restartDisabled = installed ? '' : ' disabled';
+      const pollDisabled = installed ? '' : ' disabled';
+      const semanticRuntime = runtime.semantic_runtime && typeof runtime.semantic_runtime === 'object' ? runtime.semantic_runtime : {};
+      const intro = options.intro
+        ? `<p class="muted" style="margin-top:0;line-height:1.6">${escapeHtml(String(options.intro))}</p>`
+        : '';
+      return `
+        ${intro}
+        <div class="mem-detail-meta">
+          <div class="mem-detail-field"><span class="mem-detail-label">Policy mode</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(policyMode))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Installed</span><span class="mem-detail-val">${escapeHtml(installed ? 'Yes' : 'No')}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Running</span><span class="mem-detail-val">${escapeHtml(running ? 'Yes' : 'No')}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Health</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(health))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Backlog</span><span class="mem-detail-val">${escapeHtml(String(backlog))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Last success</span><span class="mem-detail-val">${escapeHtml(formatInstantLocal(runtime.last_success_at) || '—')}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Active phase</span><span class="mem-detail-val">${escapeHtml(runtime.active_phase ? String(runtime.active_phase) : '—')}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Summary</span><span class="mem-detail-val">${escapeHtml(summary)}</span></div>
+        </div>
+        <h3 class="mem-detail-h" style="margin-top:18px">Semantic pipeline</h3>
+        <div class="mem-detail-meta">
+          <div class="mem-detail-field"><span class="mem-detail-label">Materialization state</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(semanticRuntime.state || 'unknown'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Work mode</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(semanticRuntime.work_mode || 'deterministic'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Pending signal</span><span class="mem-detail-val">${escapeHtml(semanticRuntime.has_pending_signal ? 'Yes' : 'No')}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Latest signal source</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(semanticRuntime.latest_signal_source || '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Latest signal</span><span class="mem-detail-val">${escapeHtml(formatInstantLocal(semanticRuntime.latest_signal_timestamp) || '—')}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Active learned context</span><span class="mem-detail-val">${escapeHtml(String(semanticRuntime.active_learned_context != null ? semanticRuntime.active_learned_context : '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Reason</span><span class="mem-detail-val">${escapeHtml(String(semanticRuntime.reason || '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Summary</span><span class="mem-detail-val">${escapeHtml(String(semanticRuntime.summary || '—'))}</span></div>
+        </div>
+        <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <button type="button" class="icon-btn" onclick="void odServiceAction('enable')"${enableDisabled}>Enable managed runtime</button>
+          <button type="button" class="icon-btn" onclick="void odServiceAction('disable')"${disableDisabled}>Disable managed runtime</button>
+          <button type="button" class="icon-btn" onclick="void odServiceAction('start')"${startDisabled}>Start worker</button>
+          <button type="button" class="icon-btn" onclick="void odServiceAction('stop')"${stopDisabled}>Stop worker</button>
+          <button type="button" class="icon-btn" onclick="void odServiceAction('restart')"${restartDisabled}>Restart worker</button>
+          <button type="button" class="icon-btn" onclick="void odServiceAction('poll')"${pollDisabled}>Run semantic cycle</button>
+        </div>
+        <p class="muted" data-service-action-status data-tone="${tone}" aria-live="polite" style="margin:12px 0 0 0">${escapeHtml(summary)}</p>
+      `;
+    }
+
+    function odMemorySurfaceMarkup(detail) {
+      const surface = detail && typeof detail === 'object' ? detail : {};
+      const typeMix = Array.isArray(surface.type_mix) ? surface.type_mix : [];
+      const recent = Array.isArray(surface.recent_highlights) ? surface.recent_highlights : [];
+      const startup = Array.isArray(surface.startup_highlights) ? surface.startup_highlights : [];
+      const lowSignalPct = Math.round(Number(surface.low_signal_share || 0) * 100);
+      const typeMixHtml = typeMix.length
+        ? '<ul style="margin:0;padding-left:1.1rem;line-height:1.6">' + typeMix.slice(0, 6).map(function (item) {
+            return `<li><strong>${escapeHtml(String(item.type || 'unknown'))}</strong> · ${escapeHtml(String(item.count || 0))}</li>`;
+          }).join('') + '</ul>'
+        : '<p class="muted" style="margin:0">No durable memory type mix is available yet.</p>';
+      const recentHtml = recent.length
+        ? '<ul style="margin:0;padding-left:1.1rem;line-height:1.6">' + recent.slice(0, 5).map(function (item) {
+            var mid = item && item.memory_id ? String(item.memory_id) : '';
+            var href = mid ? memoryHref(mid) : '/memories';
+            var title = item && item.title ? String(item.title) : mid || 'Memory';
+            var summary = item && item.summary ? ' · ' + escapeHtml(String(item.summary)) : '';
+            return `<li><a href="${href}">${escapeHtml(title)}</a>${summary}</li>`;
+          }).join('') + '</ul>'
+        : '<p class="muted" style="margin:0">No recent durable memory highlights are available yet.</p>';
+      const startupHtml = startup.length
+        ? '<ul style="margin:0;padding-left:1.1rem;line-height:1.6">' + startup.slice(0, 5).map(function (item) {
+            var mid = item && item.memory_id ? String(item.memory_id) : '';
+            var href = mid ? memoryHref(mid) : '/memories';
+            var title = item && item.title ? String(item.title) : mid || 'Memory';
+            return `<li><a href="${href}">${escapeHtml(title)}</a></li>`;
+          }).join('') + '</ul>'
+        : '<p class="muted" style="margin:0">Startup memory is still pointer-like or empty.</p>';
+      return `
+        <p class="muted" style="margin-top:0;line-height:1.6">This is the current durable memory surface, not just the capture stream. Use it to see what OpenDream is actually keeping alive for retrieval and startup.</p>
+        <div class="mem-detail-meta">
+          <div class="mem-detail-field"><span class="mem-detail-label">Durable active</span><span class="mem-detail-val">${escapeHtml(String(surface.durable_active_total != null ? surface.durable_active_total : '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Learned context active</span><span class="mem-detail-val">${escapeHtml(String(surface.learned_context_active_total != null ? surface.learned_context_active_total : '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Contested durable</span><span class="mem-detail-val">${escapeHtml(String(surface.durable_contested_total != null ? surface.durable_contested_total : '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Low-signal share</span><span class="mem-detail-val">${escapeHtml(String(lowSignalPct))}%</span></div>
+        </div>
+        <h3 class="mem-detail-h" style="margin-top:18px">Type mix</h3>
+        ${typeMixHtml}
+        <h3 class="mem-detail-h" style="margin-top:18px">Recent highlights</h3>
+        ${recentHtml}
+        <h3 class="mem-detail-h" style="margin-top:18px">Startup highlights</h3>
+        ${startupHtml}
+      `;
+    }
+
+    function odRuntimeEffectsMarkup(detail) {
+      const effect = detail && typeof detail === 'object' ? detail : {};
+      if (String(effect.status || 'not_available') !== 'available') {
+        return '<p class="muted" style="margin:0">No recent runtime effect summary is available yet.</p>';
+      }
+      const counts = effect.change_counts && typeof effect.change_counts === 'object' ? effect.change_counts : {};
+      const targets = Array.isArray(effect.target_memory_ids) ? effect.target_memory_ids : [];
+      const paths = Array.isArray(effect.target_paths) ? effect.target_paths : [];
+      const targetMemoryHtml = targets.length
+        ? '<ul style="margin:0;padding-left:1.1rem;line-height:1.6">' + targets.slice(0, 8).map(function (id) {
+            return `<li><a href="${memoryHref(String(id))}"><code>${escapeHtml(String(id))}</code></a></li>`;
+          }).join('') + '</ul>'
+        : '<p class="muted" style="margin:0">No target memory ids were recorded for the last runtime effect.</p>';
+      const targetPathHtml = paths.length
+        ? '<ul style="margin:0;padding-left:1.1rem;line-height:1.6">' + paths.slice(0, 8).map(function (path) {
+            return `<li><code>${escapeHtml(String(path))}</code></li>`;
+          }).join('') + '</ul>'
+        : '<p class="muted" style="margin:0">No target paths were recorded for the last runtime effect.</p>';
+      return `
+        <p class="muted" style="margin-top:0;line-height:1.6">This summarizes the last time OpenDream materially changed the memory surface, including which records or files were touched.</p>
+        <div class="mem-detail-meta">
+          <div class="mem-detail-field"><span class="mem-detail-label">Run</span><span class="mem-detail-val">${effect.run_id ? `<a href="${runHref(String(effect.run_id))}">${escapeHtml(odTruncateMiddle(String(effect.run_id), 18))}</a>` : '—'}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Run type</span><span class="mem-detail-val">${escapeHtml(odTitleCaseToken(effect.run_type || 'unknown'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Ended</span><span class="mem-detail-val">${escapeHtml(formatInstantLocal(effect.ended_at) || '—')}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Summary</span><span class="mem-detail-val">${escapeHtml(String(effect.summary_line || '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Created</span><span class="mem-detail-val">${escapeHtml(String(counts.created != null ? counts.created : 0))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Updated</span><span class="mem-detail-val">${escapeHtml(String(counts.updated != null ? counts.updated : 0))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Superseded</span><span class="mem-detail-val">${escapeHtml(String(counts.superseded != null ? counts.superseded : 0))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Diff available</span><span class="mem-detail-val">${escapeHtml(effect.diff_available ? 'Yes' : 'No')}</span></div>
+        </div>
+        <h3 class="mem-detail-h" style="margin-top:18px">Target memories</h3>
+        ${targetMemoryHtml}
+        <h3 class="mem-detail-h" style="margin-top:18px">Touched paths</h3>
+        ${targetPathHtml}
+      `;
+    }
+
     async function renderOverview() {
       const data = await fetchJson('/api/overview');
       const health = await fetchJson('/api/health');
@@ -2001,6 +2171,9 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const healthEvidence = health.evidence || {};
       const liveCheck = health.live_check || {};
       const lastSemanticRun = (ctx && ctx.last_semantic_run) || {};
+      const runtimeManagement = data.runtime_management || {};
+      const memorySurface = data.memory_surface || {};
+      const lastRuntimeEffects = data.last_runtime_effects || {};
       const evTotal = (Number(sig.transcript_events) || 0) + (Number(sig.explicit_events) || 0);
       const contestedClass = contestedN > 0 ? ' od-strip-card--warn' : '';
       const memoryRoot = escapeHtml(String((data.store_health && data.store_health.memory_root) || '—'));
@@ -2154,6 +2327,11 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
             ${snapshotApiFooter}
           </div>
         `, true),
+        panel('Background runtime', odRuntimeManagementMarkup(runtimeManagement, {
+          intro: 'Managed background runtime keeps capture, maintenance, and semantic improvement moving without requiring manual runs every time.',
+        }), true),
+        panel('Current memory surface', odMemorySurfaceMarkup(memorySurface), true),
+        panel('Last runtime effects', odRuntimeEffectsMarkup(lastRuntimeEffects), true),
         panel('Memory-quality warnings', odSemanticWarningItems(semantic.warnings), true),
         panel('Context pruning evidence', `
           <p class="muted" style="margin-top:0;line-height:1.6">Progressive disclosure is part of the product contract. This panel shows the current context profile, how many raw candidates were considered, and how much was pruned before prompt injection.</p>
@@ -2994,6 +3172,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const palE = pal === 'emerald' ? 'od-palette-btn--active' : '';
       const dreamMode = (ctx && ctx.dream_mode) || 'deterministic';
       const selectorDisabled = ctx && ctx.workspace_probe_status && ctx.workspace_probe_status !== 'ok';
+      const runtimeManagement = data.runtime_management || {};
       odSetMainHtml(
         [
           panel(
@@ -3035,6 +3214,13 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           ${odSemanticWarningItems(semantic.warnings)}
           <h3 class="mem-detail-h" style="margin-top:18px">Context pruning evidence</h3>
           ${odSemanticPruningMarkup(pruning)}`,
+            true,
+          ),
+          panel(
+            'Background runtime control center',
+            odRuntimeManagementMarkup(runtimeManagement, {
+              intro: 'OpenDream should keep improving memory in the background. Use these controls to enable, disable, or restart the managed worker for this workspace.',
+            }),
             true,
           ),
           panel(

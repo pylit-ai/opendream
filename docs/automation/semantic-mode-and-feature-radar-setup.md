@@ -113,7 +113,7 @@ If semantic mode is unavailable and `fallback_policy` is `fallback_to_determinis
 - Verifier audits: `<memory-root>/audit/semantic_verifier/`
 - Learned context records: `<memory-root>/state/learned_context_records.json` (plus topic material under `topics/learned-context/` when generated)
 
-Bootstrap snapshot for support / debugging:
+Bootstrap snapshot for support / debugging only. This does not validate semantic readiness or materialize learned context:
 
 ```bash
 opendream semantic bootstrap --workspace "$PWD"

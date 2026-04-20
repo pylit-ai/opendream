@@ -782,6 +782,18 @@ def prepare_context(
     selected_ids = [item["memory_id"] for item in selected]
     selected_learned_ids = [str(item.get("record_id") or "") for item in selected_learned_context]
     omitted = [item for item in excluded if item.get("memory_id") not in selected_ids]
+    candidate_count = (
+        len(merged_candidates)
+        + len(filtered_startup_entries)
+        + len(learned_context_pool)
+        + len(automation_candidates)
+    )
+    injected_count = (
+        len(selected)
+        + len(filtered_startup_entries)
+        + len(selected_learned_context)
+        + len(selected_automation)
+    )
     context_id = stable_id(
         "context",
         timestamp,
@@ -790,23 +802,6 @@ def prepare_context(
         ",".join(selected_ids),
         ",".join(selected_learned_ids),
     )
-    assembly = ContextAssembly(
-        context_id=context_id,
-        session_id=stable_id("session", query),
-        turn_id=stable_id("turn", timestamp, query),
-        retrieval_run_id=",".join(run_id for run_id in retrieval_run_ids if run_id),
-        startup_index_snapshot=filtered_startup_entries,
-        selected_memory_ids=selected_ids,
-        omitted_memory_ids=[str(item.get("memory_id") or "") for item in omitted if item.get("memory_id")],
-        omission_reasons=omitted,
-        assembled_text=prompt_context,
-        character_count=len(prompt_context),
-        token_estimate=max(1, len(prompt_context.split())),
-        created_at=timestamp,
-    )
-    if primary_store.is_initialized():
-        primary_store.write_context_assembly(assembly)
-
     initialized = [store for store in store_list if store.is_initialized()]
     total_durable = sum(len(store.load_durable_records()) for store in initialized)
     if not initialized:
@@ -830,19 +825,6 @@ def prepare_context(
     else:
         empty_reason = None
         hints = []
-
-    candidate_count = (
-        len(merged_candidates)
-        + len(filtered_startup_entries)
-        + len(learned_context_pool)
-        + len(automation_candidates)
-    )
-    injected_count = (
-        len(selected)
-        + len(filtered_startup_entries)
-        + len(selected_learned_context)
-        + len(selected_automation)
-    )
     raw_character_count = sum(
         _representative_text_length(item, kind="durable")
         for item in merged_candidates
@@ -872,6 +854,53 @@ def prepare_context(
     suppression_counts: dict[str, int] = defaultdict(int)
     for item in [*omitted, *suppressed]:
         suppression_counts[str(item.get("reason") or "unspecified")] += 1
+
+    assembly = ContextAssembly(
+        context_id=context_id,
+        session_id=stable_id("session", query),
+        turn_id=stable_id("turn", timestamp, query),
+        retrieval_run_id=",".join(run_id for run_id in retrieval_run_ids if run_id),
+        startup_index_snapshot=filtered_startup_entries,
+        selected_memory_ids=selected_ids,
+        omitted_memory_ids=[str(item.get("memory_id") or "") for item in omitted if item.get("memory_id")],
+        omission_reasons=omitted,
+        assembled_text=prompt_context,
+        character_count=len(prompt_context),
+        token_estimate=max(1, len(prompt_context.split())),
+        created_at=timestamp,
+        profile=profile,
+        selection={
+            "startup_index": {
+                "candidate_count": len(filtered_startup_entries),
+                "selected": len(filtered_startup_entries),
+            },
+            "durable_memory": {
+                "candidate_count": len(merged_candidates),
+                "selected": len(selected),
+            },
+            "learned_context": {
+                "candidate_count": len(learned_context_pool),
+                "selected": len(selected_learned_context),
+            },
+            "automation": {
+                "candidate_count": len(automation_candidates),
+                "selected": len(selected_automation),
+            },
+        },
+        context_pruning={
+            "candidate_count": candidate_count,
+            "injected_count": injected_count,
+            "suppressed_count": max(candidate_count - injected_count, 0),
+            "raw_characters": raw_character_count,
+            "injected_characters": injected_character_count,
+            "saved_characters": max(raw_character_count - injected_character_count, 0),
+            "raw_token_estimate": max(1, raw_character_count // 4) if raw_character_count else 0,
+            "injected_token_estimate": max(1, injected_character_count // 4) if injected_character_count else 0,
+            "saved_token_estimate": max((raw_character_count - injected_character_count) // 4, 0),
+        },
+    )
+    if primary_store.is_initialized():
+        primary_store.write_context_assembly(assembly)
 
     return {
         "workspace": str(store_list[0].workspace) if len(store_list) == 1 else None,

@@ -171,11 +171,11 @@ Automation behavior is covered by integration tests under `tests/test_memory_cli
 | Symptom | Likely cause | Mitigation |
 |---------|----------------|------------|
 | Empty automation section in `prepare-context` | No durable rows matching `memory_types_any` / filters | Fix kinds or tags; run `maintain`; confirm consolidation. |
-| Radar never updates | `tick` not running or interval not elapsed | Use `automation run` once; then schedule `tick`. |
+| Radar never updates | Background runtime / `tick` not running or interval not elapsed | Use `automation run` once; then enable the managed background runtime (`opendream service enable --workspace "$PWD"`) or schedule `tick`. The same runtime is manageable from observe `/overview` and `/settings`. |
 | Everything goes `stale` too fast | `stale_after_runs` too low or selectors too narrow | Widen types or raise N. |
 | Wrong backlog promoted | Treating projections as SoT | Promote only via explicit events/specs; keep playbook §3 in team docs. |
 | Stale ideas never leave | Only Layer B in use | Add Layer C; Layer B alone cannot infer “framework X obsolete.” |
-| Workspace says semantic but acts deterministic | `mode=semantic` configured without a runnable semantic path | Treat as degraded semantic-first, run `semantic setup` / inspect status, and surface the next action instead of claiming readiness. |
+| Workspace says semantic but acts deterministic | `mode=semantic` configured without an applied or runnable semantic path | If setup has not been applied yet, treat as semantic setup required. If an applied path is now broken, treat as degraded semantic-first. In both cases run `semantic setup --apply` / inspect status, and surface the next action instead of claiming readiness. |
 | Context previews stay bloated | Progressive disclosure not pruning enough candidates | Check `prepare-context` metadata for profile, candidate counts, injected counts, and suppression reasons; tune selectors or semantic setup before trusting the output. |
 
 ---

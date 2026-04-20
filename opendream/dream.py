@@ -23,9 +23,14 @@ def _dream_worker_agent_summary(
         return f"Processed {len(processed_jobs)} queued dream job(s)."
     if backlog_results:
         last = backlog_results[-1]
+        work_mode = str(last.get("mode") or "")
         if last.get("status") == "completed":
+            if work_mode in {"semantic", "hybrid"}:
+                return "Semantic backlog processed; learned-context materialization attempted."
             return "Transcript backlog processed; dream run completed."
         reason = str(last.get("reason") or "")
+        if reason == "no-signal":
+            return "No transcript or explicit-event signal is available for semantic backlog yet."
         if reason == "no-episodes":
             return (
                 "No transcript episode files; dream skipped. "
@@ -298,12 +303,14 @@ def dream_worker(
     max_jobs_per_poll: int | None = None,
     idle_exit: bool = True,
     process_backlog: bool = True,
+    mode: str = "auto",
 ) -> dict[str, Any]:
     worker_run_id = stable_id("dream-worker", store.store_id, now or to_iso(utc_now()))
     before_snapshot = store.snapshot_store_text()
     processed_jobs: list[dict[str, Any]] = []
     backlog_results: list[dict[str, Any]] = []
     started_at = now or to_iso(utc_now())
+    lock_failures = 0
     _write_worker_health(
         store,
         timestamp=started_at,
@@ -312,102 +319,134 @@ def dream_worker(
     )
     poll_count = 0
     try:
-        with store.dream_worker_lock():
-            while max_polls <= 0 or poll_count < max_polls:
-                poll_count += 1
-                timestamp = now or to_iso(utc_now())
-                queue = store.load_dream_queue()
-                queued_jobs = [job for job in queue if job.get("status") == "queued"]
-                jobs_this_poll = 0
-                _write_worker_health(
-                    store,
-                    timestamp=timestamp,
-                    state="draining" if queued_jobs else "idle",
-                    queue_backlog=len(queued_jobs),
-                    active_phase="poll",
-                )
-
-                if queued_jobs:
-                    limit = max_jobs_per_poll or len(queued_jobs)
-                    for job in queued_jobs[:limit]:
-                        _write_worker_health(
-                            store,
-                            timestamp=timestamp,
-                            state="draining",
-                            queue_backlog=len([item for item in queue if item.get("status") == "queued"]),
-                            active_job_id=str(job.get("job_id")),
-                            active_phase="job",
-                        )
-                        processed = _process_job(store, job, queue, now=timestamp)
-                        if processed is not None:
-                            processed_jobs.append(processed)
-                            jobs_this_poll += 1
-                            if processed["result"].get("status") == "completed":
-                                _write_worker_health(
-                                    store,
-                                    timestamp=timestamp,
-                                    state="draining",
-                                    queue_backlog=len(
-                                        [item for item in store.load_dream_queue() if item.get("status") == "queued"]
-                                    ),
-                                    last_success_at=timestamp,
-                                )
-                elif process_backlog:
-                    backlog = dream_tick(
+        while max_polls <= 0 or poll_count < max_polls:
+            poll_count += 1
+            timestamp = now or to_iso(utc_now())
+            queue = store.load_dream_queue()
+            queued_jobs = [job for job in queue if job.get("status") == "queued"]
+            resolved_mode = _resolve_worker_mode(store, requested_mode=mode)
+            jobs_this_poll = 0
+            try:
+                with store.dream_worker_lock():
+                    _write_worker_health(
                         store,
-                        episode_paths=sorted(store.transcripts_dir.glob("*.jsonl")),
-                        now=timestamp,
+                        timestamp=timestamp,
+                        state="draining" if queued_jobs else "idle",
+                        queue_backlog=len(queued_jobs),
+                        active_phase="poll",
                     )
-                    backlog_results.append(backlog)
-                    if backlog.get("status") == "completed":
-                        _write_worker_health(
-                            store,
-                            timestamp=timestamp,
-                            state="draining",
-                            queue_backlog=0,
-                            last_success_at=timestamp,
-                        )
 
+                    if queued_jobs:
+                        limit = max_jobs_per_poll or len(queued_jobs)
+                        for job in queued_jobs[:limit]:
+                            _write_worker_health(
+                                store,
+                                timestamp=timestamp,
+                                state="draining",
+                                queue_backlog=len([item for item in queue if item.get("status") == "queued"]),
+                                active_job_id=str(job.get("job_id")),
+                                active_phase="job",
+                            )
+                            processed = _process_job(store, job, queue, now=timestamp, mode=resolved_mode)
+                            if processed is not None:
+                                processed_jobs.append(processed)
+                                jobs_this_poll += 1
+                                if processed["result"].get("status") == "completed":
+                                    _write_worker_health(
+                                        store,
+                                        timestamp=timestamp,
+                                        state="draining",
+                                        queue_backlog=len([
+                                            item
+                                            for item in store.load_dream_queue()
+                                            if item.get("status") == "queued"
+                                        ]),
+                                        last_success_at=timestamp,
+                                    )
+                    elif process_backlog:
+                        if resolved_mode in {"semantic", "hybrid"}:
+                            from .semantic_dreamer import semantic_dream_tick
+
+                            backlog = semantic_dream_tick(
+                                store,
+                                episode_paths=sorted(store.transcripts_dir.glob("*.jsonl")),
+                                now=timestamp,
+                                mode=resolved_mode,
+                            )
+                        else:
+                            backlog = dream_tick(
+                                store,
+                                episode_paths=sorted(store.transcripts_dir.glob("*.jsonl")),
+                                now=timestamp,
+                            )
+                        backlog_results.append(backlog)
+                        if backlog.get("status") == "completed":
+                            _write_worker_health(
+                                store,
+                                timestamp=timestamp,
+                                state="draining",
+                                queue_backlog=0,
+                                last_success_at=timestamp,
+                            )
+            except LockError:
+                lock_failures += 1
+                _record_worker_failure(store, reason="worker-lock-held", timestamp=timestamp)
                 pending_jobs = len([job for job in store.load_dream_queue() if job.get("status") == "queued"])
-                last_result = processed_jobs[-1]["result"]["status"] if processed_jobs else (
-                    backlog_results[-1]["status"] if backlog_results else "idle"
-                )
                 store.save_dream_worker_state(
                     {
                         "state": "idle" if pending_jobs == 0 else "queued",
                         "last_polled_at": timestamp,
                         "processed_jobs": len(processed_jobs),
                         "last_job_id": processed_jobs[-1]["job_id"] if processed_jobs else None,
-                        "last_result": last_result,
+                        "last_result": "worker-lock-held",
                         "queue_depth": pending_jobs,
+                        "work_mode": resolved_mode,
                     }
                 )
-                _write_worker_health(
-                    store,
-                    timestamp=timestamp,
-                    state="idle" if pending_jobs == 0 else "draining",
-                    queue_backlog=pending_jobs,
-                    active_job_id=None,
-                    active_phase=None,
-                )
-
-                if idle_exit and jobs_this_poll == 0 and (
-                    not backlog_results or backlog_results[-1]["status"] == "skipped"
-                ):
-                    break
+                if max_polls == 1:
+                    return {
+                        "run_id": worker_run_id,
+                        "status": "skipped",
+                        "reason": "worker-lock-held",
+                        "processed_jobs": [],
+                        "backlog_results": [],
+                        "agent_summary": "Dream worker lock held by another process; try again shortly.",
+                        "cli_output_version": CLI_JSON_VERSION,
+                    }
                 if (max_polls <= 0 or poll_count < max_polls) and interval_seconds > 0:
                     time.sleep(interval_seconds)
-    except LockError:
-        _record_worker_failure(store, reason="worker-lock-held", timestamp=now or to_iso(utc_now()))
-        return {
-            "run_id": worker_run_id,
-            "status": "skipped",
-            "reason": "worker-lock-held",
-            "processed_jobs": [],
-            "backlog_results": [],
-            "agent_summary": "Dream worker lock held by another process; try again shortly.",
-            "cli_output_version": CLI_JSON_VERSION,
-        }
+                continue
+
+            pending_jobs = len([job for job in store.load_dream_queue() if job.get("status") == "queued"])
+            last_result = processed_jobs[-1]["result"]["status"] if processed_jobs else (
+                backlog_results[-1]["status"] if backlog_results else "idle"
+            )
+            store.save_dream_worker_state(
+                {
+                    "state": "idle" if pending_jobs == 0 else "queued",
+                    "last_polled_at": timestamp,
+                    "processed_jobs": len(processed_jobs),
+                    "last_job_id": processed_jobs[-1]["job_id"] if processed_jobs else None,
+                    "last_result": last_result,
+                    "queue_depth": pending_jobs,
+                    "work_mode": resolved_mode,
+                }
+            )
+            _write_worker_health(
+                store,
+                timestamp=timestamp,
+                state="idle" if pending_jobs == 0 else "draining",
+                queue_backlog=pending_jobs,
+                active_job_id=None,
+                active_phase=None,
+            )
+
+            if idle_exit and jobs_this_poll == 0 and (
+                not backlog_results or backlog_results[-1]["status"] == "skipped"
+            ):
+                break
+            if (max_polls <= 0 or poll_count < max_polls) and interval_seconds > 0:
+                time.sleep(interval_seconds)
     finally:
         _write_worker_health(
             store,
@@ -425,6 +464,8 @@ def dream_worker(
         "processed_jobs": processed_jobs,
         "backlog_results": backlog_results,
         "queue_depth": len([job for job in store.load_dream_queue() if job.get("status") == "queued"]),
+        "lock_failures": lock_failures,
+        "work_mode": _resolve_worker_mode(store, requested_mode=mode),
         "agent_summary": _dream_worker_agent_summary(processed_jobs, backlog_results),
         "cli_output_version": CLI_JSON_VERSION,
     }
@@ -502,6 +543,7 @@ def _process_job(
     queue: list[dict[str, Any]],
     *,
     now: str,
+    mode: str,
 ) -> dict[str, Any] | None:
     job["status"] = "running"
     job["attempts"] = int(job.get("attempts", 0)) + 1
@@ -513,14 +555,27 @@ def _process_job(
     if not episode_paths:
         episode_paths = sorted(store.transcripts_dir.glob("*.jsonl"))
 
-    result = dream_run(
-        store,
-        episode_paths=episode_paths,
-        now=now,
-        max_recent_episodes=job.get("max_recent_episodes"),
-        min_episode_signals=job.get("min_episode_signals"),
-        trigger_class=str(job.get("trigger_class") or "queued-manual"),
-    )
+    if mode in {"semantic", "hybrid"}:
+        from .semantic_dreamer import semantic_dream_run
+
+        result = semantic_dream_run(
+            store,
+            episode_paths=episode_paths,
+            mode=mode,
+            now=now,
+            max_recent_episodes=job.get("max_recent_episodes"),
+            min_episode_signals=job.get("min_episode_signals"),
+            trigger_class=str(job.get("trigger_class") or "queued-manual"),
+        )
+    else:
+        result = dream_run(
+            store,
+            episode_paths=episode_paths,
+            now=now,
+            max_recent_episodes=job.get("max_recent_episodes"),
+            min_episode_signals=job.get("min_episode_signals"),
+            trigger_class=str(job.get("trigger_class") or "queued-manual"),
+        )
     if result.get("reason") == "lock-held":
         job["status"] = "queued"
         job["last_result"] = "lock-held"
@@ -543,6 +598,13 @@ def _process_job(
             timestamp=now,
         )
     return {"job_id": job["job_id"], "result": result}
+
+
+def _resolve_worker_mode(store: MemoryStore, *, requested_mode: str) -> str:
+    if requested_mode in {"deterministic", "semantic", "hybrid"}:
+        return requested_mode
+    configured = str(store.load_semantic_config().get("mode", "deterministic") or "deterministic")
+    return configured if configured in {"deterministic", "semantic", "hybrid"} else "deterministic"
 
 
 def _write_worker_health(

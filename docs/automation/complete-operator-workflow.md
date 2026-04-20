@@ -146,7 +146,7 @@ Under `<active_memory_root>/`:
 - `audit/semantic_dream/`, `audit/semantic_verifier/`
 - `state/learned_context_records.json` when promotion occurs
 
-Support bundle:
+Support bundle for debugging only. This does not validate semantic readiness or materialize learned context:
 
 ```bash
 opendream semantic bootstrap --workspace "$WORKSPACE"
@@ -164,6 +164,7 @@ Use this when the **backlog must change** because the repo or world changed (Lay
 opendream semantic setup --workspace "$WORKSPACE" --prefer no-extra-key --apply
 opendream semantic status --workspace "$WORKSPACE"
 opendream semantic adapters status --workspace "$WORKSPACE"
+opendream dream worker --workspace "$WORKSPACE" --once --mode auto   # optional manual nudge / diagnosis
 ```
 
 ### 4.2 Path A — Manual agent session (you paste context)

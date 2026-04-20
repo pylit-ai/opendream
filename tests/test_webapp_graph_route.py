@@ -109,6 +109,115 @@ class GraphRouteTests(unittest.TestCase):
         self.assertIn("memory_quality", payload)
         self.assertIn("context_pruning", payload)
         self.assertIn("last_semantic_run", payload)
+        self.assertIn("service_management", payload)
+
+    def test_concurrent_ui_context_requests_rebuild_index_without_racing(self) -> None:
+        self.store.observability_index_path.unlink(missing_ok=True)
+        payloads: list[dict[str, object]] = []
+        failures: list[BaseException] = []
+        lock = threading.Lock()
+
+        def worker() -> None:
+            try:
+                payload = self.get_json("/api/ui-context")
+            except BaseException as exc:  # pragma: no cover - captured for assertion
+                with lock:
+                    failures.append(exc)
+                return
+            with lock:
+                payloads.append(payload)
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=2)
+
+        self.assertFalse(failures, failures)
+        self.assertEqual(len(payloads), 4)
+        self.assertTrue(self.store.observability_index_path.exists())
+
+    def test_api_service_control_enable_and_disable(self) -> None:
+        try:
+            status, out = self.post_json("/api/service/control", {"action": "enable"})
+            self.assertEqual(status, 200)
+            self.assertEqual(out.get("status"), "ok")
+            self.assertEqual(out["service"]["policy"]["management_mode"], "managed")
+            self.assertTrue(out["service"]["running"])
+
+            status, out = self.post_json("/api/service/control", {"action": "disable"})
+            self.assertEqual(status, 200)
+            self.assertEqual(out.get("status"), "ok")
+            self.assertEqual(out["service"]["policy"]["management_mode"], "disabled")
+            self.assertFalse(out["service"]["running"])
+        finally:
+            self.post_json("/api/service/control", {"action": "disable"})
+
+    def test_head_and_favicon_requests_do_not_error(self) -> None:
+        head_req = urllib.request.Request(f"{self.base_url}/overview", method="HEAD")
+        with urllib.request.urlopen(head_req) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+
+        favicon_req = urllib.request.Request(f"{self.base_url}/favicon.ico", method="GET")
+        with urllib.request.urlopen(favicon_req) as resp:
+            self.assertEqual(resp.status, 204)
+            self.assertEqual(resp.read(), b"")
+
+    def test_api_service_control_poll_runs_semantic_cycle(self) -> None:
+        self.store.save_semantic_config(
+            {
+                **self.store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "direct-provider",
+                "candidate_strategies": ["direct-provider", "deterministic"],
+                "preferred_auth_mode": "direct-provider",
+            }
+        )
+        self.store.save_provider_registry(
+            [
+                {
+                    "provider_id": "openai-main",
+                    "transport": "openai",
+                    "model_id": "gpt-5.4",
+                    "roles": ["synthesis", "verification"],
+                    "health_status": "healthy",
+                }
+            ]
+        )
+        emit_event(
+            self.store,
+            kind="task_outcome",
+            content=(
+                "Workflow to reproduce the failure: run pytest tests/test_worker.py "
+                "because Redis is required locally."
+            ),
+            scope="project",
+            channel="cli",
+            message_ref="semantic-poll-1",
+            timestamp="2026-04-10T12:01:00Z",
+        )
+        emit_event(
+            self.store,
+            kind="task_outcome",
+            content=(
+                "The tests failed because the local Redis service was missing; "
+                "the working command sequence is docker compose up redis then pytest."
+            ),
+            scope="project",
+            channel="cli",
+            message_ref="semantic-poll-2",
+            timestamp="2026-04-10T12:02:00Z",
+        )
+
+        status, out = self.post_json("/api/service/control", {"action": "poll", "now": FIXED_NOW})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(out.get("status"), "ok")
+        self.assertEqual(out.get("action"), "poll")
+        self.assertTrue(out["result"]["backlog_results"])
+        self.assertEqual(out["result"]["backlog_results"][0]["status"], "completed")
+        self.assertEqual(out["overview"]["runtime_management"]["semantic_runtime"]["state"], "materialized")
 
     def test_api_ui_context_semantic_summary_from_disk_config(self) -> None:
         cfg = self.store.memory_root / "state" / "semantic_config.json"
@@ -155,11 +264,62 @@ class GraphRouteTests(unittest.TestCase):
                 }
             ]
         )
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-1"],
+                    "query_family_tags": ["python", "verification"],
+                    "summary": "The workspace repeatedly needs Python verification guidance.",
+                    "details": "Recent tasks often ask for verification and local Python tooling.",
+                    "assumptions": "Python workflow remains stable.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-19",
+                    "created_at": "2026-04-19T10:00:00Z",
+                    "fresh_until": "2026-04-26T10:00:00Z",
+                    "confidence": 0.87,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "active",
+                }
+            ]
+        )
         payload = self.get_json("/api/ui-context")
         self.assertEqual(payload.get("product_posture"), "semantic-first")
         self.assertEqual(payload.get("semantic_capability_state"), "ready")
         self.assertEqual(payload["scope_health"]["label"], "Semantic ready")
         self.assertEqual(payload["scope_health"]["link"], "/overview")
+
+    def test_api_ui_context_marks_applied_but_unevidenced_semantic_as_degraded(self) -> None:
+        self.store.save_semantic_config(
+            {
+                **self.store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "direct-provider",
+                "candidate_strategies": ["direct-provider", "deterministic"],
+                "preferred_auth_mode": "direct-provider",
+            }
+        )
+        self.store.save_provider_registry(
+            [
+                {
+                    "provider_id": "openai-main",
+                    "transport": "openai",
+                    "model_id": "gpt-5.4",
+                    "roles": ["synthesis", "verification"],
+                    "health_status": "healthy",
+                }
+            ]
+        )
+        payload = self.get_json("/api/ui-context")
+        self.assertEqual(payload.get("product_posture"), "semantic-first")
+        self.assertEqual(payload.get("semantic_capability_state"), "degraded")
+        self.assertEqual(payload["scope_health"]["label"], "Semantic degraded")
+        self.assertEqual(payload["scope_health"]["link"], "/settings")
 
     def test_post_semantic_dream_mode_persists(self) -> None:
         status, out = self.post_json("/api/semantic-dream-mode", {"mode": "hybrid"})
@@ -264,6 +424,11 @@ class GraphRouteTests(unittest.TestCase):
             "Health API",
             "Run live check",
             "Operator Snapshot",
+            "Background runtime",
+            "Semantic pipeline",
+            "Materialization state",
+            "Current memory surface",
+            "Last runtime effects",
             "od-overview-snapshot",
             "od-snapshot-group",
             "Snapshot APIs",
@@ -274,9 +439,13 @@ class GraphRouteTests(unittest.TestCase):
             "Context pruning evidence",
             "Last semantic run",
             "Semantic setup control center",
+            "Background runtime control center",
             "Advanced semantic controls",
             "Changing this selector updates configuration, but readiness is still derived",
             "od-dream-mode-select",
+            "odServiceAction",
+            "/api/service/control",
+            "Enable managed runtime",
             "semantic-dream-mode",
             "sidebar-mobile-open",
             "data-mobile-nav",

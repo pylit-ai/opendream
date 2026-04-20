@@ -177,7 +177,7 @@ def semantic_setup(
         next_actions.append(
             f"Run: opendream semantic setup --workspace . --prefer {preference} --apply"
         )
-        next_actions.append("Run: opendream semantic bootstrap --workspace .")
+        next_actions.append("Run: opendream dream worker --workspace . --once --mode auto")
 
     # Build warnings
     warnings: list[str] = []

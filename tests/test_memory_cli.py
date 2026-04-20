@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -10,7 +11,9 @@ import time
 import tomllib
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from opendream import cli
 from opendream.consolidator import consolidate
 from opendream.storage import DEFAULT_MEMORY_DIR, LEGACY_MEMORY_DIR, MemoryStore
 from opendream.validation import validate_document
@@ -170,6 +173,36 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(global_result["store_kind"], "global")
         self.assertEqual(project_store["store_kind"], "project")
         self.assertEqual(global_store["store_kind"], "global")
+
+    def test_command_observe_serve_handles_keyboard_interrupt_cleanly(self) -> None:
+        args = argparse.Namespace(
+            workspace=str(self.workspace),
+            memory_dir=None,
+            compat_mode=False,
+            now=None,
+            host="127.0.0.1",
+            port=0,
+        )
+
+        class _InterruptingServer:
+            server_address = ("127.0.0.1", 8771)
+
+            def serve_forever(self) -> None:
+                raise KeyboardInterrupt
+
+            def server_close(self) -> None:
+                self.closed = True
+
+        server = _InterruptingServer()
+        with (
+            patch("opendream.cli.build_server", return_value=server),
+            patch("opendream.cli.index_observability"),
+            patch("builtins.print"),
+        ):
+            result = cli.command_observe_serve(args)
+
+        self.assertEqual(result, {"status": "stopped", "host": "127.0.0.1", "port": 8771})
+        self.assertTrue(getattr(server, "closed", False))
 
     def test_emit_event_records_reporting_agent_with_unknown_default(self) -> None:
         run_cli(
@@ -566,6 +599,214 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn("agent_summary", out)
         self.assertIn("cli_output_version", out)
         self.assertIn("transcript", out["agent_summary"].lower())
+
+    def test_dream_worker_auto_mode_materializes_semantic_learning_from_events(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        store = MemoryStore(self.workspace)
+        store.save_semantic_config(
+            {
+                **store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "direct-provider",
+                "preferred_auth_mode": "direct-provider",
+                "candidate_strategies": ["direct-provider", "deterministic"],
+            }
+        )
+        store.save_provider_registry(
+            [
+                {
+                    "provider_id": "openai-primary",
+                    "transport": "openai",
+                    "model_id": "gpt-5.4",
+                    "roles": ["synthesis", "verification"],
+                    "health_status": "healthy",
+                }
+            ]
+        )
+        self.emit_runtime_event(
+            self.workspace,
+            kind="task_outcome",
+            content=(
+                "Workflow to reproduce the failure: run pytest tests/test_worker.py "
+                "because Redis is required locally."
+            ),
+            message_ref="semantic-worker-1",
+        )
+        self.emit_runtime_event(
+            self.workspace,
+            kind="task_outcome",
+            content=(
+                "The tests failed because the local Redis service was missing; "
+                "the working command sequence is docker compose up redis then pytest."
+            ),
+            message_ref="semantic-worker-2",
+        )
+
+        out = run_cli(
+            "dream",
+            "worker",
+            "--workspace",
+            str(self.workspace),
+            "--once",
+            "--mode",
+            "auto",
+            "--now",
+            FIXED_NOW,
+        )
+
+        self.assertEqual(out["status"], "completed")
+        self.assertTrue(out["backlog_results"])
+        backlog = out["backlog_results"][0]
+        self.assertEqual(backlog["status"], "completed")
+        self.assertEqual(backlog["mode"], "semantic")
+
+        semantic_status = run_cli("semantic", "status", "--workspace", str(self.workspace))
+        self.assertEqual(semantic_status["semantic_capability_state"], "ready")
+        self.assertGreaterEqual(semantic_status["learned_context"]["active"], 1)
+        self.assertEqual(semantic_status["last_semantic_run"], "semantic")
+
+    def test_dream_worker_looping_mode_recovers_after_transient_lock_contention(self) -> None:
+        from opendream.dream import dream_worker
+
+        run_cli("init", "--workspace", str(self.workspace))
+        store = MemoryStore(self.workspace)
+        result_holder: dict[str, object] = {}
+
+        def _run_worker() -> None:
+            result_holder["result"] = dream_worker(
+                store,
+                now=FIXED_NOW,
+                interval_seconds=0.05,
+                max_polls=2,
+                idle_exit=False,
+                mode="auto",
+            )
+
+        with store.dream_worker_lock():
+            thread = threading.Thread(target=_run_worker)
+            thread.start()
+            time.sleep(0.02)
+
+        thread.join(timeout=2)
+        self.assertIn("result", result_holder)
+        result = result_holder["result"]
+        self.assertEqual(result["status"], "completed")
+        self.assertGreaterEqual(result["lock_failures"], 1)
+        self.assertEqual(store.load_dream_worker_state()["last_result"], "skipped")
+        self.assertIn(
+            "worker-lock-held",
+            [item["reason"] for item in store.load_worker_health().get("recent_failures", [])],
+        )
+
+    def test_service_status_reports_semantic_runtime_diagnosis(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        store = MemoryStore(self.workspace)
+        store.save_semantic_config(
+            {
+                **store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "direct-provider",
+                "preferred_auth_mode": "direct-provider",
+                "candidate_strategies": ["direct-provider", "deterministic"],
+            }
+        )
+        store.save_provider_registry(
+            [
+                {
+                    "provider_id": "openai-primary",
+                    "transport": "openai",
+                    "model_id": "gpt-5.4",
+                    "roles": ["synthesis", "verification"],
+                    "health_status": "healthy",
+                }
+            ]
+        )
+        self.emit_runtime_event(
+            self.workspace,
+            kind="task_outcome",
+            content="The semantic worker should synthesize learned context from explicit event backlog.",
+            message_ref="semantic-status-1",
+        )
+
+        status = run_cli("service", "status", "--workspace", str(self.workspace))
+
+        self.assertIn("semantic_runtime", status)
+        semantic_runtime = status["semantic_runtime"]
+        self.assertEqual(semantic_runtime["state"], "awaiting_materialization")
+        self.assertEqual(semantic_runtime["work_mode"], "semantic")
+        self.assertTrue(semantic_runtime["has_pending_signal"])
+        self.assertEqual(semantic_runtime["latest_signal_source"], "explicit_events")
+
+    def test_semantic_setup_apply_runs_initial_cycle_when_signal_is_available(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        store = MemoryStore(self.workspace)
+        store.save_provider_registry(
+            [
+                {
+                    "provider_id": "openai-primary",
+                    "transport": "openai",
+                    "model_id": "gpt-5.4",
+                    "roles": ["synthesis", "verification"],
+                    "health_status": "healthy",
+                }
+            ]
+        )
+        self.emit_runtime_event(
+            self.workspace,
+            kind="task_outcome",
+            content=(
+                "Workflow to reproduce the failure: run pytest tests/test_worker.py "
+                "because Redis is required locally."
+            ),
+            message_ref="semantic-setup-1",
+        )
+        self.emit_runtime_event(
+            self.workspace,
+            kind="task_outcome",
+            content=(
+                "The tests failed because the local Redis service was missing; "
+                "the working command sequence is docker compose up redis then pytest."
+            ),
+            message_ref="semantic-setup-2",
+        )
+
+        out = run_cli(
+            "semantic",
+            "setup",
+            "--workspace",
+            str(self.workspace),
+            "--prefer",
+            "direct-provider",
+            "--apply",
+            "--now",
+            FIXED_NOW,
+        )
+
+        self.assertEqual(out["status"], "applied")
+        self.assertIn("initial_cycle", out)
+        self.assertTrue(out["initial_cycle"]["backlog_results"])
+        self.assertEqual(out["initial_cycle"]["backlog_results"][0]["status"], "completed")
+        self.assertEqual(out["readiness"]["semantic_capability_state"], "ready")
+
+    def test_workspace_upgrade_refreshes_managed_service_manifest(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        try:
+            run_cli("service", "enable", "--workspace", str(self.workspace))
+            store = MemoryStore(self.workspace)
+            manifest = store.load_service_manifest()
+            manifest["command"] = [part for part in manifest["command"] if part not in {"--mode", "auto"}]
+            store.save_service_manifest(manifest)
+
+            out = run_cli("workspace", "upgrade", "--workspace", str(self.workspace))
+
+            workspaces = out["workspaces"]
+            self.assertEqual(len(workspaces), 1)
+            self.assertIn("updated", workspaces[0]["runtime_management"]["steps"])
+            refreshed = store.load_service_manifest()
+            self.assertIn("--mode", refreshed["command"])
+            self.assertIn("auto", refreshed["command"])
+        finally:
+            run_cli("service", "disable", "--workspace", str(self.workspace))
 
     def test_prepare_context_merges_project_and_global_with_precedence(self) -> None:
         run_cli("init", "--workspace", str(self.global_workspace), "--store-kind", "global")
@@ -1718,6 +1959,44 @@ class MemoryCliIntegrationTests(unittest.TestCase):
                 "--purge",
                 check=False,
             )
+
+    def test_workspace_upgrade_ensures_background_runtime(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        try:
+            result = run_cli("workspace", "upgrade", "--workspace", str(self.workspace))
+            self.assertEqual(result["status"], "completed")
+            upgraded = result["workspaces"][0]
+            runtime = upgraded.get("runtime_management")
+            self.assertIsInstance(runtime, dict)
+            self.assertIn(runtime.get("status"), {"ensured", "started", "already-running"})
+
+            service = run_cli("service", "status", "--workspace", str(self.workspace))
+            self.assertTrue(service["installed"])
+            self.assertTrue(service["running"])
+            self.assertEqual(service["policy"]["management_mode"], "managed")
+        finally:
+            run_cli_raw("service", "disable", "--workspace", str(self.workspace), check=False)
+            run_cli_raw("uninstall-service", "--workspace", str(self.workspace), "--purge", check=False)
+
+    def test_service_enable_and_disable_manage_runtime_policy(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        try:
+            enabled = run_cli("service", "enable", "--workspace", str(self.workspace))
+            self.assertEqual(enabled["status"], "enabled")
+            self.assertEqual(enabled["policy"]["management_mode"], "managed")
+            self.assertTrue(enabled["service"]["running"])
+
+            disabled = run_cli("service", "disable", "--workspace", str(self.workspace))
+            self.assertEqual(disabled["status"], "disabled")
+            self.assertEqual(disabled["policy"]["management_mode"], "disabled")
+            self.assertFalse(disabled["service"]["running"])
+
+            status = run_cli("service", "status", "--workspace", str(self.workspace))
+            self.assertEqual(status["policy"]["management_mode"], "disabled")
+            self.assertFalse(status["running"])
+        finally:
+            run_cli_raw("service", "disable", "--workspace", str(self.workspace), check=False)
+            run_cli_raw("uninstall-service", "--workspace", str(self.workspace), "--purge", check=False)
 
     def test_service_autowire_is_idempotent_and_reversible(self) -> None:
         claude_settings = self.workspace / ".claude" / "settings.json"

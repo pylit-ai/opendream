@@ -222,6 +222,73 @@ class MemoryQualityTests(unittest.TestCase):
         )
         self.assertEqual(report["next_action"], "apply the recommended semantic strategy")
 
+    def test_runnable_semantic_path_without_learning_evidence_is_degraded(self) -> None:
+        now = "2026-04-19T12:00:00Z"
+        write_json(
+            self.store.semantic_config_path,
+            {
+                "mode": "semantic",
+                "execution_strategy": "direct-provider",
+                "preferred_auth_mode": "direct-provider",
+                "fallback_policy": "fallback_to_deterministic",
+            },
+        )
+        write_json(
+            self.store.provider_registry_path,
+            [
+                {
+                    "provider_id": "openai-primary",
+                    "transport": "openai",
+                    "model_id": "gpt-5.4",
+                    "roles": ["synthesis", "verification"],
+                    "health_status": "healthy",
+                }
+            ],
+        )
+        write_json(
+            self.store.durable_records_path,
+            [
+                {
+                    "memory_id": "decision-1",
+                    "type": "project_decision",
+                    "scope": "project",
+                    "title": "Decision: package-manager",
+                    "summary": "Use uv for local Python tasks.",
+                    "body": "Use uv for local Python tasks.",
+                    "status": "active",
+                    "confidence": 0.93,
+                    "salience": 0.88,
+                    "source_event_ids": ["evt-1"],
+                    "supersedes": [],
+                    "conflicts_with": [],
+                    "valid_from": "2026-04-18T10:00:00Z",
+                    "valid_to": None,
+                    "access_count": 0,
+                    "last_accessed_at": None,
+                    "created_at": "2026-04-18T10:00:00Z",
+                    "updated_at": "2026-04-18T10:00:00Z",
+                    "provenance_tier": "source_backed",
+                    "claim_class": "externally_checkable",
+                }
+            ],
+        )
+        write_json(self.store.learned_context_path, [])
+
+        report = analyze_memory_quality(self.store, now=now)
+
+        self.assertEqual(report["semantic_capability_state"], "degraded")
+        self.assertEqual(
+            report["semantic_unavailability_reason"],
+            "semantic path is configured, but learned-context activity has not materialized yet",
+        )
+        self.assertEqual(
+            report["next_action"],
+            "run a semantic dream cycle so learned-context starts materializing",
+        )
+        codes = {warning["code"] for warning in report["memory_quality"]["warnings"]}
+        self.assertIn("missing_learned_context_activity", codes)
+        self.assertNotIn("semantic_unavailable", codes)
+
 
 if __name__ == "__main__":
     unittest.main()

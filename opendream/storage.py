@@ -1257,8 +1257,24 @@ class MemoryStore:
 
     # --- Semantic audit ---
 
-    def write_semantic_dream_audit(self, run_id: str, payload: dict[str, Any]) -> Path:
+    def write_semantic_dream_audit(
+        self,
+        run_id: str,
+        payload: dict[str, Any],
+        *,
+        before_snapshot: dict[str, str] | None = None,
+        target_paths: list[Path] | None = None,
+    ) -> Path | dict[str, str]:
         self.ensure_layout()
+        if before_snapshot is not None:
+            return self.write_mutation_audit(
+                action="semantic_dream",
+                run_id=run_id,
+                target_paths=target_paths or [],
+                summary=payload,
+                before_snapshot=before_snapshot,
+                audit_dir=self.audit_semantic_dream_dir,
+            )
         path = self.audit_semantic_dream_dir / f"{run_id}.json"
         write_json(path, payload)
         return path

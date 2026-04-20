@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from . import workspace_catalog
+from .dream import dream_worker
 from .integration import emit_event
 from .observability import (
     build_graph,
@@ -21,7 +22,7 @@ from .observability import (
     query_runs,
 )
 from .semantic_dreamer import dream_status_semantic
-from .service import service_status
+from .service import disable_background_runtime, enable_background_runtime, restart_service, service_status, start_service, stop_service
 from .storage import MemoryStore
 from .util import CLI_JSON_VERSION, to_iso, utc_now
 from .validation import SchemaValidationError, validate_document
@@ -441,15 +442,27 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
     store: MemoryStore
 
     def do_GET(self) -> None:  # noqa: N802
+        self._dispatch_request(head_only=False)
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._dispatch_request(head_only=True)
+
+    def _dispatch_request(self, *, head_only: bool) -> None:
         parsed = urlparse(self.path)
         query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+        if parsed.path == "/favicon.ico":
+            self._write_empty(HTTPStatus.NO_CONTENT)
+            return
         if parsed.path.startswith("/api/stream"):
-            self._write_event_stream()
+            self._write_event_stream(head_only=head_only)
             return
         if parsed.path.startswith("/static/"):
-            self._serve_static(parsed.path)
+            self._serve_static(parsed.path, head_only=head_only)
             return
         if parsed.path.startswith("/api/"):
+            if head_only:
+                self._write_empty(HTTPStatus.OK, content_type="application/json; charset=utf-8")
+                return
             self._handle_api_get(parsed)
             return
         if parsed.path == "/graph":
@@ -460,7 +473,7 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 self.send_header("Location", location)
                 self.end_headers()
                 return
-        self._write_html(_index_html())
+        self._write_html(_index_html(), head_only=head_only)
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -499,6 +512,42 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 out = _ui_context_payload(self.store)
                 out["status"] = "ok"
                 self._write_json(out)
+                return
+            elif parsed.path == "/api/service/control":
+                action = str(payload.get("action", "")).strip()
+                if action == "enable":
+                    response = enable_background_runtime(self.store)
+                elif action == "disable":
+                    response = disable_background_runtime(self.store)
+                elif action == "start":
+                    response = start_service(self.store)
+                elif action == "stop":
+                    response = stop_service(self.store)
+                elif action == "restart":
+                    response = restart_service(self.store)
+                elif action == "poll":
+                    response = dream_worker(
+                        self.store,
+                        now=payload.get("now"),
+                        max_polls=1,
+                        idle_exit=True,
+                        process_backlog=True,
+                        mode="auto",
+                    )
+                else:
+                    self._write_json({"error": f"unsupported service action: {action}"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                index_observability(self.store)
+                self._write_json(
+                    {
+                        "status": "ok",
+                        "action": action,
+                        "service": service_status(self.store),
+                        "overview": load_or_build_index(self.store)["overview"],
+                        "ui_context": _ui_context_payload(self.store),
+                        "result": response,
+                    }
+                )
                 return
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -687,15 +736,23 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _write_html(self, body: str) -> None:
+    def _write_empty(self, status: HTTPStatus, *, content_type: str | None = None) -> None:
+        self.send_response(status)
+        if content_type:
+            self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _write_html(self, body: str, *, head_only: bool = False) -> None:
         payload = body.encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
-        self.wfile.write(payload)
+        if not head_only:
+            self.wfile.write(payload)
 
-    def _serve_static(self, request_path: str) -> None:
+    def _serve_static(self, request_path: str, *, head_only: bool = False) -> None:
         relative = unquote(request_path[len("/static/"):])
         if not relative or ".." in relative.split("/"):
             self.send_error(HTTPStatus.NOT_FOUND)
@@ -716,9 +773,10 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "public, max-age=86400")
         self.end_headers()
-        self.wfile.write(body)
+        if not head_only:
+            self.wfile.write(body)
 
-    def _write_event_stream(self) -> None:
+    def _write_event_stream(self, *, head_only: bool = False) -> None:
         snapshot = {
             "status": self.store.status_snapshot(),
             "overview": load_or_build_index(self.store)["overview"],
@@ -734,7 +792,8 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if not head_only:
+            self.wfile.write(body)
 
 
 def build_server(store: MemoryStore, *, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
@@ -818,6 +877,7 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
     memory_quality = overview.get("memory_quality") or {"state": "unknown", "warnings": [], "metrics": {}}
     context_pruning = overview.get("context_pruning") or {}
     execution_ownership = overview.get("execution_ownership") or {}
+    service = service_status(store)
 
     payload["product_posture"] = product_posture
     payload["semantic_capability_state"] = semantic_capability_state
@@ -826,6 +886,15 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
     payload["memory_quality"] = memory_quality
     payload["context_pruning"] = context_pruning
     payload["execution_ownership"] = execution_ownership
+    payload["service_management"] = {
+        "policy_mode": service.get("policy", {}).get("management_mode", "unknown"),
+        "installed": service.get("installed", False),
+        "running": service.get("running", False),
+        "health": service.get("health", "unknown"),
+        "backlog": service.get("backlog", 0),
+        "active_phase": service.get("active_phase"),
+        "last_success_at": service.get("last_success_at"),
+    }
     payload["last_semantic_run"] = {
         "mode": semantic_status.get("last_semantic_run"),
         "execution_strategy": semantic_status.get("execution_strategy"),

@@ -65,7 +65,7 @@ Semantic-first is the default **posture**, but posture and readiness are differe
 
 Semantic mode is optional. Without `semantic_config.json` (or with `"mode": "deterministic"`), the store behaves like deterministic-only for semantic **availability**. Use `opendream semantic config --workspace "$PWD"` and `opendream semantic status --workspace "$PWD"` to inspect configuration; see [semantic-mode-and-feature-radar-setup.md](automation/semantic-mode-and-feature-radar-setup.md) for file paths and a full setup sequence.
 
-Use `opendream semantic setup --workspace "$PWD" --apply` to detect available execution strategies, apply the recommendation, and scaffold the path it needs.
+Use `opendream semantic setup --workspace "$PWD" --apply` to detect available execution strategies, apply the recommendation, scaffold the path it needs, and run an immediate validation cycle. If you want to re-check later without changing config, use `opendream dream worker --workspace "$PWD" --once --mode auto`.
 
 ## What is learned context?
 
@@ -131,9 +131,13 @@ opendream workspace upgrade --workspace "$PWD"
 ```
 
 `workspace upgrade` repairs managed surfaces when needed, re-probes the
-workspace, and upserts its catalog entry so the upgraded repo shows up in
-`opendream workspace list` and the `/workspaces` dashboard. The workspace
-directory is never rewritten by catalog operations.
+workspace, ensures the managed background runtime for project workspaces unless
+you have explicitly disabled it, and upserts its catalog entry so the upgraded
+repo shows up in `opendream workspace list` and the `/workspaces` dashboard.
+The workspace directory is never rewritten by catalog operations. Use
+`opendream service disable --workspace "$PWD"` if a repo should stay manual,
+and `opendream service enable --workspace "$PWD"` to restore the primary
+ongoing-improvement path.
 
 ## I have existing workspaces that aren't showing up in `workspace list` — how do I add them?
 

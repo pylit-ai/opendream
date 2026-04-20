@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -61,6 +62,9 @@ from .reconciliation import run_reconciliation_sweep
 from .retriever import retrieve
 from .service import (
     autowire_adapters,
+    disable_background_runtime,
+    enable_background_runtime,
+    ensure_background_runtime,
     format_service_doctor,
     format_service_status,
     install_service,
@@ -973,6 +977,7 @@ def command_dream_worker(args: argparse.Namespace) -> dict[str, Any]:
         max_jobs_per_poll=args.max_jobs_per_poll,
         idle_exit=args.idle_exit,
         process_backlog=not args.no_backlog,
+        mode=args.mode,
     )
     result["workspace"] = str(store.workspace)
     result["memory_root"] = str(store.memory_root)
@@ -1113,7 +1118,8 @@ def command_observe_serve(args: argparse.Namespace) -> dict[str, Any]:
     port = int(server.server_address[1])
     print(json_dumps({"status": "serving", "host": host, "port": port, "url": f"http://{host}:{port}"}))
     try:
-        server.serve_forever()
+        with suppress(KeyboardInterrupt):
+            server.serve_forever()
     finally:
         server.server_close()
     return {"status": "stopped", "host": host, "port": port}
@@ -1266,6 +1272,7 @@ def command_workspace_upgrade(args: argparse.Namespace) -> dict[str, Any]:
             )
             continue
         activate_result = activate_agents(store, targets="configured", repair=True)
+        runtime_result = ensure_background_runtime(store)
         catalog_result = workspace_catalog.doctor(workspace=str(store.workspace))
         entry = catalog_result["entries"][0] if catalog_result.get("entries") else {}
         results.append(
@@ -1273,6 +1280,7 @@ def command_workspace_upgrade(args: argparse.Namespace) -> dict[str, Any]:
                 "workspace": str(store.workspace),
                 "status": "completed",
                 "activation_repair_status": activate_result.get("status", "unknown"),
+                "runtime_management": runtime_result,
                 "catalog_status_kind": entry.get("status_kind"),
             }
         )
@@ -1289,6 +1297,26 @@ def command_workspace_upgrade(args: argparse.Namespace) -> dict[str, Any]:
 def command_service_start(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
     return start_service(store)
+
+
+def command_service_enable(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return enable_background_runtime(
+        store,
+        interval_seconds=args.interval_seconds,
+        backend_mode=args.backend,
+        service_mode=args.service_mode,
+        install_root=Path(args.install_root).expanduser() if args.install_root else None,
+    )
+
+
+def command_service_disable(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return disable_background_runtime(store)
 
 
 def command_service_stop(args: argparse.Namespace) -> dict[str, Any]:
@@ -1392,6 +1420,7 @@ def command_semantic_bootstrap(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def command_semantic_setup(args: argparse.Namespace) -> dict[str, Any]:
+    from .dream import dream_worker
     from .semantic_dreamer import dream_status_semantic
     from .semantic_setup import apply_setup_recommendation, semantic_setup
 
@@ -1403,10 +1432,25 @@ def command_semantic_setup(args: argparse.Namespace) -> dict[str, Any]:
     if not store.is_initialized():
         store.initialize(store_kind="project", compat_mode=args.compat_mode)
     applied = apply_setup_recommendation(store, report)
+    runtime_result = ensure_background_runtime(store)
+    initial_cycle = dream_worker(
+        store,
+        now=args.now,
+        max_polls=1,
+        idle_exit=True,
+        process_backlog=True,
+        mode="auto",
+    )
+    runtime_result = {
+        **runtime_result,
+        "service": service_status(store, now=args.now),
+    }
     return {
         **report,
         "status": "applied",
         "applied": applied,
+        "runtime_management": runtime_result,
+        "initial_cycle": initial_cycle,
         "readiness": dream_status_semantic(store),
     }
 
@@ -1820,6 +1864,12 @@ def build_parser() -> argparse.ArgumentParser:
     dream_worker_parser.add_argument("--idle-exit", action="store_true", default=False)
     dream_worker_parser.add_argument("--once", action="store_true")
     dream_worker_parser.add_argument("--no-backlog", action="store_true")
+    dream_worker_parser.add_argument(
+        "--mode",
+        choices=["auto", "deterministic", "semantic", "hybrid"],
+        default="auto",
+        help="Worker mode: auto (follow workspace posture), deterministic, semantic, or hybrid",
+    )
     add_layout_arguments(dream_worker_parser)
     dream_worker_parser.set_defaults(func=command_dream_worker)
     dream_daemon_parser = dream_subparsers.add_parser(
@@ -1839,6 +1889,12 @@ def build_parser() -> argparse.ArgumentParser:
     dream_daemon_parser.add_argument("--idle-exit", action="store_true", default=False)
     dream_daemon_parser.add_argument("--once", action="store_true")
     dream_daemon_parser.add_argument("--no-backlog", action="store_true")
+    dream_daemon_parser.add_argument(
+        "--mode",
+        choices=["auto", "deterministic", "semantic", "hybrid"],
+        default="auto",
+        help="Daemon mode: auto (follow workspace posture), deterministic, semantic, or hybrid",
+    )
     add_layout_arguments(dream_daemon_parser)
     dream_daemon_parser.set_defaults(func=command_dream_worker)
 
@@ -2003,6 +2059,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Execution preference: no-extra-key (default) or direct-provider",
     )
     semantic_setup_parser.add_argument("--apply", action="store_true")
+    semantic_setup_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(semantic_setup_parser)
     semantic_setup_parser.set_defaults(func=command_semantic_setup)
 
@@ -2119,6 +2176,23 @@ def build_parser() -> argparse.ArgumentParser:
     service_start_parser.add_argument("--workspace", required=True)
     add_layout_arguments(service_start_parser)
     service_start_parser.set_defaults(func=command_service_start)
+
+    service_enable_parser = service_subparsers.add_parser(
+        "enable",
+        help="Enable managed background runtime policy and ensure the worker is running",
+    )
+    service_enable_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_enable_parser)
+    add_service_arguments(service_enable_parser)
+    service_enable_parser.set_defaults(func=command_service_enable)
+
+    service_disable_parser = service_subparsers.add_parser(
+        "disable",
+        help="Disable managed background runtime policy and stop the worker if it is running",
+    )
+    service_disable_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_disable_parser)
+    service_disable_parser.set_defaults(func=command_service_disable)
 
     service_stop_parser = service_subparsers.add_parser("stop", help="Stop the installed background service")
     service_stop_parser.add_argument("--workspace", required=True)
