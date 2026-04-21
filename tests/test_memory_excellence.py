@@ -630,6 +630,43 @@ class TestExtractorClaimClassification(unittest.TestCase):
         assert candidate is not None
         self.assertIn(candidate.claim_class, ("externally_checkable", "derived_abstraction", "speculative"))
 
+    def test_task_outcome_with_requirement_signal_is_typed_requirement(self) -> None:
+        event = {
+            "event_id": "evt-req-1",
+            "session_id": "s1",
+            "turn_id": "t1",
+            "timestamp": to_iso(utc_now()),
+            "scope": "project",
+            "kind": "task_outcome",
+            "source": {},
+            "content": "Redis must be running locally before the integration tests will pass.",
+            "tags": [],
+        }
+        candidate = extract_candidate(event, origin_mode="dream")
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.type, "environment_requirement")
+
+    def test_task_outcome_with_workflow_signal_is_typed_workflow_without_tag(self) -> None:
+        event = {
+            "event_id": "evt-flow-1",
+            "session_id": "s1",
+            "turn_id": "t1",
+            "timestamp": to_iso(utc_now()),
+            "scope": "project",
+            "kind": "task_outcome",
+            "source": {},
+            "content": (
+                "Working fix sequence: 1. docker compose up redis 2. pytest tests/test_worker.py "
+                "3. make verify"
+            ),
+            "tags": [],
+        }
+        candidate = extract_candidate(event, origin_mode="dream")
+        self.assertIsNotNone(candidate)
+        assert candidate is not None
+        self.assertEqual(candidate.type, "procedural_workflow")
+
 
 class TestMemoryExcellenceScorecard(unittest.TestCase):
     """WS11: Memory-excellence evaluation and release gates."""

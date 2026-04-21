@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from .claim_verification import classify_claim, verify_claim
+from .extractor import build_title, classify_event, parse_workflow_steps
 from .models import ConsolidationOperation, MemoryRecord, RelationEdge, StartupIndexEntry
 from .planner import build_plan
 from .relation_graph import create_relation_store
@@ -164,6 +165,63 @@ def _bump(summary: dict[str, Any], key: str, amount: int = 1) -> None:
     summary[key] = int(summary.get(key, 0)) + amount
 
 
+_RETYPE_ELIGIBLE_TYPES = frozenset(
+    {"project_decision", "environment_requirement", "procedural_workflow", "anti_pattern", "user_preference"}
+)
+
+
+def _retype_generic_records_from_source_events(
+    records: list[dict[str, Any]],
+    *,
+    events_by_id: dict[str, dict[str, Any]],
+    operations: list[ConsolidationOperation],
+    summary: dict[str, Any],
+    run_id: str,
+    now: str,
+) -> None:
+    for record in records:
+        if record.get("status") != "active" or record.get("type") != "semantic_fact":
+            continue
+        source_events = [
+            events_by_id[event_id]
+            for event_id in record.get("source_event_ids", [])
+            if event_id in events_by_id
+        ]
+        if not source_events:
+            continue
+        inferred_types = {
+            inferred
+            for event in source_events
+            if (inferred := classify_event(event)) in _RETYPE_ELIGIBLE_TYPES
+        }
+        if len(inferred_types) != 1:
+            continue
+        inferred_type = next(iter(inferred_types))
+        exemplar = source_events[-1]
+        record["type"] = inferred_type
+        record["title"] = build_title(exemplar, inferred_type)
+        record["claim_class"] = classify_claim(record["body"], title=record["title"])
+        if inferred_type == "procedural_workflow":
+            steps = parse_workflow_steps(record["body"])
+            if steps:
+                record["workflow_steps"] = steps
+        elif "workflow_steps" in record:
+            record.pop("workflow_steps", None)
+        record["updated_at"] = now
+        _bump(summary, "updated")
+        operations.append(
+            _make_operation(
+                run_id,
+                "update",
+                record["memory_id"],
+                f"retyped generic semantic_fact to {inferred_type} from source event evidence",
+                list(record.get("source_event_ids", [])),
+                now=now,
+                payload={"retyped_from": "semantic_fact", "retyped_to": inferred_type},
+            )
+        )
+
+
 def consolidate(
     store: MemoryStore,
     *,
@@ -258,6 +316,16 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
             run_id=run_id,
             now=now,
         )
+
+    events_by_id = {str(event.get("event_id", "")): event for event in store.load_events()}
+    _retype_generic_records_from_source_events(
+        existing_records,
+        events_by_id=events_by_id,
+        operations=operations,
+        summary=summary,
+        run_id=run_id,
+        now=now,
+    )
 
     # Claim verification pass: verify externally checkable claims.
     verification_reports: list[dict[str, Any]] = []

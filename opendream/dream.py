@@ -9,7 +9,7 @@ from .boundaries import boundary_enforcement_report, default_allowed_write_roots
 from .episodes import latest_episode_timestamp, load_episode_rows, looks_memory_worthy, row_to_event
 from .integration import maintain
 from .storage import LockError, MemoryStore
-from .util import CLI_JSON_VERSION, parse_timestamp, semantic_tokens, stable_id, to_iso, utc_now
+from .util import CLI_JSON_VERSION, parse_timestamp, prune_recent_failures, semantic_tokens, stable_id, to_iso, utc_now
 from .validation import validate_document
 
 _UNSET = object()
@@ -627,7 +627,11 @@ def _write_worker_health(
         "active_job_id": existing.get("active_job_id") if active_job_id is _UNSET else active_job_id,
         "active_phase": existing.get("active_phase") if active_phase is _UNSET else active_phase,
         "restart_count": int(existing.get("restart_count", 0)) + (1 if existing.get("pid") != os.getpid() else 0),
-        "recent_failures": existing.get("recent_failures", []),
+        "recent_failures": prune_recent_failures(
+            existing.get("recent_failures", []),
+            now=timestamp,
+            last_success_at=last_success_at if last_success_at is not None else existing.get("last_success_at"),
+        ),
         "state": state,
         "service_name": store.load_service_manifest().get("service_name"),
         "supervisor_kind": store.load_service_manifest().get("supervisor_kind"),
@@ -640,7 +644,11 @@ def _record_worker_failure(store: MemoryStore, *, reason: str, timestamp: str) -
     health = store.load_worker_health()
     failures = list(health.get("recent_failures", []))
     failures.append({"at": timestamp, "reason": reason})
-    health["recent_failures"] = failures[-5:]
+    health["recent_failures"] = prune_recent_failures(
+        failures,
+        now=timestamp,
+        last_success_at=health.get("last_success_at"),
+    )
     health["state"] = "degraded"
     health["last_loop_at"] = timestamp
     health["pid"] = os.getpid()

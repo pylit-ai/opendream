@@ -28,6 +28,7 @@ from .util import (
     atomic_write_text,
     ensure_relative_to,
     parse_timestamp,
+    prune_recent_failures,
     read_json,
     stable_id,
     summarize,
@@ -506,6 +507,7 @@ class MemoryStore:
         timestamp = now or to_iso(utc_now())
         metadata = self.load_store_metadata()
         if not self.is_initialized():
+            worker_health: dict[str, Any] = {}
             return {
                 "workspace": str(self.workspace),
                 "store_id": metadata["store_id"],
@@ -532,7 +534,7 @@ class MemoryStore:
                     "lock": self.dream_lock_state(),
                     "worker_lock": self.dream_worker_lock_state(),
                     "worker": {"state": "idle", "processed_jobs": 0},
-                    "worker_health": self.load_worker_health(),
+                    "worker_health": worker_health,
                     "policy": metadata["dream"],
                     "transcript_dir": str(self.transcripts_dir),
                     "available_episode_files": 0,
@@ -554,6 +556,15 @@ class MemoryStore:
         dream_state = self.load_dream_state()
         dream_queue = self.load_dream_queue()
         dream_worker_state = self.load_dream_worker_state()
+        worker_health = self.load_worker_health()
+        worker_health = {
+            **worker_health,
+            "recent_failures": prune_recent_failures(
+                worker_health.get("recent_failures", []),
+                now=timestamp,
+                last_success_at=worker_health.get("last_success_at"),
+            ),
+        }
         next_eligible_reason = "eligible"
         next_eligible_at = None
 
@@ -598,7 +609,7 @@ class MemoryStore:
                 "lock": self.dream_lock_state(),
                 "worker_lock": self.dream_worker_lock_state(),
                 "worker": dream_worker_state or {"state": "idle", "processed_jobs": 0},
-                "worker_health": self.load_worker_health(),
+                "worker_health": worker_health,
                 "policy": self.load_store_metadata()["dream"],
                 "transcript_dir": str(self.transcripts_dir),
                 "available_episode_files": len(list(self.transcripts_dir.glob("*.jsonl"))),

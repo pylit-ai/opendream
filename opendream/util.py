@@ -5,7 +5,7 @@ import json
 import os
 import re
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -172,6 +172,42 @@ def append_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def prune_recent_failures(
+    failures: list[dict[str, Any]] | None,
+    *,
+    now: str | None = None,
+    last_success_at: str | None = None,
+    recent_limit: int = 5,
+    retention_hours: int = 24,
+) -> list[dict[str, Any]]:
+    rows = [row for row in (failures or []) if isinstance(row, dict)]
+    if not rows:
+        return []
+    current = parse_timestamp(now) if now else utc_now()
+    retention_cutoff = current - timedelta(hours=retention_hours)
+    success_ts = parse_timestamp(last_success_at) if last_success_at else None
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        at = row.get("at")
+        if not isinstance(at, str):
+            continue
+        try:
+            row_ts = parse_timestamp(at)
+        except ValueError:
+            continue
+        if row_ts < retention_cutoff:
+            continue
+        reason = str(row.get("reason", ""))
+        if (
+            reason == "worker-lock-held"
+            and success_ts is not None
+            and row_ts < success_ts
+        ):
+            continue
+        kept.append({"at": at, "reason": reason})
+    return kept[-recent_limit:]
 
 
 def sha256_path(path: Path) -> str:

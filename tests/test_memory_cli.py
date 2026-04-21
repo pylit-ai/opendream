@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from opendream import cli
 from opendream.consolidator import consolidate
+from opendream.models import MemoryRecord
 from opendream.storage import DEFAULT_MEMORY_DIR, LEGACY_MEMORY_DIR, MemoryStore
 from opendream.validation import validate_document
 
@@ -697,6 +698,144 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "worker-lock-held",
             [item["reason"] for item in store.load_worker_health().get("recent_failures", [])],
         )
+
+    def test_service_status_hides_stale_lock_contention_after_later_success(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        store = MemoryStore(self.workspace)
+        store.save_worker_health(
+            {
+                "pid": 1234,
+                "started_at": "2026-04-20T10:00:00Z",
+                "last_loop_at": "2026-04-20T10:10:00Z",
+                "last_success_at": "2026-04-20T12:00:00Z",
+                "queue_backlog": 0,
+                "active_job_id": None,
+                "active_phase": None,
+                "restart_count": 0,
+                "recent_failures": [
+                    {"at": "2026-04-20T10:05:00Z", "reason": "worker-lock-held"},
+                    {"at": "2026-04-20T11:50:00Z", "reason": "provider-timeout"},
+                ],
+                "state": "idle",
+                "service_name": None,
+                "supervisor_kind": None,
+            }
+        )
+
+        status = run_cli("service", "status", "--workspace", str(self.workspace))
+
+        self.assertEqual(
+            [item["reason"] for item in status["recent_failures"]],
+            ["provider-timeout"],
+        )
+        self.assertEqual(
+            [item["reason"] for item in status["worker_health"]["recent_failures"]],
+            ["provider-timeout"],
+        )
+
+    def test_service_status_hides_lock_contention_immediately_after_later_success(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        store = MemoryStore(self.workspace)
+        store.save_worker_health(
+            {
+                "pid": 1234,
+                "started_at": "2026-04-20T10:00:00Z",
+                "last_loop_at": "2026-04-20T10:10:00Z",
+                "last_success_at": "2026-04-20T10:06:00Z",
+                "queue_backlog": 0,
+                "active_job_id": None,
+                "active_phase": None,
+                "restart_count": 0,
+                "recent_failures": [
+                    {"at": "2026-04-20T10:05:00Z", "reason": "worker-lock-held"},
+                    {"at": "2026-04-20T10:05:30Z", "reason": "provider-timeout"},
+                ],
+                "state": "idle",
+                "service_name": None,
+                "supervisor_kind": None,
+            }
+        )
+
+        status = run_cli("service", "status", "--workspace", str(self.workspace))
+
+        self.assertEqual(
+            [item["reason"] for item in status["recent_failures"]],
+            ["provider-timeout"],
+        )
+
+    def test_status_hides_stale_lock_contention_after_later_success(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        store = MemoryStore(self.workspace)
+        store.save_worker_health(
+            {
+                "pid": 1234,
+                "started_at": "2026-04-20T10:00:00Z",
+                "last_loop_at": "2026-04-20T10:10:00Z",
+                "last_success_at": "2026-04-20T12:00:00Z",
+                "queue_backlog": 0,
+                "active_job_id": None,
+                "active_phase": None,
+                "restart_count": 0,
+                "recent_failures": [
+                    {"at": "2026-04-20T10:05:00Z", "reason": "worker-lock-held"},
+                    {"at": "2026-04-20T11:50:00Z", "reason": "provider-timeout"},
+                ],
+                "state": "idle",
+                "service_name": None,
+                "supervisor_kind": None,
+            }
+        )
+
+        status = run_cli("status", "--workspace", str(self.workspace))
+
+        self.assertEqual(
+            [item["reason"] for item in status["dream"]["worker_health"]["recent_failures"]],
+            ["provider-timeout"],
+        )
+
+    def test_consolidate_retypes_generic_semantic_fact_when_source_events_are_specific(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        store = MemoryStore(self.workspace)
+        self.emit_runtime_event(
+            self.workspace,
+            kind="task_outcome",
+            content="Redis must be running locally before the integration tests will pass.",
+            message_ref="retype-1",
+        )
+        event = store.load_events()[-1]
+        store.save_durable_records(
+            [
+                MemoryRecord(
+                    memory_id="mem_semantic_fact_1",
+                    type="semantic_fact",
+                    scope="project",
+                    title="Fact: redis-local-tests",
+                    summary="Redis must be running locally before the integration tests will pass.",
+                    body="Redis must be running locally before the integration tests will pass.",
+                    status="active",
+                    confidence=0.6,
+                    salience=0.6,
+                    source_event_ids=[event["event_id"]],
+                    supersedes=[],
+                    conflicts_with=[],
+                    valid_from=FIXED_NOW,
+                    valid_to=None,
+                    access_count=0,
+                    last_accessed_at=None,
+                    created_at=FIXED_NOW,
+                    updated_at=FIXED_NOW,
+                    provenance_tier="inferred",
+                    claim_class="externally_checkable",
+                )
+            ]
+        )
+
+        result = consolidate(store, now="2026-04-20T12:10:00Z")
+        records = store.load_durable_records()
+
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(records[0]["type"], "environment_requirement")
+        self.assertTrue(records[0]["title"].startswith("Environment:"))
 
     def test_service_status_reports_semantic_runtime_diagnosis(self) -> None:
         run_cli("init", "--workspace", str(self.workspace))

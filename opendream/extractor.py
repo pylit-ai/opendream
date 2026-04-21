@@ -19,11 +19,36 @@ TYPE_CONFIDENCE = {
 }
 
 _STEP_RE = re.compile(r"^\s*(?:\d+[.)]\s+|[-*]\s+)(.+)", re.MULTILINE)
+_WORKFLOW_SIGNAL_RE = re.compile(
+    r"(?:\b(?:workflow|sequence|steps?|runbook|command sequence)\b|\b\d+[.)]\s+\S)",
+    re.IGNORECASE,
+)
+_REQUIREMENT_SIGNAL_RE = re.compile(
+    r"\b(?:must|must be|required|requires|need to|needs to|before .*?(?:pass|run|work|succeed))\b",
+    re.IGNORECASE,
+)
+_DECISION_SIGNAL_RE = re.compile(
+    r"\b(?:use|prefer|adopt|standardize on|keep using|switch to|align on)\b",
+    re.IGNORECASE,
+)
+
+
+def _infer_outcome_type(kind: str, content: str, tags: dict[str, list[str]]) -> str | None:
+    if kind not in {"debug_outcome", "task_outcome", "tool_failure"}:
+        return None
+    if "workflow" in tags or _WORKFLOW_SIGNAL_RE.search(content):
+        return "procedural_workflow"
+    if _REQUIREMENT_SIGNAL_RE.search(content):
+        return "environment_requirement"
+    if kind == "task_outcome" and _DECISION_SIGNAL_RE.search(content):
+        return "project_decision"
+    return None
 
 
 def classify_event(event: dict[str, Any]) -> str | None:
     kind = event["kind"]
-    content = event["content"].lower()
+    content = event["content"]
+    content_lower = content.lower()
     tags = parse_tags(event.get("tags"))
 
     if event.get("sensitivity") in {"secret", "sensitive", "do_not_store"}:
@@ -42,9 +67,12 @@ def classify_event(event: dict[str, Any]) -> str | None:
     if kind in {"workflow_step", "task_outcome"} and "workflow" in tags:
         return "procedural_workflow"
     if kind in {"debug_outcome", "tool_failure"} and (
-        "anti-pattern" in content or "avoid" in content or "anti-pattern" in tags
+        "anti-pattern" in content_lower or "avoid" in content_lower or "anti-pattern" in tags
     ):
         return "anti_pattern"
+    inferred = _infer_outcome_type(kind, content, tags)
+    if inferred is not None:
+        return inferred
     if kind in {"debug_outcome", "task_outcome", "tool_failure"}:
         return "semantic_fact"
     return None

@@ -16,7 +16,16 @@ from typing import Any
 
 from .activation import SUPPORTED_TARGETS
 from .storage import MemoryStore
-from .util import atomic_write_text, ensure_relative_to, parse_timestamp, sha256_path, stable_id, to_iso, utc_now
+from .util import (
+    atomic_write_text,
+    ensure_relative_to,
+    parse_timestamp,
+    prune_recent_failures,
+    sha256_path,
+    stable_id,
+    to_iso,
+    utc_now,
+)
 from .validation import validate_document
 
 TEMPLATE_ROOT = Path(__file__).with_name("templates")
@@ -504,6 +513,13 @@ def service_status(store: MemoryStore, *, now: str | None = None) -> dict[str, A
     runtime = store.load_service_runtime()
     runtime.setdefault("management_mode", _default_management_mode(store))
     worker_health = store.load_worker_health()
+    recent_failures = prune_recent_failures(
+        worker_health.get("recent_failures", []),
+        now=timestamp,
+        last_success_at=worker_health.get("last_success_at"),
+        recent_limit=RECENT_FAILURE_LIMIT,
+    )
+    worker_health = {**worker_health, "recent_failures": recent_failures}
     queue = store.load_dream_queue()
     queue_backlog = len([job for job in queue if job.get("status") == "queued"])
     install_path = Path(str(manifest.get("install_path", ""))).expanduser() if manifest else None
@@ -553,7 +569,7 @@ def service_status(store: MemoryStore, *, now: str | None = None) -> dict[str, A
         "pid": pid,
         "restart_count": int(runtime.get("restart_count", 0)),
         "start_count": int(runtime.get("start_count", 0)),
-        "recent_failures": worker_health.get("recent_failures", []),
+        "recent_failures": recent_failures,
         "policy": policy,
         "semantic_runtime": semantic_runtime,
         "runtime": runtime,
