@@ -7,11 +7,14 @@ review/reject/supersede flows.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from .models import MemoryCandidate
 from .storage import MemoryStore
-from .util import semantic_tokens, stable_id, to_iso, utc_now
+from .util import parse_timestamp, semantic_tokens, stable_id, to_iso, utc_now
+
+_LEARNED_CONTEXT_RESTORE_WINDOW_HOURS = 24
 
 
 def deterministic_verify(
@@ -306,11 +309,16 @@ def reject_proposal(
     now: str | None = None,
 ) -> dict[str, Any]:
     """Reject a learned context record."""
+    timestamp = now or to_iso(utc_now())
     records = store.load_learned_context_records()
     for record in records:
         if record.get("record_id") == record_id:
             record["status"] = "rejected"
             record["verifier_status"] = "rejected"
+            record["status_changed_at"] = timestamp
+            record["restorable_until"] = to_iso(
+                parse_timestamp(timestamp) + timedelta(hours=_LEARNED_CONTEXT_RESTORE_WINDOW_HOURS)
+            )
             store.save_learned_context_records(records)
             return {"status": "rejected", "record_id": record_id}
     return {"status": "not_found", "record_id": record_id}
@@ -324,14 +332,62 @@ def supersede_record(
     now: str | None = None,
 ) -> dict[str, Any]:
     """Mark a learned context record as superseded by another."""
+    timestamp = now or to_iso(utc_now())
     records = store.load_learned_context_records()
     for record in records:
         if record.get("record_id") == old_record_id:
             record["status"] = "superseded"
             record["superseded_by"] = new_record_id
+            record["status_changed_at"] = timestamp
+            record["restorable_until"] = to_iso(
+                parse_timestamp(timestamp) + timedelta(hours=_LEARNED_CONTEXT_RESTORE_WINDOW_HOURS)
+            )
             store.save_learned_context_records(records)
             return {"status": "superseded", "old_id": old_record_id, "new_id": new_record_id}
     return {"status": "not_found", "record_id": old_record_id}
+
+
+def restore_record(
+    store: MemoryStore,
+    record_id: str,
+    *,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Reactivate a recently pruned learned-context record within its restore window."""
+    timestamp = now or to_iso(utc_now())
+    records = store.load_learned_context_records()
+    for record in records:
+        if record.get("record_id") != record_id:
+            continue
+        current_status = str(record.get("status") or "")
+        if current_status == "active":
+            return {"status": "already_active", "record_id": record_id}
+        if current_status not in {"superseded", "archived", "rejected"}:
+            return {
+                "status": "not_restorable",
+                "record_id": record_id,
+                "reason": f"status {current_status or 'unknown'} is not restorable",
+            }
+        restorable_until = str(record.get("restorable_until") or "").strip()
+        if not restorable_until:
+            return {
+                "status": "restore_window_missing",
+                "record_id": record_id,
+            }
+        if parse_timestamp(restorable_until) < parse_timestamp(timestamp):
+            return {
+                "status": "restore_window_expired",
+                "record_id": record_id,
+                "restorable_until": restorable_until,
+            }
+        record["restored_from_status"] = current_status
+        record["restored_at"] = timestamp
+        record["status"] = "active"
+        record["verifier_status"] = "approved"
+        record.pop("superseded_by", None)
+        store.save_learned_context_records(records)
+        return {"status": "restored", "record_id": record_id}
+    return {"status": "not_found", "record_id": record_id}
 
 
 def distill_to_durable_candidate(

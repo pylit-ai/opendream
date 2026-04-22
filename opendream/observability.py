@@ -11,7 +11,7 @@ from .memory_quality import LOW_SIGNAL_TYPES, analyze_memory_quality
 from .models import Annotation, ObservabilityConsolidationOp, PhaseTrace, ReviewDecision
 from .semantic_readiness import empty_context_pruning
 from .storage import MemoryStore
-from .util import read_json, sha256_path, stable_id, to_iso, utc_now
+from .util import parse_timestamp, read_json, sha256_path, stable_id, to_iso, utc_now
 
 
 def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
@@ -720,7 +720,7 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
     semantic_config = store.load_semantic_config()
     semantic_surface = _semantic_quality_surface(store, now=timestamp)
     runtime_management = _build_runtime_management_overview(store, timestamp)
-    memory_surface = _build_memory_surface(store, records)
+    memory_surface = _build_memory_surface(store, records, now=timestamp)
     last_runtime_effects = _build_last_runtime_effects(runs)
     overview: dict[str, Any] = {
         "generated_at": timestamp,
@@ -903,12 +903,17 @@ def _runtime_management_summary(status: dict[str, Any], semantic_runtime: dict[s
     return "background runtime is installed but not currently running"
 
 
-def _build_memory_surface(store: MemoryStore, records: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_memory_surface(
+    store: MemoryStore,
+    records: list[dict[str, Any]],
+    *,
+    now: str,
+) -> dict[str, Any]:
     active_durable = [record for record in records if record.get("status") == "active"]
     contested = [record for record in records if record.get("status") == "contested"]
-    learned_context = [
-        record for record in store.load_learned_context_records() if record.get("status") == "active"
-    ]
+    learned_context_records = store.load_learned_context_records()
+    learned_context = [record for record in learned_context_records if record.get("status") == "active"]
+    recent_pruned_learned_context = _recent_pruned_learned_context(learned_context_records, now=now)
     type_counts = Counter(str(record.get("type", "unknown")) for record in active_durable)
     type_mix = [
         {"type": memory_type, "count": count}
@@ -935,9 +940,11 @@ def _build_memory_surface(store: MemoryStore, records: list[dict[str, Any]]) -> 
         "durable_active_total": len(active_durable),
         "durable_contested_total": len(contested),
         "learned_context_active_total": len(learned_context),
+        "learned_context_recently_pruned_total": len(recent_pruned_learned_context),
         "low_signal_share": round(low_signal_count / max(len(active_durable), 1), 3) if active_durable else 0.0,
         "type_mix": type_mix,
         "recent_highlights": recent_highlights,
+        "recent_pruned_learned_context": recent_pruned_learned_context,
         "startup_highlights": [
             {
                 "memory_id": entry.get("memory_id"),
@@ -948,6 +955,43 @@ def _build_memory_surface(store: MemoryStore, records: list[dict[str, Any]]) -> 
             for entry in startup_entries[:5]
         ],
     }
+
+
+def _recent_pruned_learned_context(records: list[dict[str, Any]], *, now: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    now_ts = parse_timestamp(now)
+    for record in records:
+        status = str(record.get("status") or "")
+        if status == "active":
+            continue
+        changed_at = str(record.get("status_changed_at") or record.get("created_at") or "")
+        restorable_until = str(record.get("restorable_until") or "")
+        restore_allowed = False
+        if restorable_until:
+            try:
+                restore_allowed = parse_timestamp(restorable_until) >= now_ts
+            except (TypeError, ValueError):
+                restore_allowed = False
+        items.append(
+            {
+                "record_id": record.get("record_id"),
+                "summary": record.get("summary"),
+                "status": status or "unknown",
+                "status_changed_at": changed_at or None,
+                "restorable_until": restorable_until or None,
+                "restore_allowed": restore_allowed,
+                "superseded_by": record.get("superseded_by"),
+                "confidence": record.get("confidence"),
+            }
+        )
+    items.sort(
+        key=lambda item: (
+            str(item.get("status_changed_at") or ""),
+            str(item.get("record_id") or ""),
+        ),
+        reverse=True,
+    )
+    return items[:5]
 
 
 def _build_last_runtime_effects(runs: list[dict[str, Any]]) -> dict[str, Any]:

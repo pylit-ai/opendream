@@ -336,6 +336,112 @@ class GraphRouteTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("error", out)
 
+    def test_api_overview_includes_recent_pruned_learned_context(self) -> None:
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-active-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-1"],
+                    "query_family_tags": ["workflow"],
+                    "summary": "Keep the active semantic workflow note available.",
+                    "details": "This remains active and should not appear in the pruned list.",
+                    "assumptions": "Workflow is current.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-19",
+                    "created_at": "2026-04-19T09:00:00Z",
+                    "fresh_until": "2026-04-26T09:00:00Z",
+                    "confidence": 0.88,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "active",
+                },
+                {
+                    "record_id": "lc-pruned-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-2"],
+                    "query_family_tags": ["redis", "jobs"],
+                    "summary": "Redis troubleshooting note was recently superseded.",
+                    "details": "A newer semantic note replaced this one.",
+                    "assumptions": "Redis workflow moved forward.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-19",
+                    "created_at": "2026-04-19T08:00:00Z",
+                    "fresh_until": "2026-04-26T08:00:00Z",
+                    "confidence": 0.64,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "superseded",
+                    "superseded_by": "lc-active-1",
+                    "status_changed_at": "2026-04-10T11:30:00Z",
+                    "restorable_until": "2026-04-11T11:30:00Z",
+                },
+            ]
+        )
+        index_observability(self.store, now=FIXED_NOW)
+
+        payload = self.get_json("/api/overview")
+        surface = payload.get("memory_surface")
+        self.assertIsInstance(surface, dict)
+        recent_pruned = surface.get("recent_pruned_learned_context")
+        self.assertIsInstance(recent_pruned, list)
+        self.assertEqual(len(recent_pruned), 1)
+        self.assertEqual(recent_pruned[0]["record_id"], "lc-pruned-1")
+        self.assertEqual(recent_pruned[0]["status"], "superseded")
+        self.assertTrue(recent_pruned[0]["restore_allowed"])
+        self.assertEqual(surface.get("learned_context_recently_pruned_total"), 1)
+
+    def test_post_learned_context_restore_reactivates_recent_record(self) -> None:
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-restore-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-restore"],
+                    "query_family_tags": ["verification"],
+                    "summary": "Recently pruned verification note.",
+                    "details": "This note should be recoverable for a short window.",
+                    "assumptions": "The note is still useful.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-19",
+                    "created_at": "2026-04-19T08:00:00Z",
+                    "fresh_until": "2026-04-26T08:00:00Z",
+                    "confidence": 0.72,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "superseded",
+                    "superseded_by": "lc-newer-1",
+                    "status_changed_at": "2026-04-10T11:45:00Z",
+                    "restorable_until": "2026-04-11T11:45:00Z",
+                }
+            ]
+        )
+        index_observability(self.store, now=FIXED_NOW)
+
+        status, out = self.post_json(
+            "/api/learned-context/restore",
+            {"record_id": "lc-restore-1", "now": FIXED_NOW},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(out.get("status"), "ok")
+        self.assertEqual(out["result"]["status"], "restored")
+        records = self.store.load_learned_context_records()
+        restored = next(record for record in records if record["record_id"] == "lc-restore-1")
+        self.assertEqual(restored["status"], "active")
+        self.assertEqual(restored["restored_from_status"], "superseded")
+        self.assertEqual(restored["restored_at"], FIXED_NOW)
+        self.assertNotIn("superseded_by", restored)
+
     def test_api_ui_meta_exposes_cli_json_version(self) -> None:
         payload = self.get_json("/api/ui-meta")
         self.assertIn("cli_json_version", payload)
@@ -428,6 +534,9 @@ class GraphRouteTests(unittest.TestCase):
             "Semantic pipeline",
             "Materialization state",
             "Current memory surface",
+            "Recently pruned learned context",
+            "/api/learned-context/restore",
+            "odRestoreLearnedContext",
             "Last runtime effects",
             "od-overview-snapshot",
             "od-snapshot-group",

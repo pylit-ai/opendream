@@ -21,6 +21,7 @@ from .observability import (
     query_retrievals,
     query_runs,
 )
+from .semantic_verifier import restore_record as restore_learned_context_record
 from .semantic_dreamer import dream_status_semantic
 from .service import disable_background_runtime, enable_background_runtime, restart_service, service_status, start_service, stop_service
 from .storage import MemoryStore
@@ -512,6 +513,28 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 out = _ui_context_payload(self.store)
                 out["status"] = "ok"
                 self._write_json(out)
+                return
+            elif parsed.path == "/api/learned-context/restore":
+                record_id = str(payload.get("record_id", "")).strip()
+                if not record_id:
+                    self._write_json({"error": "record_id is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                response = restore_learned_context_record(
+                    self.store,
+                    record_id,
+                    now=payload.get("now"),
+                )
+                if response.get("status") in {"not_found", "not_restorable", "restore_window_missing", "restore_window_expired"}:
+                    self._write_json({"error": response.get("reason") or response.get("status"), "result": response}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                index_observability(self.store)
+                self._write_json(
+                    {
+                        "status": "ok",
+                        "result": response,
+                        "overview": load_or_build_index(self.store)["overview"],
+                    }
+                )
                 return
             elif parsed.path == "/api/service/control":
                 action = str(payload.get("action", "")).strip()

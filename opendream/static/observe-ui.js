@@ -660,6 +660,21 @@
       } catch (e) {}
     }
     window.odClearLiveCheckResult = odClearLiveCheckResult;
+    function odReadRestoreLearnedContextResult() {
+      try {
+        var raw = sessionStorage.getItem('od-restore-learned-context-result');
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch (e) {
+        return null;
+      }
+    }
+    function odClearRestoreLearnedContextResult() {
+      try {
+        sessionStorage.removeItem('od-restore-learned-context-result');
+      } catch (e) {}
+    }
+    window.odClearRestoreLearnedContextResult = odClearRestoreLearnedContextResult;
     window.odRunLiveCheck = async function () {
       var fr = document.getElementById('od-data-freshness');
       if (fr) fr.textContent = 'Running live check…';
@@ -680,6 +695,27 @@
       } catch (err) {
         var msg = err && err.message ? err.message : String(err);
         if (fr) fr.textContent = 'Live check failed: ' + msg;
+      }
+    };
+    window.odRestoreLearnedContext = async function (recordId) {
+      var rid = String(recordId || '').trim();
+      if (!rid) return;
+      try {
+        var out = await fetchJson('/api/learned-context/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ record_id: rid }),
+        });
+        try {
+          sessionStorage.setItem('od-restore-learned-context-result', JSON.stringify(out));
+        } catch (e0) {}
+        if (location.pathname === '/' || location.pathname === '/overview') {
+          await runRender('Overview', renderOverview);
+        }
+      } catch (err) {
+        var fr = document.getElementById('od-data-freshness');
+        var msg = err && err.message ? err.message : String(err);
+        if (fr) fr.textContent = 'Restore failed: ' + msg;
       }
     };
     const fetchJson = async (path, options={}) => {
@@ -2021,6 +2057,7 @@
       const surface = detail && typeof detail === 'object' ? detail : {};
       const typeMix = Array.isArray(surface.type_mix) ? surface.type_mix : [];
       const recent = Array.isArray(surface.recent_highlights) ? surface.recent_highlights : [];
+      const recentPruned = Array.isArray(surface.recent_pruned_learned_context) ? surface.recent_pruned_learned_context : [];
       const startup = Array.isArray(surface.startup_highlights) ? surface.startup_highlights : [];
       const lowSignalPct = Math.round(Number(surface.low_signal_share || 0) * 100);
       const typeMixHtml = typeMix.length
@@ -2045,11 +2082,28 @@
             return `<li><a href="${href}">${escapeHtml(title)}</a></li>`;
           }).join('') + '</ul>'
         : '<p class="muted" style="margin:0">Startup memory is still pointer-like or empty.</p>';
+      const recentPrunedHtml = recentPruned.length
+        ? '<ul style="margin:0;padding-left:1.1rem;line-height:1.7">' + recentPruned.slice(0, 5).map(function (item) {
+            var rid = item && item.record_id ? String(item.record_id) : '';
+            var summary = item && item.summary ? String(item.summary) : rid || 'Learned context';
+            var status = item && item.status ? odTitleCaseToken(String(item.status)) : 'Unknown';
+            var changedAt = item && item.status_changed_at ? formatInstantLocal(item.status_changed_at) : '—';
+            var restorableUntil = item && item.restorable_until ? formatInstantLocal(item.restorable_until) : '—';
+            var restoreAllowed = !!(item && item.restore_allowed);
+            var supersededBy = item && item.superseded_by ? String(item.superseded_by) : '';
+            var extra = supersededBy ? ` · superseded by <code>${escapeHtml(supersededBy)}</code>` : '';
+            var restoreBtn = restoreAllowed
+              ? ` <button type="button" class="icon-btn" onclick="void odRestoreLearnedContext('${escapeHtml(rid)}')" aria-label="Restore learned context ${escapeHtml(summary)}" title="Restore">Restore</button>`
+              : '';
+            return `<li><strong>${escapeHtml(summary)}</strong><div class="muted" style="margin-top:4px">${escapeHtml(status)} · changed ${escapeHtml(changedAt)} · restore until ${escapeHtml(restorableUntil)}${extra}</div>${restoreBtn}</li>`;
+          }).join('') + '</ul>'
+        : '<p class="muted" style="margin:0">No recently pruned learned-context records are within the current review window.</p>';
       return `
         <p class="muted" style="margin-top:0;line-height:1.6">This is the current durable memory surface, not just the capture stream. Use it to see what OpenDream is actually keeping alive for retrieval and startup.</p>
         <div class="mem-detail-meta">
           <div class="mem-detail-field"><span class="mem-detail-label">Durable active</span><span class="mem-detail-val">${escapeHtml(String(surface.durable_active_total != null ? surface.durable_active_total : '—'))}</span></div>
           <div class="mem-detail-field"><span class="mem-detail-label">Learned context active</span><span class="mem-detail-val">${escapeHtml(String(surface.learned_context_active_total != null ? surface.learned_context_active_total : '—'))}</span></div>
+          <div class="mem-detail-field"><span class="mem-detail-label">Recently pruned learned context</span><span class="mem-detail-val">${escapeHtml(String(surface.learned_context_recently_pruned_total != null ? surface.learned_context_recently_pruned_total : '—'))}</span></div>
           <div class="mem-detail-field"><span class="mem-detail-label">Contested durable</span><span class="mem-detail-val">${escapeHtml(String(surface.durable_contested_total != null ? surface.durable_contested_total : '—'))}</span></div>
           <div class="mem-detail-field"><span class="mem-detail-label">Low-signal share</span><span class="mem-detail-val">${escapeHtml(String(lowSignalPct))}%</span></div>
         </div>
@@ -2057,6 +2111,8 @@
         ${typeMixHtml}
         <h3 class="mem-detail-h" style="margin-top:18px">Recent highlights</h3>
         ${recentHtml}
+        <h3 class="mem-detail-h" style="margin-top:18px">Recently pruned learned context</h3>
+        ${recentPrunedHtml}
         <h3 class="mem-detail-h" style="margin-top:18px">Startup highlights</h3>
         ${startupHtml}
       `;
@@ -2255,6 +2311,11 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
         recentLiveCheck && recentLiveCheck.probe
           ? `<div class="od-empty-nextsteps glossary-hint" role="status"><strong>Live check completed.</strong> Probe <code>${escapeHtml(recentLiveCheck.probe.event_id || '—')}</code> was observed at <strong>${escapeHtml(formatInstantLocal(recentLiveCheck.probe.timestamp) || '—')}</strong>. <button type="button" class="icon-btn" onclick="odClearLiveCheckResult(); void runRender('Overview', renderOverview)" aria-label="Dismiss live check result" title="Dismiss">Dismiss</button></div>`
           : '';
+      const restoreNoticeRaw = odReadRestoreLearnedContextResult();
+      const restoreNotice =
+        restoreNoticeRaw && restoreNoticeRaw.result
+          ? `<div class="od-empty-nextsteps glossary-hint" role="status"><strong>Learned context restored.</strong> Record <code>${escapeHtml(String(restoreNoticeRaw.result.record_id || '—'))}</code> is active again. <button type="button" class="icon-btn" onclick="odClearRestoreLearnedContextResult(); void runRender('Overview', renderOverview)" aria-label="Dismiss restore result" title="Dismiss">Dismiss</button></div>`
+          : '';
       const snapshotApiFooter = `
         <div class="od-snapshot-footer">
           <div>
@@ -2286,6 +2347,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
           <p class="muted od-snapshot-contract">Machine-readable workspace contract (schemas in repo): <code>opendream contract export --workspace &lt;path&gt; --format json</code>. See <code>AGENTS.md</code> in the OpenDream repository for <code>cli_output_version</code> and contract fields.</p>
         </div>`;
       if (liveCheckNotice) parts.push(panel('Live Check Result', liveCheckNotice, true));
+      if (restoreNotice) parts.push(panel('Restore Result', restoreNotice, true));
       parts.push(panel('Semantic readiness card', readinessPanel, true));
       parts.push(
         '<div class="full od-overview-strip" role="region" aria-label="At a glance">' +
