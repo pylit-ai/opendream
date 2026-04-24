@@ -812,7 +812,10 @@ def build_semantic_change_review(
         source_context_id=str(context.get("context_id") or ""),
         source_run_id=str(context.get("retrieval_run_id") or ""),
     )
-    items = [*kept, *suppressed, *transitions]
+    items = [
+        _semantic_change_enrich_item(item, context=context)
+        for item in [*kept, *suppressed, *transitions]
+    ]
     summary_counts = {
         "kept_count": len(kept),
         "suppressed_count": len(suppressed),
@@ -840,19 +843,93 @@ def build_semantic_change_review(
     }
 
 
+def build_semantic_change_unavailable(
+    store: MemoryStore,
+    *,
+    now: str | None = None,
+) -> dict[str, Any]:
+    timestamp = now or to_iso(utc_now())
+    contexts = store.load_context_assemblies()
+    comparable_contexts = [
+        item
+        for item in contexts
+        if item.get("selected_learned_context_items") or item.get("suppressed_learned_context_items")
+    ]
+    learned_context_records = store.load_learned_context_records()
+    semantic_config = store.load_semantic_config()
+    semantic_quality = analyze_memory_quality(store, now=timestamp)
+    learned_total = len(learned_context_records)
+    context_total = len(contexts)
+    comparable_total = len(comparable_contexts)
+    semantic_mode = str(semantic_config.get("mode", "deterministic") or "deterministic")
+    semantic_state = str(semantic_quality.get("semantic_capability_state") or "unknown")
+
+    if learned_total == 0:
+        reason_code = "no_learned_context"
+        details = (
+            "durable memory exists, but OpenDream has not materialized any learned-context "
+            "records for this workspace yet."
+        )
+    elif context_total == 0:
+        reason_code = "no_context_assembly"
+        details = (
+            "Learned-context records exist, but no prompt context assembly has been recorded yet."
+        )
+    elif comparable_total == 0:
+        reason_code = "no_comparable_context"
+        details = (
+            "Context has been assembled, but the recorded assemblies do so without "
+            "learned-context kept or suppressed items."
+        )
+    else:
+        reason_code = "not_available"
+        details = "No comparable learned-context change review is available for the current workspace."
+
+    next_actions = [
+        "Inspect durable memory in Memory Explorer.",
+        "Run semantic setup if learned-context materialization should be enabled.",
+        "Run a semantic refresh or prepare-context after semantic materialization completes.",
+    ]
+    if semantic_mode == "deterministic" or semantic_state == "disabled_by_choice":
+        next_actions.insert(1, "Semantic mode is currently deterministic or disabled by choice.")
+
+    return {
+        "status": "not_available",
+        "reason_code": reason_code,
+        "headline": "Learned-context comparison is not available yet.",
+        "details": details,
+        "semantic_mode": semantic_mode,
+        "semantic_capability_state": semantic_state,
+        "learned_context_total": learned_total,
+        "context_assembly_total": context_total,
+        "comparable_context_total": comparable_total,
+        "next_actions": next_actions,
+        "review_href": "/memories/changes",
+    }
+
+
 def _build_semantic_change_summary(store: MemoryStore, timestamp: str) -> dict[str, Any]:
     review = build_semantic_change_review(store, now=timestamp)
     if review is None:
+        unavailable = build_semantic_change_unavailable(store, now=timestamp)
         return {
             "status": "not_available",
-            "headline": "No semantic change review is available yet.",
+            "headline": unavailable["headline"],
+            "reason_code": unavailable["reason_code"],
+            "details": unavailable["details"],
+            "semantic_mode": unavailable["semantic_mode"],
+            "semantic_capability_state": unavailable["semantic_capability_state"],
+            "learned_context_total": unavailable["learned_context_total"],
+            "context_assembly_total": unavailable["context_assembly_total"],
+            "comparable_context_total": unavailable["comparable_context_total"],
+            "next_actions": unavailable["next_actions"],
             "latest_run_id": None,
             "latest_context_id": None,
             "kept_count": 0,
             "suppressed_count": 0,
             "deactivated_count": 0,
             "restorable_count": 0,
-            "review_href": "/semantic-changes",
+            "review_href": "/memories/changes",
         }
     counts = review["summary_counts"]
     return {
@@ -864,7 +941,7 @@ def _build_semantic_change_summary(store: MemoryStore, timestamp: str) -> dict[s
         "suppressed_count": int(counts.get("suppressed_count", 0) or 0),
         "deactivated_count": int(counts.get("deactivated_count", 0) or 0),
         "restorable_count": int(counts.get("restorable_count", 0) or 0),
-        "review_href": f"/semantic-changes/{review['source_id']}",
+        "review_href": f"/memories/changes/{review['source_id']}",
     }
 
 
@@ -908,6 +985,105 @@ def _semantic_change_reason_label(reason_code: str) -> str:
         "record_restored": "Record restored to active learned context",
     }
     return labels.get(reason_code, reason_code.replace("_", " ").capitalize())
+
+
+def _semantic_change_enrich_item(item: dict[str, Any], *, context: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(item)
+    reason_code = str(enriched.get("reason_code") or "")
+    change_class = str(enriched.get("change_class") or "")
+    record_id = str(enriched.get("record_id") or "")
+    context_id = str(enriched.get("source_context_id") or context.get("context_id") or "")
+    profile = context.get("profile") if isinstance(context.get("profile"), dict) else {}
+    selection = context.get("selection") if isinstance(context.get("selection"), dict) else {}
+    learned_selection = (
+        selection.get("learned_context")
+        if isinstance(selection.get("learned_context"), dict)
+        else {}
+    )
+    profile_name = str(profile.get("name") or "current")
+    learned_selected = int(learned_selection.get("selected", 0) or 0)
+    learned_candidates = int(learned_selection.get("candidate_count", 0) or 0)
+    if context_id and record_id:
+        enriched["memory_detail_href"] = f"/memories/changes/{context_id}?item={record_id}"
+    else:
+        enriched["memory_detail_href"] = "/memories/changes"
+
+    if change_class == "suppressed" and reason_code == "profile_budget_exceeded":
+        enriched.update(
+            {
+                "retention_effect": "still_active_not_purged",
+                "operator_summary": (
+                    "Not purged: this learned-context record is still active. It was only left out "
+                    f"of this assembled context because the {profile_name} profile had room for "
+                    f"{learned_selected} of {learned_candidates} learned-context candidates."
+                ),
+                "operator_severity": "info",
+                "operator_next_actions": [
+                    "Usually no action is required; this is normal context-budget pruning.",
+                    "Use a more specific query if this item should outrank nearby learned context.",
+                    "Run prepare-context with --limit 8 or higher when you need the deeper task profile.",
+                ],
+            }
+        )
+    elif change_class == "suppressed":
+        enriched.update(
+            {
+                "retention_effect": "still_active_not_purged",
+                "operator_summary": (
+                    "Not purged: this learned-context record is still active, but this context did "
+                    f"not inject it because {enriched.get('reason_label') or reason_code}."
+                ),
+                "operator_severity": "info",
+                "operator_next_actions": [
+                    "Inspect the reason and source context before changing memory.",
+                    "Refine the query or semantic setup if this item should appear more often.",
+                ],
+            }
+        )
+    elif change_class == "kept":
+        enriched.update(
+            {
+                "retention_effect": "included_in_context",
+                "operator_summary": (
+                    "Included: this learned-context record was active and injected into the assembled context."
+                ),
+                "operator_severity": "good",
+                "operator_next_actions": ["No action is required unless the content looks stale or misleading."],
+            }
+        )
+    elif change_class == "deactivated":
+        enriched.update(
+            {
+                "retention_effect": "removed_from_active_learned_context",
+                "operator_summary": (
+                    "Removed from active learned context; it will not be injected unless restored or replaced."
+                ),
+                "operator_severity": "warn" if enriched.get("restore_allowed") else "bad",
+                "operator_next_actions": [
+                    "Restore it if the removal was wrong and it is still inside the restore window.",
+                    "Inspect superseding or verifier evidence before restoring stale content.",
+                ],
+            }
+        )
+    elif change_class == "restored":
+        enriched.update(
+            {
+                "retention_effect": "restored_to_active_learned_context",
+                "operator_summary": "Restored: this learned-context record is active again.",
+                "operator_severity": "good",
+                "operator_next_actions": ["No action is required unless it should be superseded by fresher evidence."],
+            }
+        )
+    else:
+        enriched.update(
+            {
+                "retention_effect": "unknown",
+                "operator_summary": "Open the source context to inspect this learned-context change.",
+                "operator_severity": "info",
+                "operator_next_actions": ["Inspect source context and provenance before changing memory."],
+            }
+        )
+    return enriched
 
 
 def _learned_context_transition_items(

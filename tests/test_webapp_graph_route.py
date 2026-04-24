@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import time
@@ -8,15 +9,19 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from opendream.integration import emit_event, maintain, prepare_context
 from opendream.observability import index_observability
 from opendream.storage import MemoryStore
-from opendream.webapp import INDEX_HTML, build_server
+from opendream.webapp import INDEX_HTML, _observe_static_asset_version, build_server
 
 _OBSERVE_UI_JS = (
     Path(__file__).resolve().parent.parent / "opendream" / "static" / "observe-ui.js"
+).read_text(encoding="utf-8")
+_OBSERVE_UI_CSS = (
+    Path(__file__).resolve().parent.parent / "opendream" / "static" / "observe-ui.css"
 ).read_text(encoding="utf-8")
 
 FIXED_NOW = "2026-04-10T12:00:00Z"
@@ -509,9 +514,67 @@ class GraphRouteTests(unittest.TestCase):
         self.assertIn("kept", change_classes)
         self.assertIn("suppressed", change_classes)
         self.assertIn("deactivated", change_classes)
+        suppressed_item = next(item for item in latest["items"] if item["change_class"] == "suppressed")
+        self.assertEqual(suppressed_item["retention_effect"], "still_active_not_purged")
+        self.assertIn("Not purged", suppressed_item["operator_summary"])
+        self.assertIn("usually no action", " ".join(suppressed_item["operator_next_actions"]).lower())
+        self.assertEqual(
+            suppressed_item["memory_detail_href"],
+            f"/memories/changes/{context['context_id']}?item=lc-suppress-1",
+        )
 
         by_context = self.get_json(f"/api/semantic-changes/{context['context_id']}")
         self.assertEqual(by_context["change_review_id"], latest["change_review_id"])
+
+    def test_semantic_changes_latest_returns_unavailable_payload_without_learned_context(self) -> None:
+        latest = self.get_json("/api/semantic-changes/latest")
+
+        self.assertEqual(latest["status"], "not_available")
+        self.assertEqual(latest["reason_code"], "no_learned_context")
+        self.assertIn("durable memory exists", latest["details"])
+        self.assertEqual(latest["learned_context_total"], 0)
+        self.assertEqual(latest["comparable_context_total"], 0)
+        self.assertIn("next_actions", latest)
+
+    def test_semantic_changes_latest_explains_contexts_without_comparable_items(self) -> None:
+        prepare_context(self.store, query="redis workflow verification", now=FIXED_NOW)
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-unmatched-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-unmatched"],
+                    "query_family_tags": ["billing"],
+                    "summary": "Billing setup note that should not match this context.",
+                    "details": (
+                        "This note exists, but the prepared context has no kept or suppressed "
+                        "learned-context compare items."
+                    ),
+                    "assumptions": "Billing work is unrelated to the query.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-23",
+                    "created_at": "2026-04-23T09:00:00Z",
+                    "fresh_until": "2026-04-30T09:00:00Z",
+                    "confidence": 0.12,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "active",
+                }
+            ]
+        )
+        index_observability(self.store, now=FIXED_NOW)
+
+        latest = self.get_json("/api/semantic-changes/latest")
+
+        self.assertEqual(latest["status"], "not_available")
+        self.assertEqual(latest["reason_code"], "no_comparable_context")
+        self.assertGreaterEqual(latest["learned_context_total"], 1)
+        self.assertGreaterEqual(latest["context_assembly_total"], 1)
+        self.assertEqual(latest["comparable_context_total"], 0)
+        self.assertIn("without learned-context kept or suppressed items", latest["details"])
 
     def test_semantic_changes_api_returns_404_for_unknown_context(self) -> None:
         with self.assertRaises(urllib.error.HTTPError) as ctx:
@@ -623,6 +686,22 @@ class GraphRouteTests(unittest.TestCase):
         ]:
             self.assertIn(path, _OBSERVE_UI_JS)
 
+    def test_memories_tabs_span_main_grid(self) -> None:
+        self.assertIn("odMemoriesTabs('explorer')", _OBSERVE_UI_JS)
+        self.assertIn(".od-memories-tabs", _OBSERVE_UI_CSS)
+        self.assertRegex(_OBSERVE_UI_CSS, r"\.od-memories-tabs\s*\{[^}]*grid-column:\s*1 / -1")
+
+    def test_static_asset_version_tracks_css_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            static_root = Path(tmp)
+            for name in ("observe-ui.js", "observe-ui.css", "graph.css"):
+                (static_root / name).write_text(name, encoding="utf-8")
+            os.utime(static_root / "observe-ui.js", (100, 100))
+            os.utime(static_root / "graph.css", (150, 150))
+            os.utime(static_root / "observe-ui.css", (200, 200))
+            with patch("opendream.webapp._STATIC_ROOT", static_root):
+                self.assertEqual(_observe_static_asset_version(), "200")
+
     def test_observe_shell_nav_async_and_presets(self) -> None:
         bundle = INDEX_HTML + _OBSERVE_UI_JS
         for needle in (
@@ -660,6 +739,20 @@ class GraphRouteTests(unittest.TestCase):
             "Current memory surface",
             "Semantic change review",
             "Compare semantic changes",
+            "Memories surface",
+            "Memory Surface",
+            "Memory Explorer",
+            "Memory Changes",
+            "/memories/surface",
+            "/memories/explorer",
+            "/memories/changes",
+            "odSelectSemanticChangeItem",
+            "data-change-item-id",
+            "data-change-detail-payload",
+            "operator_summary",
+            "operator_next_actions",
+            "Learned-context comparison is not available yet",
+            "durable memory exists",
             "Suppressed in this context",
             "Removed from active learned context",
             "Restorable now",

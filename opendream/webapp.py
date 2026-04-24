@@ -11,6 +11,7 @@ from . import workspace_catalog
 from .dream import dream_worker
 from .integration import emit_event
 from .observability import (
+    build_semantic_change_unavailable,
     build_semantic_change_review,
     build_graph,
     create_annotation,
@@ -33,11 +34,16 @@ _STATIC_ROOT = (Path(__file__).parent / "static").resolve()
 
 
 def _observe_static_asset_version() -> str:
-    """Cache-bust string for observe UI assets (changes when observe-ui.js mtime changes)."""
-    try:
-        return str(int((_STATIC_ROOT / "observe-ui.js").stat().st_mtime))
-    except OSError:
+    """Cache-bust string for observe UI assets."""
+    mtimes: list[float] = []
+    for name in ("observe-ui.js", "observe-ui.css", "graph.css"):
+        try:
+            mtimes.append((_STATIC_ROOT / name).stat().st_mtime)
+        except OSError:
+            continue
+    if not mtimes:
         return "1"
+    return str(int(max(mtimes)))
 
 
 def _index_html() -> str:
@@ -338,8 +344,7 @@ INDEX_HTML = """<!doctype html>
         <p class="sidebar-nav-section" id="sidebar-sec-this-ws">This workspace</p>
         <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-this-ws">
           <li><a href="/overview" data-short="Ov" title="Overview"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg><span class="nav-label">Overview</span></a></li>
-          <li><a href="/semantic-changes" data-short="Sc" title="Semantic Changes"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7"/><path d="M4 12h5"/><path d="M4 17h7"/><path d="m14 7 2 2 4-4"/><path d="m14 17 2-2 4 4"/></svg><span class="nav-label">Semantic Changes</span></a></li>
-          <li><a href="/memories" data-short="Mem" title="Memories"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span class="nav-label">Memories</span></a></li>
+          <li><a href="/memories/surface" data-short="Mem" title="Memories"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span class="nav-label">Memories</span></a></li>
         </ul>
         <p class="sidebar-nav-section" id="sidebar-sec-trace">Trace</p>
         <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-trace">
@@ -609,7 +614,12 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 now=str(index.get("generated_at") or ""),
             )
             if payload is None:
-                self._write_json({"error": "semantic change review not available"}, status=HTTPStatus.NOT_FOUND)
+                self._write_json(
+                    build_semantic_change_unavailable(
+                        self.store,
+                        now=str(index.get("generated_at") or ""),
+                    )
+                )
                 return
             self._write_json(payload)
             return

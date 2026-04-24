@@ -197,9 +197,9 @@ def prune_recent_failures(
             row_ts = parse_timestamp(at)
         except ValueError:
             continue
-        if row_ts < retention_cutoff:
-            continue
         reason = str(row.get("reason", ""))
+        if row_ts < retention_cutoff and reason == "worker-lock-held":
+            continue
         if (
             reason == "worker-lock-held"
             and success_ts is not None

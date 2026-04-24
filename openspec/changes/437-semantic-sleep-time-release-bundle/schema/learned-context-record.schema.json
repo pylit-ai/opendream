@@ -60,6 +60,22 @@
     "superseded_by": {
       "type": ["string", "null"]
     },
+    "status_changed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "restorable_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "restored_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "restored_from_status": {
+      "type": "string",
+      "enum": ["superseded", "archived", "rejected"]
+    },
     "harm_signals": {
       "type": "array",
       "items": { "type": "string" }

@@ -461,8 +461,11 @@
     .pager button:disabled { opacity: 0.45; cursor: not-allowed; }
     input[type="datetime-local"] { min-width: 11.5rem; }
     .mem-view-toggle { display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap; }
-    .mem-view-toggle:not(.icon-toolbar) button { padding:8px 14px; font-size:13px; border-radius:10px; }
-    .mem-view-toggle:not(.icon-toolbar) button.mem-view-active { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 1px var(--focus-ring); }
+    .mem-view-toggle:not(.icon-toolbar) button,
+    .mem-view-toggle:not(.icon-toolbar) a.icon-btn { padding:8px 14px; font-size:13px; border-radius:10px; text-decoration:none; }
+    .mem-view-toggle:not(.icon-toolbar) button.mem-view-active,
+    .mem-view-toggle:not(.icon-toolbar) a.icon-btn.mem-view-active { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 1px var(--focus-ring); }
+    .od-memories-tabs { grid-column: 1 / -1; margin: 0 0 14px 0; }
     .mem-timeline { padding: 4px 0 8px 0; }
     .mem-timeline-day { margin: 18px 0 10px 0; padding-left: 7.5rem; font-size: 12px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
     .mem-timeline-day:first-child { margin-top: 0; }
@@ -893,16 +896,88 @@
     .od-change-list-item {
       display: grid;
       gap: 8px;
-      padding: 12px 14px;
+      padding: 14px;
       border-radius: 12px;
       border: 1px solid var(--border);
       background: var(--panel);
       color: inherit;
       text-decoration: none;
+      line-height: 1.45;
+      position: relative;
+      overflow: hidden;
+    }
+    .od-change-list-item::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: transparent;
+    }
+    .od-change-list-item:hover {
+      background: color-mix(in srgb, var(--interactive) 55%, var(--panel));
+      border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
     }
     .od-change-list-item.is-selected {
       border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
       box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+    }
+    .od-change-list-item.is-selected::before { background: var(--accent); }
+    .od-change-card-topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .od-change-card-title {
+      font-size: 0.95rem;
+      line-height: 1.35;
+      font-weight: 700;
+    }
+    .od-change-card-reason {
+      margin: 0;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .od-change-card-explainer,
+    .od-change-explainer {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .od-change-explainer {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--interactive);
+      color: var(--text);
+    }
+    .od-change-action-list {
+      margin: 12px 0 0 0;
+      padding-left: 1.1rem;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .od-change-action-list--compact {
+      margin-top: 2px;
+      font-size: 12px;
+    }
+    .od-change-card-cta {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .od-change-detail-actions {
+      margin-top: 14px;
+    }
+    .od-change-action-link {
+      line-height: 1.2;
+      text-decoration: none;
+      padding-inline: 12px;
     }
     .od-change-detail-pane {
       min-width: 0;
