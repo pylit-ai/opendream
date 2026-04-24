@@ -711,6 +711,8 @@
         } catch (e0) {}
         if (location.pathname === '/' || location.pathname === '/overview') {
           await runRender('Overview', renderOverview);
+        } else if (location.pathname === '/semantic-changes' || location.pathname.indexOf('/semantic-changes/') === 0) {
+          await runRender('Semantic changes', () => renderSemanticChanges(location.pathname.split('/').pop()));
         }
       } catch (err) {
         var fr = document.getElementById('od-data-freshness');
@@ -1131,6 +1133,8 @@
     function routeToPageId(path) {
       var p = path || '';
       if (p === '/' || p === '/overview') return 'overview';
+      if (p === '/semantic-changes') return 'semantic-changes';
+      if (p.indexOf('/semantic-changes/') === 0) return 'semantic-change-detail';
       if (p === '/workspaces') return 'workspaces';
       if (p.indexOf('/workspaces/') === 0) return 'workspace-detail';
       if (p === '/memories') return 'memories';
@@ -2053,11 +2057,230 @@
       `;
     }
 
+    function odSemanticChangeTone(changeClass, restoreAllowed) {
+      if (changeClass === 'restored' || changeClass === 'kept') return 'good';
+      if (changeClass === 'deactivated') return 'bad';
+      if (changeClass === 'suppressed') return 'warn';
+      if (restoreAllowed) return 'info';
+      return 'neutral';
+    }
+
+    function odSemanticChangeHref(sourceId, overrides) {
+      const params = new URLSearchParams(location.search);
+      Object.keys(overrides || {}).forEach(function (key) {
+        const value = overrides[key];
+        if (value === null || value === undefined || value === '') params.delete(key);
+        else params.set(key, String(value));
+      });
+      const base = sourceId ? '/semantic-changes/' + encodeURIComponent(String(sourceId)) : '/semantic-changes';
+      const query = params.toString();
+      return query ? base + '?' + query : base;
+    }
+
+    function odSemanticChangeChip(label, tone) {
+      return `<span class="od-change-chip od-change-chip--${escapeHtml(tone || 'neutral')}">${escapeHtml(label)}</span>`;
+    }
+
+    function odSemanticChangeLabel(item) {
+      const changeClass = String(item && item.change_class || '');
+      if (changeClass === 'suppressed') return 'Suppressed';
+      if (changeClass === 'deactivated') return 'Removed from store';
+      if (changeClass === 'restored') return 'Restored';
+      return 'Kept';
+    }
+
+    function odSemanticChangeSummaryMarkup(summary) {
+      const data = summary && typeof summary === 'object' ? summary : {};
+      if (String(data.status || 'not_available') !== 'available') {
+        return `
+          <div class="od-empty-nextsteps glossary-hint" role="status">
+            <strong>No semantic change review is available yet.</strong>
+            OpenDream has not recorded a comparable learned-context change set for the current workspace.
+          </div>
+        `;
+      }
+      const href = String(data.review_href || '/semantic-changes');
+      const cards = [
+        ['Kept active', Number(data.kept_count || 0), 'good', 'Learned-context items that stayed active in the assembled context.'],
+        ['Suppressed in this context', Number(data.suppressed_count || 0), 'warn', 'Items that stayed in the store but were excluded from this context.'],
+        ['Removed from active learned context', Number(data.deactivated_count || 0), 'bad', 'Records whose stored status changed away from active.'],
+        ['Restorable now', Number(data.restorable_count || 0), 'good', 'Recently removed records still inside the restore window.'],
+      ];
+      return `
+        <p class="muted" style="margin-top:0;line-height:1.6">Overview stays summary-first here. Use the compare page to inspect the latest semantic change set in detail.</p>
+        <div class="od-change-summary-grid">
+          ${cards.map(function (card) {
+            return `<a class="od-change-summary-card od-change-summary-card--${escapeHtml(card[2])}" href="${href}">
+              <span class="od-change-summary-value">${escapeHtml(String(card[1]))}</span>
+              <span class="od-change-summary-label">${escapeHtml(card[0])}</span>
+              <span class="od-change-summary-note">${escapeHtml(card[3])}</span>
+              <span class="od-change-summary-cta">Review changes</span>
+            </a>`;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    function odSemanticChangeDetailMarkup(item, viewMode) {
+      if (!item) {
+        return '<div class="od-empty-nextsteps glossary-hint" role="status">No kept, suppressed, or removed learned-context changes were recorded for this run.</div>';
+      }
+      const tone = odSemanticChangeTone(item.change_class, item.restore_allowed);
+      const label = odSemanticChangeLabel(item);
+      const restoreBtn = item.restore_allowed
+        ? `<button type="button" class="icon-btn" onclick="void odRestoreLearnedContext('${escapeHtml(String(item.record_id || ''))}')" aria-label="Restore learned context ${escapeHtml(String(item.summary || item.record_id || 'record'))}" title="Restore">Restore</button>`
+        : '';
+      if (viewMode === 'overlay') {
+        return `
+          <div class="od-change-detail-card od-change-detail-card--${escapeHtml(tone)}">
+            ${odSemanticChangeChip(label, tone)}
+            <h3 class="mem-detail-h" style="margin:12px 0 6px 0">${escapeHtml(String(item.summary || item.record_id || 'Learned context change'))}</h3>
+            <p class="muted" style="margin:0">${escapeHtml(String(item.reason_label || '—'))}</p>
+            <div class="mem-detail-meta" style="margin-top:16px">
+              <div class="mem-detail-field"><span class="mem-detail-label">Before</span><span class="mem-detail-val">${escapeHtml(String(item.before_state || '—'))}</span></div>
+              <div class="mem-detail-field"><span class="mem-detail-label">After</span><span class="mem-detail-val">${escapeHtml(String(item.after_state || '—'))}</span></div>
+              <div class="mem-detail-field"><span class="mem-detail-label">Changed</span><span class="mem-detail-val">${escapeHtml(formatInstantLocal(item.changed_at) || '—')}</span></div>
+              <div class="mem-detail-field"><span class="mem-detail-label">Restorable until</span><span class="mem-detail-val">${escapeHtml(formatInstantLocal(item.restorable_until) || '—')}</span></div>
+            </div>
+            <p style="margin:16px 0 0 0">${escapeHtml(String(item.details_preview || '—'))}</p>
+            <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap">${restoreBtn}${item.provenance_link_target ? `<a href="${escapeHtml(String(item.provenance_link_target))}">Open provenance</a>` : ''}</div>
+          </div>
+        `;
+      }
+      if (viewMode === 'side_by_side') {
+        return `
+          <div class="od-change-detail-card od-change-detail-card--${escapeHtml(tone)}">
+            <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+              <div>
+                ${odSemanticChangeChip(label, tone)}
+                <h3 class="mem-detail-h" style="margin:10px 0 4px 0">${escapeHtml(String(item.summary || item.record_id || 'Learned context change'))}</h3>
+                <p class="muted" style="margin:0">${escapeHtml(String(item.reason_label || '—'))}</p>
+              </div>
+              <div class="row" style="gap:8px;flex-wrap:wrap">${restoreBtn}${item.provenance_link_target ? `<a href="${escapeHtml(String(item.provenance_link_target))}">Open provenance</a>` : ''}</div>
+            </div>
+            <div class="od-change-compare-grid">
+              <section class="od-change-state od-change-state--before">
+                <div class="od-change-state-title">Before</div>
+                <div class="od-change-state-value">${escapeHtml(String(item.before_state || '—'))}</div>
+                <p class="muted" style="margin:0">Active learned context available to retrieval.</p>
+              </section>
+              <section class="od-change-state od-change-state--after">
+                <div class="od-change-state-title">After</div>
+                <div class="od-change-state-value">${escapeHtml(String(item.after_state || '—'))}</div>
+                <p class="muted" style="margin:0">${escapeHtml(String(item.details_preview || '—'))}</p>
+              </section>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="od-change-detail-card od-change-detail-card--${escapeHtml(tone)}">
+          <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+            <div>
+              ${odSemanticChangeChip(label, tone)}
+              <h3 class="mem-detail-h" style="margin:10px 0 4px 0">${escapeHtml(String(item.summary || item.record_id || 'Learned context change'))}</h3>
+              <p class="muted" style="margin:0">${escapeHtml(String(item.reason_label || '—'))}</p>
+            </div>
+            <div class="row" style="gap:8px;flex-wrap:wrap">${restoreBtn}${item.provenance_link_target ? `<a href="${escapeHtml(String(item.provenance_link_target))}">Open provenance</a>` : ''}</div>
+          </div>
+          <div class="mem-detail-meta" style="margin-top:16px">
+            <div class="mem-detail-field"><span class="mem-detail-label">Before</span><span class="mem-detail-val">${escapeHtml(String(item.before_state || '—'))}</span></div>
+            <div class="mem-detail-field"><span class="mem-detail-label">After</span><span class="mem-detail-val">${escapeHtml(String(item.after_state || '—'))}</span></div>
+            <div class="mem-detail-field"><span class="mem-detail-label">Changed</span><span class="mem-detail-val">${escapeHtml(formatInstantLocal(item.changed_at) || '—')}</span></div>
+            <div class="mem-detail-field"><span class="mem-detail-label">Restorable until</span><span class="mem-detail-val">${escapeHtml(formatInstantLocal(item.restorable_until) || '—')}</span></div>
+            <div class="mem-detail-field"><span class="mem-detail-label">Confidence</span><span class="mem-detail-val">${escapeHtml(item.confidence != null ? String(item.confidence) : '—')}</span></div>
+          </div>
+          <p style="margin:16px 0 0 0">${escapeHtml(String(item.details_preview || '—'))}</p>
+        </div>
+      `;
+    }
+
+    async function renderSemanticChanges(rawSourceId=null) {
+      const params = new URLSearchParams(location.search);
+      const filter = String(params.get('filter') || 'all');
+      const viewMode = String(params.get('view') || 'summary');
+      const requestedItem = String(params.get('item') || '');
+      const sourceId = rawSourceId && rawSourceId !== 'semantic-changes' ? decodeURIComponent(String(rawSourceId)) : null;
+      let data;
+      try {
+        data = await fetchJson(sourceId ? '/api/semantic-changes/' + encodeURIComponent(sourceId) : '/api/semantic-changes/latest');
+      } catch (err) {
+        odSetMainHtml(panel('Compare semantic changes', `<div class="od-empty-nextsteps glossary-hint" role="status">No semantic change review is available yet.</div>`, true));
+        return;
+      }
+      const counts = data.summary_counts || {};
+      const allItems = Array.isArray(data.items) ? data.items : [];
+      const filteredItems = allItems.filter(function (item) {
+        if (filter === 'suppressed') return item.change_class === 'suppressed';
+        if (filter === 'deactivated') return item.change_class === 'deactivated';
+        if (filter === 'restorable') return item.change_class === 'deactivated' && !!item.restore_allowed;
+        if (filter === 'restored') return item.change_class === 'restored';
+        return true;
+      });
+      const selectedItem = filteredItems.find(function (item) {
+        return requestedItem && String(item.record_id || '') === requestedItem;
+      }) || filteredItems[0] || null;
+      const listHtml = filteredItems.length
+        ? filteredItems.map(function (item) {
+            const selected = selectedItem && String(selectedItem.record_id || '') === String(item.record_id || '');
+            const tone = odSemanticChangeTone(item.change_class, item.restore_allowed);
+            const href = odSemanticChangeHref(data.source_id, { filter: filter, view: viewMode, item: item.record_id });
+            return `<a class="od-change-list-item${selected ? ' is-selected' : ''}" href="${href}">
+              <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start">
+                ${odSemanticChangeChip(odSemanticChangeLabel(item), tone)}
+                <span class="muted" style="font-size:11px">${escapeHtml(formatInstantLocal(item.changed_at) || '—')}</span>
+              </div>
+              <strong>${escapeHtml(String(item.summary || item.record_id || 'Learned context change'))}</strong>
+              <p class="muted" style="margin:0">${escapeHtml(String(item.reason_label || '—'))}</p>
+            </a>`;
+          }).join('')
+        : '<div class="od-empty-nextsteps glossary-hint" role="status">No kept, suppressed, or removed learned-context changes were recorded for this run.</div>';
+      const filters = [['all', 'All'], ['suppressed', 'Suppressed'], ['deactivated', 'Deactivated'], ['restorable', 'Restorable'], ['restored', 'Restored']];
+      const viewModes = [['summary', 'Summary'], ['side_by_side', 'Side by side'], ['overlay', 'Overlay']];
+      const bc = odBreadcrumbHtml([
+        { href: '/semantic-changes', label: 'Semantic changes' },
+        ...(sourceId ? [{ href: '', label: odTruncateMiddle(String(sourceId), 42) }] : []),
+      ]);
+      odSetMainHtml(
+        bc +
+        [
+          panel('Compare semantic changes', `
+            <div class="od-change-header">
+              <div class="od-change-header-copy">
+                <p class="muted" style="margin:0">Source kind: <code>${escapeHtml(String(data.source_kind || 'context_assembly'))}</code></p>
+                <h3 class="mem-detail-h" style="margin:8px 0 4px 0">Semantic change review</h3>
+                <p class="muted" style="margin:0">Inspect what stayed active, what was suppressed in this context, and what was removed from active learned context.</p>
+              </div>
+              <div class="od-change-header-stats">
+                ${odSemanticChangeChip('Kept ' + String(counts.kept_count || 0), 'good')}
+                ${odSemanticChangeChip('Suppressed ' + String(counts.suppressed_count || 0), 'warn')}
+                ${odSemanticChangeChip('Removed ' + String(counts.deactivated_count || 0), 'bad')}
+                ${odSemanticChangeChip('Restorable ' + String(counts.restorable_count || 0), 'good')}
+              </div>
+            </div>
+            <div class="row" style="margin-top:16px;gap:8px;flex-wrap:wrap">
+              ${filters.map(function (pair) {
+                return `<a class="icon-btn${filter === pair[0] ? ' mem-view-active' : ''}" href="${odSemanticChangeHref(data.source_id, { filter: pair[0], view: viewMode, item: selectedItem && selectedItem.record_id ? selectedItem.record_id : null })}">${escapeHtml(pair[1])}</a>`;
+              }).join('')}
+            </div>
+            <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">
+              ${viewModes.map(function (pair) {
+                return `<a class="icon-btn${viewMode === pair[0] ? ' mem-view-active' : ''}" href="${odSemanticChangeHref(data.source_id, { filter: filter, view: pair[0], item: selectedItem && selectedItem.record_id ? selectedItem.record_id : null })}">${escapeHtml(pair[1])}</a>`;
+              }).join('')}
+            </div>
+            <div class="od-change-layout">
+              <aside class="od-change-list-rail">${listHtml}</aside>
+              <div class="od-change-detail-pane">${odSemanticChangeDetailMarkup(selectedItem, viewMode)}</div>
+            </div>
+          `, true),
+        ].join(''),
+      );
+    }
+
     function odMemorySurfaceMarkup(detail) {
       const surface = detail && typeof detail === 'object' ? detail : {};
       const typeMix = Array.isArray(surface.type_mix) ? surface.type_mix : [];
       const recent = Array.isArray(surface.recent_highlights) ? surface.recent_highlights : [];
-      const recentPruned = Array.isArray(surface.recent_pruned_learned_context) ? surface.recent_pruned_learned_context : [];
       const startup = Array.isArray(surface.startup_highlights) ? surface.startup_highlights : [];
       const lowSignalPct = Math.round(Number(surface.low_signal_share || 0) * 100);
       const typeMixHtml = typeMix.length
@@ -2082,28 +2305,11 @@
             return `<li><a href="${href}">${escapeHtml(title)}</a></li>`;
           }).join('') + '</ul>'
         : '<p class="muted" style="margin:0">Startup memory is still pointer-like or empty.</p>';
-      const recentPrunedHtml = recentPruned.length
-        ? '<ul style="margin:0;padding-left:1.1rem;line-height:1.7">' + recentPruned.slice(0, 5).map(function (item) {
-            var rid = item && item.record_id ? String(item.record_id) : '';
-            var summary = item && item.summary ? String(item.summary) : rid || 'Learned context';
-            var status = item && item.status ? odTitleCaseToken(String(item.status)) : 'Unknown';
-            var changedAt = item && item.status_changed_at ? formatInstantLocal(item.status_changed_at) : '—';
-            var restorableUntil = item && item.restorable_until ? formatInstantLocal(item.restorable_until) : '—';
-            var restoreAllowed = !!(item && item.restore_allowed);
-            var supersededBy = item && item.superseded_by ? String(item.superseded_by) : '';
-            var extra = supersededBy ? ` · superseded by <code>${escapeHtml(supersededBy)}</code>` : '';
-            var restoreBtn = restoreAllowed
-              ? ` <button type="button" class="icon-btn" onclick="void odRestoreLearnedContext('${escapeHtml(rid)}')" aria-label="Restore learned context ${escapeHtml(summary)}" title="Restore">Restore</button>`
-              : '';
-            return `<li><strong>${escapeHtml(summary)}</strong><div class="muted" style="margin-top:4px">${escapeHtml(status)} · changed ${escapeHtml(changedAt)} · restore until ${escapeHtml(restorableUntil)}${extra}</div>${restoreBtn}</li>`;
-          }).join('') + '</ul>'
-        : '<p class="muted" style="margin:0">No recently pruned learned-context records are within the current review window.</p>';
       return `
         <p class="muted" style="margin-top:0;line-height:1.6">This is the current durable memory surface, not just the capture stream. Use it to see what OpenDream is actually keeping alive for retrieval and startup.</p>
         <div class="mem-detail-meta">
           <div class="mem-detail-field"><span class="mem-detail-label">Durable active</span><span class="mem-detail-val">${escapeHtml(String(surface.durable_active_total != null ? surface.durable_active_total : '—'))}</span></div>
           <div class="mem-detail-field"><span class="mem-detail-label">Learned context active</span><span class="mem-detail-val">${escapeHtml(String(surface.learned_context_active_total != null ? surface.learned_context_active_total : '—'))}</span></div>
-          <div class="mem-detail-field"><span class="mem-detail-label">Recently pruned learned context</span><span class="mem-detail-val">${escapeHtml(String(surface.learned_context_recently_pruned_total != null ? surface.learned_context_recently_pruned_total : '—'))}</span></div>
           <div class="mem-detail-field"><span class="mem-detail-label">Contested durable</span><span class="mem-detail-val">${escapeHtml(String(surface.durable_contested_total != null ? surface.durable_contested_total : '—'))}</span></div>
           <div class="mem-detail-field"><span class="mem-detail-label">Low-signal share</span><span class="mem-detail-val">${escapeHtml(String(lowSignalPct))}%</span></div>
         </div>
@@ -2111,8 +2317,6 @@
         ${typeMixHtml}
         <h3 class="mem-detail-h" style="margin-top:18px">Recent highlights</h3>
         ${recentHtml}
-        <h3 class="mem-detail-h" style="margin-top:18px">Recently pruned learned context</h3>
-        ${recentPrunedHtml}
         <h3 class="mem-detail-h" style="margin-top:18px">Startup highlights</h3>
         ${startupHtml}
       `;
@@ -2228,6 +2432,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       const liveCheck = health.live_check || {};
       const lastSemanticRun = (ctx && ctx.last_semantic_run) || {};
       const runtimeManagement = data.runtime_management || {};
+      const semanticChangeSummary = data.semantic_change_summary || {};
       const memorySurface = data.memory_surface || {};
       const lastRuntimeEffects = data.last_runtime_effects || {};
       const evTotal = (Number(sig.transcript_events) || 0) + (Number(sig.explicit_events) || 0);
@@ -2349,6 +2554,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       if (liveCheckNotice) parts.push(panel('Live Check Result', liveCheckNotice, true));
       if (restoreNotice) parts.push(panel('Restore Result', restoreNotice, true));
       parts.push(panel('Semantic readiness card', readinessPanel, true));
+      parts.push(panel('Semantic change review', odSemanticChangeSummaryMarkup(semanticChangeSummary), true));
       parts.push(
         '<div class="full od-overview-strip" role="region" aria-label="At a glance">' +
           `<a class="od-strip-card" href="/memories"><span class="od-strip-value">${memTotal}</span><span class="od-strip-label">Memories</span></a>` +
@@ -3633,6 +3839,7 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       }
       var items = [
         { href: '/overview', label: 'Overview', kw: 'home health summary' },
+        { href: '/semantic-changes', label: 'Semantic changes', kw: 'compare semantic change review kept suppressed removed restorable' },
         { href: '/workspaces', label: 'Workspaces', kw: 'catalog roots' },
         { href: '/memories', label: 'Memories', kw: 'records durable' },
         { href: '/memories?focus_search=1', label: 'Memories — focus search', kw: 'find filter query search' },
@@ -3754,6 +3961,8 @@ opendream observe serve --workspace "$PWD" --port 8000</pre>Open <code>/overview
       });
     })();
     if (route === '/' || route === '/overview') void runRender('Overview', renderOverview);
+    else if (route === '/semantic-changes') void runRender('Semantic changes', () => renderSemanticChanges());
+    else if (route.startsWith('/semantic-changes/')) void runRender('Semantic changes', () => renderSemanticChanges(route.split('/').pop()));
     else if (route === '/workspaces') void runRender('Workspaces', renderWorkspaces);
     else if (route.startsWith('/workspaces/')) void runRender('Workspace detail', () => renderWorkspaceDetail(route.split('/').pop()));
     else if (route === '/memories') void runRender('Memories', () => renderMemories());

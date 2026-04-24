@@ -13,6 +13,10 @@ from .semantic_readiness import empty_context_pruning
 from .storage import MemoryStore
 from .util import parse_timestamp, read_json, sha256_path, stable_id, to_iso, utc_now
 
+_SEMANTIC_CHANGE_COMPARE_FILTERS = ["all", "suppressed", "deactivated", "restorable", "restored"]
+_SEMANTIC_CHANGE_COMPARE_MODES = ["summary", "side_by_side", "overlay"]
+_LEARNED_CONTEXT_DEACTIVATED_STATUSES = frozenset({"superseded", "archived", "rejected"})
+
 
 def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
@@ -783,10 +787,202 @@ def _build_overview(store: MemoryStore, timestamp: str) -> dict[str, Any]:
         "runtime_management": runtime_management,
         "memory_surface": memory_surface,
         "last_runtime_effects": last_runtime_effects,
+        "semantic_change_summary": _build_semantic_change_summary(store, timestamp),
         **semantic_surface,
         "context_pruning": _latest_context_pruning(store),
     }
     return overview
+
+
+def build_semantic_change_review(
+    store: MemoryStore,
+    *,
+    source_id: str | None = None,
+    now: str | None = None,
+) -> dict[str, Any] | None:
+    timestamp = now or to_iso(utc_now())
+    context = _resolve_semantic_change_context(store, source_id=source_id)
+    if context is None:
+        return None
+    kept = list(context.get("selected_learned_context_items") or [])
+    suppressed = list(context.get("suppressed_learned_context_items") or [])
+    transitions = _learned_context_transition_items(
+        store,
+        now=timestamp,
+        source_context_id=str(context.get("context_id") or ""),
+        source_run_id=str(context.get("retrieval_run_id") or ""),
+    )
+    items = [*kept, *suppressed, *transitions]
+    summary_counts = {
+        "kept_count": len(kept),
+        "suppressed_count": len(suppressed),
+        "deactivated_count": sum(1 for item in transitions if item.get("change_class") == "deactivated"),
+        "restorable_count": sum(
+            1
+            for item in transitions
+            if item.get("change_class") == "deactivated" and item.get("restore_allowed")
+        ),
+        "restored_count": sum(1 for item in transitions if item.get("change_class") == "restored"),
+    }
+    return {
+        "change_review_id": str(context.get("context_id") or ""),
+        "source_kind": "context_assembly",
+        "source_id": str(context.get("context_id") or ""),
+        "source_run_id": str(context.get("retrieval_run_id") or "") or None,
+        "created_at": context.get("created_at"),
+        "summary_counts": summary_counts,
+        "items": items,
+        "view_hints": {
+            "default_view_mode": "summary",
+            "available_filters": list(_SEMANTIC_CHANGE_COMPARE_FILTERS),
+            "available_compare_modes": list(_SEMANTIC_CHANGE_COMPARE_MODES),
+        },
+    }
+
+
+def _build_semantic_change_summary(store: MemoryStore, timestamp: str) -> dict[str, Any]:
+    review = build_semantic_change_review(store, now=timestamp)
+    if review is None:
+        return {
+            "status": "not_available",
+            "headline": "No semantic change review is available yet.",
+            "latest_run_id": None,
+            "latest_context_id": None,
+            "kept_count": 0,
+            "suppressed_count": 0,
+            "deactivated_count": 0,
+            "restorable_count": 0,
+            "review_href": "/semantic-changes",
+        }
+    counts = review["summary_counts"]
+    return {
+        "status": "available",
+        "headline": "Review the latest semantic context changes.",
+        "latest_run_id": review.get("source_run_id"),
+        "latest_context_id": review.get("source_id"),
+        "kept_count": int(counts.get("kept_count", 0) or 0),
+        "suppressed_count": int(counts.get("suppressed_count", 0) or 0),
+        "deactivated_count": int(counts.get("deactivated_count", 0) or 0),
+        "restorable_count": int(counts.get("restorable_count", 0) or 0),
+        "review_href": f"/semantic-changes/{review['source_id']}",
+    }
+
+
+def _resolve_semantic_change_context(
+    store: MemoryStore,
+    *,
+    source_id: str | None = None,
+) -> dict[str, Any] | None:
+    contexts = store.load_context_assemblies()
+    comparable = [
+        item
+        for item in contexts
+        if item.get("selected_learned_context_items") or item.get("suppressed_learned_context_items")
+    ]
+    comparable.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    if source_id:
+        for item in comparable:
+            if str(item.get("context_id") or "") == source_id:
+                return item
+            if str(item.get("retrieval_run_id") or "") == source_id:
+                return item
+        return None
+    return comparable[0] if comparable else None
+
+
+def _semantic_change_reason_label(reason_code: str) -> str:
+    labels = {
+        "selected_for_context": "Kept active in this context",
+        "profile_budget_exceeded": "Suppressed in this context because the profile budget was exceeded",
+        "startup_profile_keeps_learned_context_pointer_only": (
+            "Suppressed in this context to keep startup output pointer-like"
+        ),
+        "weak_match_learned_context": "Suppressed in this context because the match was weak",
+        "conflicted_learned_context": "Suppressed in this context because the record is conflicted",
+        "stale_learned_context": "Suppressed in this context because the record is stale",
+        "verifier_not_ready": "Suppressed in this context because verification is not ready",
+        "inactive_learned_context": "Removed from active learned context",
+        "superseded": "Removed from active learned context because a newer record superseded it",
+        "archived": "Removed from active learned context because it was archived",
+        "rejected": "Removed from active learned context because verification rejected it",
+        "record_restored": "Record restored to active learned context",
+    }
+    return labels.get(reason_code, reason_code.replace("_", " ").capitalize())
+
+
+def _learned_context_transition_items(
+    store: MemoryStore,
+    *,
+    now: str,
+    source_context_id: str,
+    source_run_id: str,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    now_ts = parse_timestamp(now)
+    for record in store.load_learned_context_records():
+        status = str(record.get("status") or "")
+        if status in _LEARNED_CONTEXT_DEACTIVATED_STATUSES:
+            restorable_until = str(record.get("restorable_until") or "")
+            restore_allowed = False
+            if restorable_until:
+                try:
+                    restore_allowed = parse_timestamp(restorable_until) >= now_ts
+                except (TypeError, ValueError):
+                    restore_allowed = False
+            items.append(
+                {
+                    "record_id": str(record.get("record_id") or ""),
+                    "summary": str(record.get("summary") or ""),
+                    "details_preview": str(record.get("details") or record.get("summary") or "")[:180],
+                    "before_state": "active",
+                    "after_state": status,
+                    "change_class": "deactivated",
+                    "reason_code": status,
+                    "reason_label": _semantic_change_reason_label(status),
+                    "changed_at": record.get("status_changed_at") or record.get("created_at"),
+                    "source_run_id": source_run_id or None,
+                    "source_context_id": source_context_id or None,
+                    "restore_allowed": restore_allowed,
+                    "restorable_until": record.get("restorable_until"),
+                    "superseded_by": record.get("superseded_by"),
+                    "confidence": record.get("confidence"),
+                    "query_family_tags": list(record.get("query_family_tags") or []),
+                    "score": None,
+                    "provenance_link_target": "/overview",
+                }
+            )
+            continue
+        if status == "active" and record.get("restored_at"):
+            items.append(
+                {
+                    "record_id": str(record.get("record_id") or ""),
+                    "summary": str(record.get("summary") or ""),
+                    "details_preview": str(record.get("details") or record.get("summary") or "")[:180],
+                    "before_state": str(record.get("restored_from_status") or "unknown"),
+                    "after_state": "active",
+                    "change_class": "restored",
+                    "reason_code": "record_restored",
+                    "reason_label": _semantic_change_reason_label("record_restored"),
+                    "changed_at": record.get("restored_at") or record.get("created_at"),
+                    "source_run_id": source_run_id or None,
+                    "source_context_id": source_context_id or None,
+                    "restore_allowed": False,
+                    "restorable_until": None,
+                    "superseded_by": None,
+                    "confidence": record.get("confidence"),
+                    "query_family_tags": list(record.get("query_family_tags") or []),
+                    "score": None,
+                    "provenance_link_target": "/overview",
+                }
+            )
+    items.sort(
+        key=lambda item: (
+            str(item.get("changed_at") or ""),
+            str(item.get("record_id") or ""),
+        ),
+        reverse=True,
+    )
+    return items[:24]
 
 
 def _latest_context_pruning(store: MemoryStore) -> dict[str, Any]:

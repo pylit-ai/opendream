@@ -168,6 +168,8 @@ class ContextAssembly:
     profile: dict[str, Any] = field(default_factory=dict)
     selection: dict[str, Any] = field(default_factory=dict)
     context_pruning: dict[str, Any] = field(default_factory=dict)
+    selected_learned_context_items: list[dict[str, Any]] = field(default_factory=list)
+    suppressed_learned_context_items: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

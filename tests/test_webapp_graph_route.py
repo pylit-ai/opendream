@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from opendream.integration import emit_event, maintain
+from opendream.integration import emit_event, maintain, prepare_context
 from opendream.observability import index_observability
 from opendream.storage import MemoryStore
 from opendream.webapp import INDEX_HTML, build_server
@@ -336,16 +336,16 @@ class GraphRouteTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("error", out)
 
-    def test_api_overview_includes_recent_pruned_learned_context(self) -> None:
+    def test_api_overview_includes_semantic_change_summary(self) -> None:
         self.store.save_learned_context_records(
             [
                 {
                     "record_id": "lc-active-1",
                     "workspace_id": self.store.store_id,
                     "source_event_ids": ["evt-1"],
-                    "query_family_tags": ["workflow"],
+                    "query_family_tags": ["redis", "workflow"],
                     "summary": "Keep the active semantic workflow note available.",
-                    "details": "This remains active and should not appear in the pruned list.",
+                    "details": "This remains active and should appear as kept in the compare view.",
                     "assumptions": "Workflow is current.",
                     "provider_id": "openai-main",
                     "model_id": "gpt-5.4",
@@ -353,6 +353,26 @@ class GraphRouteTests(unittest.TestCase):
                     "created_at": "2026-04-19T09:00:00Z",
                     "fresh_until": "2026-04-26T09:00:00Z",
                     "confidence": 0.88,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "active",
+                },
+                {
+                    "record_id": "lc-active-2",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-3"],
+                    "query_family_tags": ["redis", "workflow"],
+                    "summary": "Second active semantic workflow note should be suppressed by the profile budget.",
+                    "details": "This stays active in the store but should not fit into the assembled context.",
+                    "assumptions": "Profile budgets remain bounded.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-19",
+                    "created_at": "2026-04-19T08:30:00Z",
+                    "fresh_until": "2026-04-26T08:30:00Z",
+                    "confidence": 0.58,
                     "verifier_status": "approved",
                     "conflict_state": "none",
                     "harm_signals": [],
@@ -384,18 +404,122 @@ class GraphRouteTests(unittest.TestCase):
                 },
             ]
         )
+        context = prepare_context(
+            self.store,
+            query="redis workflow verification",
+            now=FIXED_NOW,
+        )
         index_observability(self.store, now=FIXED_NOW)
 
         payload = self.get_json("/api/overview")
-        surface = payload.get("memory_surface")
-        self.assertIsInstance(surface, dict)
-        recent_pruned = surface.get("recent_pruned_learned_context")
-        self.assertIsInstance(recent_pruned, list)
-        self.assertEqual(len(recent_pruned), 1)
-        self.assertEqual(recent_pruned[0]["record_id"], "lc-pruned-1")
-        self.assertEqual(recent_pruned[0]["status"], "superseded")
-        self.assertTrue(recent_pruned[0]["restore_allowed"])
-        self.assertEqual(surface.get("learned_context_recently_pruned_total"), 1)
+        summary = payload.get("semantic_change_summary")
+        self.assertIsInstance(summary, dict)
+        self.assertEqual(summary["latest_context_id"], context["context_id"])
+        self.assertEqual(summary["kept_count"], 1)
+        self.assertEqual(summary["suppressed_count"], 1)
+        self.assertEqual(summary["deactivated_count"], 1)
+        self.assertEqual(summary["restorable_count"], 1)
+
+    def test_semantic_changes_api_returns_compare_payload_and_supports_context_lookup(self) -> None:
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-keep-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-1"],
+                    "query_family_tags": ["workflow", "redis"],
+                    "summary": "Keep this learned-context item in the assembled context.",
+                    "details": "It should show up as kept.",
+                    "assumptions": "Still relevant.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-23",
+                    "created_at": "2026-04-23T09:00:00Z",
+                    "fresh_until": "2026-04-30T09:00:00Z",
+                    "confidence": 0.93,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "active",
+                },
+                {
+                    "record_id": "lc-suppress-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-2"],
+                    "query_family_tags": ["workflow", "redis"],
+                    "summary": "Suppress this active learned-context item from the assembled context.",
+                    "details": "It should be grouped under suppressed in this context.",
+                    "assumptions": "Useful later.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-23",
+                    "created_at": "2026-04-23T08:00:00Z",
+                    "fresh_until": "2026-04-30T08:00:00Z",
+                    "confidence": 0.57,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "active",
+                },
+                {
+                    "record_id": "lc-deactivated-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-3"],
+                    "query_family_tags": ["jobs"],
+                    "summary": "This learned-context item was removed from active learned context.",
+                    "details": "It should be restorable.",
+                    "assumptions": "Recent semantic churn.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-23",
+                    "created_at": "2026-04-23T07:00:00Z",
+                    "fresh_until": "2026-04-30T07:00:00Z",
+                    "confidence": 0.68,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "superseded",
+                    "superseded_by": "lc-keep-1",
+                    "status_changed_at": "2026-04-10T11:45:00Z",
+                    "restorable_until": "2026-04-11T11:45:00Z",
+                },
+            ]
+        )
+        context = prepare_context(
+            self.store,
+            query="redis workflow verification",
+            now=FIXED_NOW,
+        )
+        index_observability(self.store, now=FIXED_NOW)
+
+        latest = self.get_json("/api/semantic-changes/latest")
+        self.assertEqual(latest["source_kind"], "context_assembly")
+        self.assertEqual(latest["source_id"], context["context_id"])
+        self.assertEqual(latest["summary_counts"]["kept_count"], 1)
+        self.assertEqual(latest["summary_counts"]["suppressed_count"], 1)
+        self.assertEqual(latest["summary_counts"]["deactivated_count"], 1)
+        self.assertEqual(latest["summary_counts"]["restorable_count"], 1)
+        self.assertEqual(latest["view_hints"]["default_view_mode"], "summary")
+        self.assertIn("side_by_side", latest["view_hints"]["available_compare_modes"])
+        self.assertIn("overlay", latest["view_hints"]["available_compare_modes"])
+        change_classes = {item["change_class"] for item in latest["items"]}
+        self.assertIn("kept", change_classes)
+        self.assertIn("suppressed", change_classes)
+        self.assertIn("deactivated", change_classes)
+
+        by_context = self.get_json(f"/api/semantic-changes/{context['context_id']}")
+        self.assertEqual(by_context["change_review_id"], latest["change_review_id"])
+
+    def test_semantic_changes_api_returns_404_for_unknown_context(self) -> None:
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(f"{self.base_url}/api/semantic-changes/not-found")
+        try:
+            self.assertEqual(ctx.exception.code, 404)
+        finally:
+            ctx.exception.close()
 
     def test_post_learned_context_restore_reactivates_recent_record(self) -> None:
         self.store.save_learned_context_records(
@@ -534,7 +658,15 @@ class GraphRouteTests(unittest.TestCase):
             "Semantic pipeline",
             "Materialization state",
             "Current memory surface",
-            "Recently pruned learned context",
+            "Semantic change review",
+            "Compare semantic changes",
+            "Suppressed in this context",
+            "Removed from active learned context",
+            "Restorable now",
+            "Side by side",
+            "Overlay",
+            "/semantic-changes",
+            "/api/semantic-changes/latest",
             "/api/learned-context/restore",
             "odRestoreLearnedContext",
             "Last runtime effects",

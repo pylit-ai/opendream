@@ -139,6 +139,82 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertTrue(payload["memory_surface"]["recent_highlights"])
         self.assertIn(payload["last_runtime_effects"]["run_type"], {"consolidation", "dream", "semantic_dream"})
 
+    def test_prepare_context_persists_structured_learned_context_compare_data(self) -> None:
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-keep-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-keep-1"],
+                    "query_family_tags": ["redis", "workflow"],
+                    "summary": "Keep Redis workflow guidance active for task runs.",
+                    "details": "This note is strongly relevant and should remain selected.",
+                    "assumptions": "Redis-backed tasks are still current.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-23",
+                    "created_at": "2026-04-23T10:00:00Z",
+                    "fresh_until": "2026-04-30T10:00:00Z",
+                    "confidence": 0.92,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "active",
+                },
+                {
+                    "record_id": "lc-suppress-1",
+                    "workspace_id": self.store.store_id,
+                    "source_event_ids": ["evt-suppress-1"],
+                    "query_family_tags": ["redis", "workflow"],
+                    "summary": "Second Redis workflow note should be suppressed by the profile budget.",
+                    "details": "This remains in the store, but the assembled context should exclude it.",
+                    "assumptions": "The lower-ranked variant is still useful later.",
+                    "provider_id": "openai-main",
+                    "model_id": "gpt-5.4",
+                    "prompt_version": "2026-04-23",
+                    "created_at": "2026-04-23T09:00:00Z",
+                    "fresh_until": "2026-04-30T09:00:00Z",
+                    "confidence": 0.61,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "harm_signals": [],
+                    "promotion_target": "learned_context",
+                    "status": "active",
+                },
+            ]
+        )
+
+        prepare_context(
+            self.store,
+            query="redis workflow verification",
+            now="2026-04-23T12:00:00Z",
+            reporting_agent={
+                "agent_id": "codex",
+                "agent_label": "Codex",
+                "runtime": "codex-cli",
+                "model_id": "gpt-5.4",
+                "model_version": "2026-04-17",
+            },
+        )
+
+        assemblies = self.store.load_context_assemblies()
+        latest = max(assemblies, key=lambda item: str(item.get("created_at") or ""))
+        kept = latest.get("selected_learned_context_items")
+        suppressed = latest.get("suppressed_learned_context_items")
+
+        self.assertIsInstance(kept, list)
+        self.assertIsInstance(suppressed, list)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(len(suppressed), 1)
+        self.assertEqual(kept[0]["record_id"], "lc-keep-1")
+        self.assertEqual(kept[0]["change_class"], "kept")
+        self.assertEqual(suppressed[0]["record_id"], "lc-suppress-1")
+        self.assertEqual(suppressed[0]["change_class"], "suppressed")
+        self.assertEqual(suppressed[0]["reason_code"], "profile_budget_exceeded")
+        self.assertIn("details_preview", suppressed[0])
+        self.assertIn("query_family_tags", suppressed[0])
+
     def test_memories_api_pagination_limit_cap_and_range_query(self) -> None:
         page0 = self.get_json("/api/memories?limit=1&offset=0&sort=memory_id&sort_dir=asc")
         self.assertGreaterEqual(page0["total"], 2)
@@ -369,6 +445,7 @@ class ObservabilityIntegrationTests(unittest.TestCase):
     def test_static_routes_render_html(self) -> None:
         paths = [
             "/overview",
+            "/semantic-changes",
             "/memories",
             "/runs",
             "/retrievals",
@@ -396,6 +473,8 @@ class ObservabilityIntegrationTests(unittest.TestCase):
             "odCopyApiCurl",
             "odCopyApiFetch",
             "odCopyCurrentViewUrl",
+            "/semantic-changes",
+            "/api/semantic-changes/latest",
             "od-overview-strip",
             "About this dashboard",
             "od-first-steps",

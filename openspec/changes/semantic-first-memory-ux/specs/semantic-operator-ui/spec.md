@@ -18,16 +18,20 @@ OpenDream MUST show how progressive disclosure and pruning affected the assemble
 - **WHEN** the operator views the semantic readiness and memory-quality surfaces in observe
 - **THEN** the UI shows the active context profile, raw candidate count, injected count, and pruning evidence with links to inspectable artifacts
 
-### Requirement: Recent Semantic Prune Visibility
-OpenDream MUST show recently pruned learned-context records on the primary memory-surface UI, including whether they are still restorable.
+### Requirement: Semantic Change Review UI
+OpenDream MUST separate summary-first semantic change review on `/overview` from the detailed compare surface on `/semantic-changes`.
 
-#### Scenario: Overview shows recoverable semantic removals
-- **WHEN** the operator opens `/overview` after semantic work has recently superseded, rejected, or archived learned-context records
-- **THEN** the memory-surface panel shows the recent records, their prune status, and the restore deadline without requiring raw JSON inspection
+#### Scenario: Overview summarizes semantic changes without pretending to be a diff
+- **WHEN** the operator opens `/overview` after OpenDream has recorded a comparable learned-context change set
+- **THEN** the page shows summary cards for kept active, suppressed in this context, removed from active learned context, and restorable now, with a primary path to review the change set in detail
 
-#### Scenario: Operator restores a recently pruned learned-context record
-- **WHEN** the operator restores a recent learned-context record from `/overview` while it remains inside the restore window
-- **THEN** OpenDream reactivates the record through an explicit UI action, refreshes the overview state, and does not silently imply that unrelated pruning rules changed
+#### Scenario: Compare page distinguishes suppression from deactivation
+- **WHEN** the operator opens `/semantic-changes` for the latest comparable learned-context change set
+- **THEN** the page shows a compare surface with filters, structured before/after state, explicit suppression vs removal labels, and view modes that do not rely on color alone
+
+#### Scenario: Operator restores a recent learned-context record from compare review
+- **WHEN** the operator restores a recent learned-context record from `/semantic-changes` while it remains inside the restore window
+- **THEN** OpenDream reactivates the record through an explicit UI action, refreshes the semantic change review state, and does not silently imply that unrelated suppression rules changed
 
 ### Requirement: Raw Mode Controls Behind Disclosure
 OpenDream MUST NOT make a raw mode selector the primary semantic UI affordance.

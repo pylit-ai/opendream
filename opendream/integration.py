@@ -44,6 +44,19 @@ _TASK_PROFILE_TERMS = {
     "update",
     "workflow",
 }
+_MAX_PERSISTED_LEARNED_CONTEXT_COMPARE_ITEMS = 12
+_LEARNED_CONTEXT_REASON_LABELS = {
+    "selected_for_context": "Kept active in this context",
+    "inactive_learned_context": "Already removed from active learned context",
+    "verifier_not_ready": "Held out because verification is not ready",
+    "startup_profile_keeps_learned_context_pointer_only": (
+        "Suppressed in this context to keep startup output pointer-like"
+    ),
+    "weak_match_learned_context": "Suppressed in this context because the match was weak",
+    "conflicted_learned_context": "Suppressed in this context because the record is conflicted",
+    "stale_learned_context": "Suppressed in this context because the record is stale",
+    "profile_budget_exceeded": "Suppressed in this context because the profile budget was exceeded",
+}
 
 
 def _store_descriptor(store: MemoryStore) -> dict[str, Any]:
@@ -134,6 +147,46 @@ def _trim_learned_context_record(record: dict[str, Any]) -> dict[str, Any]:
         "conflict_state": record.get("conflict_state", "none"),
         "provider_id": record.get("provider_id"),
         "model_id": record.get("model_id"),
+    }
+
+
+def _learned_context_reason_label(reason_code: str) -> str:
+    return _LEARNED_CONTEXT_REASON_LABELS.get(
+        reason_code,
+        reason_code.replace("_", " ").strip().capitalize() or "Learned-context change",
+    )
+
+
+def _learned_context_compare_item(
+    record: dict[str, Any],
+    *,
+    change_class: str,
+    reason_code: str,
+    source_context_id: str,
+    source_run_id: str,
+    changed_at: str,
+    after_state: str,
+) -> dict[str, Any]:
+    details_preview = summarize(str(record.get("details") or record.get("summary") or ""), 180)
+    return {
+        "record_id": str(record.get("record_id") or ""),
+        "summary": str(record.get("summary") or ""),
+        "details_preview": details_preview,
+        "before_state": "active",
+        "after_state": after_state,
+        "change_class": change_class,
+        "reason_code": reason_code,
+        "reason_label": _learned_context_reason_label(reason_code),
+        "changed_at": changed_at,
+        "source_run_id": source_run_id or None,
+        "source_context_id": source_context_id,
+        "restore_allowed": False,
+        "restorable_until": record.get("restorable_until"),
+        "superseded_by": record.get("superseded_by"),
+        "confidence": record.get("confidence"),
+        "query_family_tags": list(record.get("query_family_tags") or []),
+        "score": record.get("score"),
+        "provenance_link_target": f"/context/{source_context_id}",
     }
 
 
@@ -457,6 +510,7 @@ def prepare_context(
     suppressed: list[dict[str, Any]] = []
     learned_context_candidates: list[dict[str, Any]] = []
     learned_context_pool: list[dict[str, Any]] = []
+    learned_context_compare_sources: dict[str, dict[str, Any]] = {}
     retrieval_run_ids: list[str] = []
 
     for store in store_list:
@@ -526,6 +580,14 @@ def prepare_context(
                     }
                 )
                 continue
+            compare_candidate = {
+                **_trim_learned_context_record(record),
+                "score": _score_learned_context(record, query=query, now=timestamp),
+                "store_id": store.store_id,
+                "store_kind": store.store_kind,
+                "workspace": str(store.workspace),
+            }
+            learned_context_compare_sources[str(record.get("record_id") or "")] = compare_candidate
             if record.get("verifier_status") not in {"approved", "review_required"}:
                 suppressed.append(
                     {
@@ -538,13 +600,7 @@ def prepare_context(
                     }
                 )
                 continue
-            candidate = {
-                **_trim_learned_context_record(record),
-                "score": _score_learned_context(record, query=query, now=timestamp),
-                "store_id": store.store_id,
-                "store_kind": store.store_kind,
-                "workspace": str(store.workspace),
-            }
+            candidate = compare_candidate
             learned_context_pool.append(candidate)
             if profile["name"] == "startup":
                 suppressed.append(
@@ -802,6 +858,34 @@ def prepare_context(
         ",".join(selected_ids),
         ",".join(selected_learned_ids),
     )
+    retrieval_run_id = ",".join(run_id for run_id in retrieval_run_ids if run_id)
+    selected_learned_context_items = [
+        _learned_context_compare_item(
+            item,
+            change_class="kept",
+            reason_code="selected_for_context",
+            source_context_id=context_id,
+            source_run_id=retrieval_run_id,
+            changed_at=timestamp,
+            after_state="active",
+        )
+        for item in selected_learned_context[:_MAX_PERSISTED_LEARNED_CONTEXT_COMPARE_ITEMS]
+    ]
+    suppressed_learned_context_items = [
+        _learned_context_compare_item(
+            learned_context_compare_sources[record_id],
+            change_class="suppressed",
+            reason_code=str(item.get("reason") or "suppressed_in_context"),
+            source_context_id=context_id,
+            source_run_id=retrieval_run_id,
+            changed_at=timestamp,
+            after_state="suppressed_in_context",
+        )
+        for item in suppressed
+        if str(item.get("kind") or "") == "learned_context"
+        for record_id in [str(item.get("record_id") or "")]
+        if record_id in learned_context_compare_sources
+    ][:_MAX_PERSISTED_LEARNED_CONTEXT_COMPARE_ITEMS]
     initialized = [store for store in store_list if store.is_initialized()]
     total_durable = sum(len(store.load_durable_records()) for store in initialized)
     if not initialized:
@@ -859,7 +943,7 @@ def prepare_context(
         context_id=context_id,
         session_id=stable_id("session", query),
         turn_id=stable_id("turn", timestamp, query),
-        retrieval_run_id=",".join(run_id for run_id in retrieval_run_ids if run_id),
+        retrieval_run_id=retrieval_run_id,
         startup_index_snapshot=filtered_startup_entries,
         selected_memory_ids=selected_ids,
         omitted_memory_ids=[str(item.get("memory_id") or "") for item in omitted if item.get("memory_id")],
@@ -898,6 +982,8 @@ def prepare_context(
             "injected_token_estimate": max(1, injected_character_count // 4) if injected_character_count else 0,
             "saved_token_estimate": max((raw_character_count - injected_character_count) // 4, 0),
         },
+        selected_learned_context_items=selected_learned_context_items,
+        suppressed_learned_context_items=suppressed_learned_context_items,
     )
     if primary_store.is_initialized():
         primary_store.write_context_assembly(assembly)

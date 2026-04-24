@@ -361,7 +361,7 @@ def restore_record(
             continue
         current_status = str(record.get("status") or "")
         if current_status == "active":
-            return {"status": "already_active", "record_id": record_id}
+            return {"status": "already_active", "record_id": record_id, "record": dict(record)}
         if current_status not in {"superseded", "archived", "rejected"}:
             return {
                 "status": "not_restorable",
@@ -386,7 +386,7 @@ def restore_record(
         record["verifier_status"] = "approved"
         record.pop("superseded_by", None)
         store.save_learned_context_records(records)
-        return {"status": "restored", "record_id": record_id}
+        return {"status": "restored", "record_id": record_id, "record": dict(record)}
     return {"status": "not_found", "record_id": record_id}
 
 
