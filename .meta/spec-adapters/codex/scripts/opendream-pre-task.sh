@@ -11,7 +11,7 @@ AGENT_MODEL_VERSION="${OPENDREAM_AGENT_MODEL_VERSION:-${OPENAI_MODEL_VERSION:-${
 echo "[opendream] status/prepare-context $WORKSPACE" >&2
 opendream status --workspace "$WORKSPACE"
 if [ -n "$GLOBAL" ]; then
-  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY" --include-global --global-workspace "$GLOBAL" \
+  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY" --output compact-json --include-global --global-workspace "$GLOBAL" \
     --agent-id "${OPENDREAM_AGENT_ID:-codex}" \
     --agent-label "$AGENT_LABEL" \
     --agent-runtime "${OPENDREAM_AGENT_RUNTIME:-codex-cli}" \
@@ -19,7 +19,7 @@ if [ -n "$GLOBAL" ]; then
     --agent-model-id "$AGENT_MODEL_ID" \
     --agent-model-version "$AGENT_MODEL_VERSION"
 else
-  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY" \
+  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY" --output compact-json \
     --agent-id "${OPENDREAM_AGENT_ID:-codex}" \
     --agent-label "$AGENT_LABEL" \
     --agent-runtime "${OPENDREAM_AGENT_RUNTIME:-codex-cli}" \

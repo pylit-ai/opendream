@@ -1089,10 +1089,16 @@ def _hook_script(adapter: str, phase: str) -> str:
                 *agent_lines,
                 "",
                 'if [ -n "$GLOBAL" ]; then',
-                "  opendream prepare-context --workspace "
-                f'"$WORKSPACE" --query "$QUERY" --include-global --global-workspace "$GLOBAL" {agent_args}'.rstrip(),
+                (
+                    "  opendream prepare-context --workspace "
+                    f'"$WORKSPACE" --query "$QUERY" --output compact-json '
+                    f'--include-global --global-workspace "$GLOBAL" {agent_args}'
+                ).rstrip(),
                 "else",
-                f'  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY" {agent_args}'.rstrip(),
+                (
+                    '  opendream prepare-context --workspace "$WORKSPACE" '
+                    f'--query "$QUERY" --output compact-json {agent_args}'
+                ).rstrip(),
                 "fi",
                 "",
             ]
@@ -1132,9 +1138,9 @@ def _openclaw_hook_script() -> str:
             'if [ "$MODE" = "pre-plan" ]; then',
             '  if [ -n "$GLOBAL" ]; then',
             "    opendream prepare-context --workspace "
-            '"$WORKSPACE" --query "$PAYLOAD" --include-global --global-workspace "$GLOBAL"',
+            '"$WORKSPACE" --query "$PAYLOAD" --output compact-json --include-global --global-workspace "$GLOBAL"',
             "  else",
-            '    opendream prepare-context --workspace "$WORKSPACE" --query "$PAYLOAD"',
+            '    opendream prepare-context --workspace "$WORKSPACE" --query "$PAYLOAD" --output compact-json',
             "  fi",
             "  exit 0",
             "fi",

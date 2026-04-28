@@ -21,6 +21,7 @@ HOMOGENEOUS_SHARE_THRESHOLD = 0.8
 EPHEMERA_RATIO_THRESHOLD = 0.6
 DEFAULT_OBSERVATION_WINDOW_DAYS = 14
 MIN_RECORDS_FOR_TYPE_WARNING = 5
+STALE_ACTIVE_LEARNED_CONTEXT_WARNING_THRESHOLD = 1
 LEARNING_EVIDENCE_MISSING_REASON = (
     "semantic path is configured, but learned-context activity has not materialized yet"
 )
@@ -64,6 +65,11 @@ def assess_memory_quality_snapshot(
     )
     active_learned_context = [
         record for record in learned_context_records if record.get("status") == "active"
+    ]
+    stale_active_learned_context = [
+        record
+        for record in active_learned_context
+        if _is_stale_learned_context(record, now=timestamp)
     ]
 
     product_posture = _product_posture(semantic_config)
@@ -146,6 +152,19 @@ def assess_memory_quality_snapshot(
                 },
             )
         )
+    if len(stale_active_learned_context) >= STALE_ACTIVE_LEARNED_CONTEXT_WARNING_THRESHOLD:
+        warnings.append(
+            _warning(
+                "stale_active_learned_context",
+                "warning",
+                "learned-context records are active but stale and will be suppressed from prompt context",
+                "Run maintenance so stale learned context is archived after the grace period.",
+                {
+                    "stale_active_learned_context_count": len(stale_active_learned_context),
+                    "active_learned_context_count": len(active_learned_context),
+                },
+            )
+        )
 
     memory_quality_state = "healthy" if not warnings else "warning"
     return {
@@ -162,6 +181,7 @@ def assess_memory_quality_snapshot(
                 "provider_count": len(providers),
                 "recent_record_count": len(recent_records),
                 "active_learned_context_count": len(active_learned_context),
+                "stale_active_learned_context_count": len(stale_active_learned_context),
                 "dominant_type": dominant_type or None,
                 "dominant_type_share": round(dominant_type_share, 3),
                 "ephemera_ratio": round(ephemera_ratio, 3),
@@ -191,6 +211,16 @@ def _availability_from_snapshot(
             "reason": f"missing provider roles: {', '.join(sorted(missing_roles))}",
         }
     return {"available": True, "mode": mode}
+
+
+def _is_stale_learned_context(record: dict[str, Any], *, now: str) -> bool:
+    fresh_until = record.get("fresh_until")
+    if not fresh_until:
+        return False
+    try:
+        return parse_timestamp(str(fresh_until)) < parse_timestamp(now)
+    except (TypeError, ValueError):
+        return False
 
 
 def _product_posture(semantic_config: dict[str, Any]) -> str:

@@ -76,6 +76,14 @@
       "type": "string",
       "enum": ["superseded", "archived", "rejected"]
     },
+    "archived_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "archive_reason": {
+      "type": "string",
+      "enum": ["stale_after_grace"]
+    },
     "harm_signals": {
       "type": "array",
       "items": { "type": "string" }

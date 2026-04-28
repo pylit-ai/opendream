@@ -124,6 +124,37 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         existing = store.load_learned_context_records()
         store.save_learned_context_records([*existing, *records])
 
+    def learned_context_record(
+        self,
+        record_id: str,
+        *,
+        summary: str = "Use the ledger-backed resolver for ticket verification.",
+        details: str = "Ticket files and verification surface should be inspected together.",
+        fresh_until: str = "2999-01-01T00:00:00Z",
+        status: str = "active",
+        verifier_status: str = "approved",
+        conflict_state: str = "none",
+    ) -> dict[str, object]:
+        return {
+            "record_id": record_id,
+            "workspace_id": "workspace",
+            "source_event_ids": [f"event-{record_id}"],
+            "query_family_tags": ["ticket-verification"],
+            "summary": summary,
+            "details": details,
+            "assumptions": "Applies to local repository verification only.",
+            "provider_id": "heuristic",
+            "model_id": "deterministic",
+            "prompt_version": "v1",
+            "created_at": FIXED_NOW,
+            "fresh_until": fresh_until,
+            "confidence": 0.8,
+            "verifier_status": verifier_status,
+            "conflict_state": conflict_state,
+            "promotion_target": "learned_context",
+            "status": status,
+        }
+
     def test_demo_creates_reproducible_artifacts(self) -> None:
         result = run_cli("demo", "--workspace", str(self.workspace), "--now", FIXED_NOW)
         memory_root = self.workspace / DEFAULT_MEMORY_DIR
@@ -487,6 +518,59 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(second["status"], "skipped")
         self.assertEqual(second["reason"], "min-interval")
 
+    def test_maintain_archives_stale_learned_context_after_grace(self) -> None:
+        self.write_learned_context_records(
+            self.workspace,
+            self.learned_context_record("lc-fresh", fresh_until="2999-01-01T00:00:00Z"),
+            self.learned_context_record(
+                "lc-stale-within-grace",
+                fresh_until="2026-03-24T12:00:00Z",
+            ),
+            self.learned_context_record(
+                "lc-stale-after-grace",
+                fresh_until="2026-03-01T12:00:00Z",
+            ),
+        )
+
+        result = run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        records = {
+            record["record_id"]: record
+            for record in MemoryStore(self.workspace).load_learned_context_records()
+        }
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["learned_context_lifecycle"]["archived"], 1)
+        self.assertEqual(records["lc-fresh"]["status"], "active")
+        self.assertEqual(records["lc-stale-within-grace"]["status"], "active")
+        self.assertEqual(records["lc-stale-after-grace"]["status"], "archived")
+        self.assertEqual(records["lc-stale-after-grace"]["archive_reason"], "stale_after_grace")
+        self.assertEqual(records["lc-stale-after-grace"]["archived_at"], FIXED_NOW)
+
+    def test_semantic_status_reports_prompt_eligible_stale_active_and_archived_counts(self) -> None:
+        self.write_learned_context_records(
+            self.workspace,
+            self.learned_context_record("lc-prompt-eligible", fresh_until="2999-01-01T00:00:00Z"),
+            self.learned_context_record("lc-stale-active", fresh_until="2000-01-01T00:00:00Z"),
+            self.learned_context_record(
+                "lc-archived",
+                fresh_until="2000-01-01T00:00:00Z",
+                status="archived",
+            ),
+            self.learned_context_record(
+                "lc-verifier-pending",
+                fresh_until="2999-01-01T00:00:00Z",
+                verifier_status="pending",
+            ),
+        )
+
+        status = run_cli("semantic", "status", "--workspace", str(self.workspace))
+        learned = status["learned_context"]
+
+        self.assertEqual(learned["active"], 3)
+        self.assertEqual(learned["prompt_eligible"], 1)
+        self.assertEqual(learned["stale_active"], 1)
+        self.assertEqual(learned["archived"], 1)
+
     def test_prepare_context_returns_prompt_ready_memory(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
         run_cli("append-event", "--workspace", str(self.workspace), "--events", str(fixture))
@@ -506,6 +590,132 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertTrue(context["selected_memory_ids"])
         self.assertIsNone(context.get("empty_reason"))
         self.assertEqual(context.get("hints"), [])
+
+    def test_prepare_context_output_modes_preserve_full_audit_and_compact_prompt(self) -> None:
+        self.write_learned_context_records(
+            self.workspace,
+            self.learned_context_record("lc-output-mode"),
+            self.learned_context_record(
+                "lc-output-budget",
+                summary="Budget-only record",
+                details="Another matching ticket verification record.",
+            ),
+        )
+
+        full = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "ticket verification resolver",
+            "--now",
+            FIXED_NOW,
+            "--output",
+            "full-json",
+        )
+        compact = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "ticket verification resolver",
+            "--now",
+            FIXED_NOW,
+            "--output",
+            "compact-json",
+        )
+        prompt = run_cli_raw(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "ticket verification resolver",
+            "--now",
+            FIXED_NOW,
+            "--output",
+            "prompt",
+        )
+
+        self.assertIn("suppressed", full)
+        self.assertIn("selected_learned_context_records", full)
+        self.assertIn("prompt_context", compact)
+        self.assertIn("context_pruning", compact)
+        self.assertIn("audit", compact)
+        self.assertNotIn("suppressed", compact)
+        self.assertNotIn("omitted", compact)
+        self.assertNotIn("selected_memories", compact)
+        self.assertNotIn("selected_learned_context_records", compact)
+        self.assertIn("OpenDream Memory Context", prompt.stdout)
+        self.assertNotIn('"prompt_context"', prompt.stdout)
+
+    def test_prepare_context_compact_output_stays_bounded_with_many_suppressed_records(self) -> None:
+        self.write_learned_context_records(
+            self.workspace,
+            *[
+                self.learned_context_record(
+                    f"lc-suppressed-{idx:03d}",
+                    summary=f"Stale ticket verification record {idx}",
+                    details="Ticket verification stale record " * 8,
+                    fresh_until="2000-01-01T00:00:00Z",
+                )
+                for idx in range(400)
+            ],
+        )
+
+        full = run_cli_raw(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "ticket verification resolver",
+            "--now",
+            FIXED_NOW,
+            "--output",
+            "full-json",
+        )
+        compact = run_cli_raw(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "ticket verification resolver",
+            "--now",
+            FIXED_NOW,
+            "--output",
+            "compact-json",
+        )
+        compact_payload = json.loads(compact.stdout)
+
+        self.assertGreater(len(full.stdout), 32768)
+        self.assertLess(len(compact.stdout.encode("utf-8")), 32768)
+        self.assertEqual(compact_payload["context_pruning"]["suppressed_count"], 400)
+        self.assertEqual(compact_payload["suppression_summary"]["stale_learned_context"], 400)
+        self.assertNotIn("suppressed", compact_payload)
+
+    def test_prepare_context_compact_output_warns_when_prompt_exceeds_hook_budget(self) -> None:
+        self.write_learned_context_records(
+            self.workspace,
+            self.learned_context_record(
+                "lc-large-selected",
+                summary="Ticket verification resolver budget warning",
+                details="ticket verification resolver " * 2500,
+            ),
+        )
+
+        compact = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "ticket verification resolver",
+            "--now",
+            FIXED_NOW,
+            "--output",
+            "compact-json",
+        )
+
+        self.assertGreater(len(json.dumps(compact).encode("utf-8")), 32768)
+        self.assertEqual(compact["warnings"][0]["code"], "compact_context_budget_exceeded")
 
     def test_prepare_context_records_reporting_agent_and_model(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
@@ -2410,6 +2620,9 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("Use the ledger-backed resolver", context_text)
+        context_payload = json.loads(context_text)
+        self.assertIn("prompt_context", context_payload)
+        self.assertNotIn("suppressed", context_payload)
 
         transcript_path = self.workspace / ".claude" / "projects" / "session.jsonl"
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2491,6 +2704,11 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertTrue((self.workspace / ".opendream" / "hooks" / "cursor-pre-task.sh").exists())
         self.assertTrue((self.workspace / ".opendream" / "hooks" / "gemini-post-task.sh").exists())
         self.assertTrue((self.workspace / ".opendream" / "hooks" / "github-copilot-pre-task.sh").exists())
+        for hook_name in ("cursor-pre-task.sh", "gemini-pre-task.sh", "github-copilot-pre-task.sh"):
+            hook_text = (self.workspace / ".opendream" / "hooks" / hook_name).read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("--output compact-json", hook_text)
 
         removed = run_cli("deactivate", "--workspace", str(self.workspace), "--targets", "all-supported")
         self.assertEqual(removed["status"], "deactivated")

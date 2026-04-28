@@ -88,3 +88,12 @@ Stop and request explicit approval before:
 - Do not invent new documentation categories when an existing canonical home exists.
 - If documentation appears to conflict, follow precedence from `docs/governance/DOCS_SYSTEM.md`.
 - Update the spec and impacted docs when behavior changes.
+
+<!-- metactl:begin agents-md -->
+# Repository Builder
+
+[metactl Instruction Index]|target:codex-cli|policy:brownfield-safe-builder|mode:reference_index
+|IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning.
+|budget:warn=8192B|max=32768B
+|packs:none
+<!-- metactl:end agents-md -->

@@ -1,13 +1,6 @@
 # Repository Builder
 
-Target: Gemini CLI
-Policy: Brownfield Safe Builder
-
-Prefer retrieval-led reasoning: use this file as a compact index, then open the referenced pack body that matches the task.
-
-## Active Pack Index
-- role + policy only; no active packs survived discovery.
-Mode: reference_index
-
-## Capability Gaps
-- pack_selection: ZeroMatch
+[metactl Instruction Index]|target:gemini-cli|policy:brownfield-safe-builder|mode:reference_index
+|IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning.
+|budget:warn=8192B|max=32768B
+|packs:none

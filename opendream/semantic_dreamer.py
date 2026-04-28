@@ -658,6 +658,7 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
     dream_state = store.load_dream_state()
 
     active_learned = [r for r in learned_records if r.get("status") == "active"]
+    archived_learned = [r for r in learned_records if r.get("status") == "archived"]
     stale_learned = []
     now = utc_now()
     for r in active_learned:
@@ -668,6 +669,14 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
                     stale_learned.append(r)
             except (ValueError, TypeError):
                 pass
+    stale_ids = {str(r.get("record_id") or "") for r in stale_learned}
+    prompt_eligible = [
+        r
+        for r in active_learned
+        if str(r.get("record_id") or "") not in stale_ids
+        and r.get("verifier_status") in {"approved", "review_required"}
+        and r.get("conflict_state", "none") == "none"
+    ]
 
     # Execution strategy and adapter info (438 bundle)
     execution_strategy = config.get("execution_strategy", "deterministic")
@@ -706,6 +715,9 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
             "total": len(learned_records),
             "active": len(active_learned),
             "stale": len(stale_learned),
+            "prompt_eligible": len(prompt_eligible),
+            "stale_active": len(stale_learned),
+            "archived": len(archived_learned),
             "rejected": sum(1 for r in learned_records if r.get("status") == "rejected"),
             "superseded": sum(1 for r in learned_records if r.get("status") == "superseded"),
         },

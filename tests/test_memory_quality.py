@@ -79,6 +79,53 @@ class MemoryQualityTests(unittest.TestCase):
         self.assertNotIn("semantic_unavailable", warning_codes)
         self.assertNotIn("missing_learned_context_activity", warning_codes)
 
+    def test_stale_active_learned_context_emits_memory_health_warning(self) -> None:
+        write_json(
+            self.store.semantic_config_path,
+            {
+                "mode": "semantic",
+                "execution_strategy": "direct-provider",
+                "fallback_policy": "fallback_to_deterministic",
+            },
+        )
+        write_json(
+            self.store.provider_registry_path,
+            [{"provider_id": "local", "health_status": "healthy", "roles": ["synthesis", "verification"]}],
+        )
+        write_json(self.store.durable_records_path, [])
+        write_json(
+            self.store.learned_context_path,
+            [
+                {
+                    "record_id": "lc-stale-active",
+                    "workspace_id": "workspace",
+                    "source_event_ids": ["event-1"],
+                    "summary": "Stale context",
+                    "details": "This learned context is stale but still active.",
+                    "assumptions": "",
+                    "provider_id": "local",
+                    "model_id": "deterministic",
+                    "prompt_version": "v1",
+                    "created_at": "2026-04-01T00:00:00Z",
+                    "fresh_until": "2026-04-10T00:00:00Z",
+                    "confidence": 0.8,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "promotion_target": "learned_context",
+                    "status": "active",
+                }
+            ],
+        )
+
+        report = analyze_memory_quality(self.store, now="2026-04-19T12:00:00Z")
+        warning_codes = {warning["code"] for warning in report["memory_quality"]["warnings"]}
+
+        self.assertIn("stale_active_learned_context", warning_codes)
+        self.assertEqual(
+            report["memory_quality"]["metrics"]["stale_active_learned_context_count"],
+            1,
+        )
+
     def test_semantic_ready_workspace_without_quality_issues_is_healthy(self) -> None:
         now = "2026-04-19T12:00:00Z"
         write_json(

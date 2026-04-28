@@ -11,9 +11,9 @@ case "$MODE" in
     echo "[opendream] status/prepare-context $WORKSPACE" >&2
     opendream status --workspace "$WORKSPACE"
     if [ -n "$GLOBAL" ]; then
-      opendream prepare-context --workspace "$WORKSPACE" --query "$PAYLOAD" --include-global --global-workspace "$GLOBAL"
+      opendream prepare-context --workspace "$WORKSPACE" --query "$PAYLOAD" --output compact-json --include-global --global-workspace "$GLOBAL"
     else
-      opendream prepare-context --workspace "$WORKSPACE" --query "$PAYLOAD"
+      opendream prepare-context --workspace "$WORKSPACE" --query "$PAYLOAD" --output compact-json
     fi
     ;;
   post-task)

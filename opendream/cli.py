@@ -81,6 +81,8 @@ from .util import FIXTURE_ROOT, json_dumps, stable_id, to_iso, utc_now
 from .validation import validate_document
 from .webapp import build_server
 
+COMPACT_CONTEXT_BUDGET_BYTES = 32768
+
 ACTIVATION_TARGETS_HELP = (
     "configured | all-detected | all-supported | <adapter-id> "
     f"(built-in ids: {', '.join(SUPPORTED_TARGETS)}; "
@@ -495,8 +497,9 @@ def command_hook_claude_pre_task(args: argparse.Namespace) -> dict[str, Any]:
     )
     output = store.workspace / ".opendream" / "context" / "claude-pre-task.json"
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(context) + "\n", encoding="utf-8")
-    return context
+    compact = compact_prepare_context_output(context)
+    output.write_text(json_dumps(compact) + "\n", encoding="utf-8")
+    return compact
 
 
 def command_hook_claude_post_task(args: argparse.Namespace) -> dict[str, Any]:
@@ -629,13 +632,57 @@ def command_maintain(args: argparse.Namespace) -> dict[str, Any]:
 def command_prepare_context(args: argparse.Namespace) -> dict[str, Any]:
     stores = resolve_store_group(args)
     selected_stores = stores if len(stores) > 1 or args.stores_manifest else stores[0]
-    return prepare_context(
+    context = prepare_context(
         selected_stores,
         query=args.query,
         limit=args.limit,
         now=args.now,
         reporting_agent=_resolve_reporting_agent(args),
     )
+    if args.output == "prompt":
+        return {"__raw_output__": context["prompt_context"]}
+    if args.output == "compact-json":
+        return compact_prepare_context_output(context)
+    return context
+
+
+def compact_prepare_context_output(context: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "cli_output_version",
+        "context_id",
+        "workspace",
+        "stores",
+        "summary",
+        "audit",
+        "profile",
+        "selection",
+        "context_pruning",
+        "suppression_summary",
+        "selected_memory_ids",
+        "selected_learned_context_ids",
+        "selected_automation_record_ids",
+        "prompt_context",
+        "empty_reason",
+        "hints",
+    )
+    compact = {key: context[key] for key in keys if key in context}
+    context_id = str(context.get("context_id") or "")
+    if context_id and "audit" not in compact:
+        compact["audit"] = {"context_path": f".opendream/memory/audit/context/{context_id}.json"}
+    compact_size = len(json_dumps(compact).encode("utf-8"))
+    if compact_size > COMPACT_CONTEXT_BUDGET_BYTES:
+        compact["warnings"] = [
+            {
+                "code": "compact_context_budget_exceeded",
+                "severity": "warning",
+                "message": "compact prepare-context output exceeds the hook stdout budget",
+                "details": {
+                    "compact_bytes": compact_size,
+                    "budget_bytes": COMPACT_CONTEXT_BUDGET_BYTES,
+                },
+            }
+        ]
+    return compact
 
 
 def _env_first(*keys: str) -> str | None:
@@ -1692,6 +1739,12 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_context_parser.add_argument("--agent-model-id")
     prepare_context_parser.add_argument("--agent-model-version")
     prepare_context_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    prepare_context_parser.add_argument(
+        "--output",
+        choices=["full-json", "compact-json", "prompt"],
+        default="full-json",
+        help="Output shape: full audit JSON, compact hook-safe JSON, or prompt text",
+    )
     add_layout_arguments(prepare_context_parser)
     add_store_group_arguments(prepare_context_parser)
     prepare_context_parser.set_defaults(func=command_prepare_context)

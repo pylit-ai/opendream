@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable
+from datetime import timedelta
 from typing import Any
 
 from .automation import tick as automation_tick
@@ -45,6 +46,7 @@ _TASK_PROFILE_TERMS = {
     "workflow",
 }
 _MAX_PERSISTED_LEARNED_CONTEXT_COMPARE_ITEMS = 12
+_LEARNED_CONTEXT_ARCHIVE_GRACE_DAYS = 7
 _LEARNED_CONTEXT_REASON_LABELS = {
     "selected_for_context": "Kept active in this context",
     "inactive_learned_context": "Already removed from active learned context",
@@ -57,6 +59,41 @@ _LEARNED_CONTEXT_REASON_LABELS = {
     "stale_learned_context": "Suppressed in this context because the record is stale",
     "profile_budget_exceeded": "Suppressed in this context because the profile budget was exceeded",
 }
+
+
+def archive_stale_learned_context(
+    store: MemoryStore,
+    *,
+    now: str | None = None,
+    grace_days: int = _LEARNED_CONTEXT_ARCHIVE_GRACE_DAYS,
+) -> dict[str, Any]:
+    timestamp = now or to_iso(utc_now())
+    cutoff = parse_timestamp(timestamp) - timedelta(days=grace_days)
+    records = store.load_learned_context_records()
+    archived_ids: list[str] = []
+    updated: list[dict[str, Any]] = []
+    for record in records:
+        next_record = dict(record)
+        if record.get("status") == "active":
+            fresh_until = record.get("fresh_until")
+            try:
+                expired_at = parse_timestamp(str(fresh_until)) if fresh_until else None
+            except (TypeError, ValueError):
+                expired_at = None
+            if expired_at is not None and expired_at < cutoff:
+                next_record["status"] = "archived"
+                next_record["archived_at"] = timestamp
+                next_record["archive_reason"] = "stale_after_grace"
+                next_record["status_changed_at"] = timestamp
+                archived_ids.append(str(record.get("record_id") or ""))
+        updated.append(next_record)
+    if archived_ids:
+        store.save_learned_context_records(updated)
+    return {
+        "archived": len(archived_ids),
+        "archived_record_ids": archived_ids,
+        "grace_days": grace_days,
+    }
 
 
 def _store_descriptor(store: MemoryStore) -> dict[str, Any]:
@@ -308,14 +345,20 @@ def maintain(
     processed_ids = store.load_processed_event_ids()
     new_events = [event for event in store.load_events() if event["event_id"] not in processed_ids]
     pending_candidates = store.load_pending_candidates()
+    learned_context_lifecycle = archive_stale_learned_context(store, now=timestamp)
 
-    if len(new_events) < policy["min_new_events"] and not pending_candidates:
+    if (
+        len(new_events) < policy["min_new_events"]
+        and not pending_candidates
+        and learned_context_lifecycle["archived"] == 0
+    ):
         return {
             "status": "skipped",
             "reason": "no-work",
             **_store_descriptor(store),
             "new_events": len(new_events),
             "pending_candidates": 0,
+            "learned_context_lifecycle": learned_context_lifecycle,
             "policy": policy,
             "cli_output_version": CLI_JSON_VERSION,
         }
@@ -337,7 +380,11 @@ def maintain(
 
     consolidation = consolidate(store, now=timestamp)
     result = {
-        "status": "completed" if consolidation.get("status") != "skipped" else "skipped",
+        "status": (
+            "completed"
+            if consolidation.get("status") != "skipped" or learned_context_lifecycle["archived"] > 0
+            else "skipped"
+        ),
         **_store_descriptor(store),
         "extract": {
             "run_id": extract_run_id,
@@ -345,6 +392,7 @@ def maintain(
             "created_candidates": len(candidates),
         },
         "consolidate": consolidation,
+        "learned_context_lifecycle": learned_context_lifecycle,
         "policy": policy,
     }
     if result["status"] == "completed":
@@ -985,13 +1033,21 @@ def prepare_context(
         selected_learned_context_items=selected_learned_context_items,
         suppressed_learned_context_items=suppressed_learned_context_items,
     )
+    context_audit_path = None
     if primary_store.is_initialized():
-        primary_store.write_context_assembly(assembly)
+        context_audit_path = primary_store.write_context_assembly(assembly)
 
     return {
         "workspace": str(store_list[0].workspace) if len(store_list) == 1 else None,
         "stores": [_store_descriptor(store) for store in store_list],
         "context_id": context_id,
+        "audit": {
+            "context_path": (
+                str(context_audit_path.relative_to(primary_store.workspace))
+                if context_audit_path is not None
+                else None
+            )
+        },
         "profile": profile,
         "selection": {
             "startup_index": {

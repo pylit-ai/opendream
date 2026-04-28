@@ -76,9 +76,12 @@ def pre_task_script(store: MemoryStore, target: str) -> str:
             f'OUTPUT="$WORKSPACE/{CONTEXT_DIR}/{output_name}"',
             'mkdir -p "$(dirname "$OUTPUT")"',
             'if [ -n "$GLOBAL" ]; then',
-            f'  {command} --query "$QUERY" --include-global --global-workspace "$GLOBAL" > "$OUTPUT"',
+            (
+                f'  {command} --query "$QUERY" --output compact-json '
+                '--include-global --global-workspace "$GLOBAL" > "$OUTPUT"'
+            ),
             "else",
-            f'  {command} --query "$QUERY" > "$OUTPUT"',
+            f'  {command} --query "$QUERY" --output compact-json > "$OUTPUT"',
             "fi",
             'cat "$OUTPUT"',
             "",
@@ -140,9 +143,12 @@ def openclaw_hook_script(store: MemoryStore) -> str:
             'mkdir -p "$(dirname "$OUTPUT")"',
             'if [ "$MODE" = "pre-plan" ]; then',
             '  if [ -n "$GLOBAL" ]; then',
-            f'    {prepare_command} --query "$PAYLOAD" --include-global --global-workspace "$GLOBAL" > "$OUTPUT"',
+            (
+                f'    {prepare_command} --query "$PAYLOAD" --output compact-json '
+                '--include-global --global-workspace "$GLOBAL" > "$OUTPUT"'
+            ),
             "  else",
-            f'    {prepare_command} --query "$PAYLOAD" > "$OUTPUT"',
+            f'    {prepare_command} --query "$PAYLOAD" --output compact-json > "$OUTPUT"',
             "  fi",
             '  cat "$OUTPUT"',
             "  exit 0",

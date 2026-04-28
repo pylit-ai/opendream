@@ -19,7 +19,7 @@ fi
 
 echo "[opendream] prepare-context $WORKSPACE" >&2
 if [ -n "$GLOBAL" ]; then
-  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY" --include-global --global-workspace "$GLOBAL"
+  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY" --output compact-json --include-global --global-workspace "$GLOBAL"
 else
-  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY"
+  opendream prepare-context --workspace "$WORKSPACE" --query "$QUERY" --output compact-json
 fi
