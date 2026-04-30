@@ -1767,6 +1767,36 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(after["dream"]["last_ran_at"], FIXED_NOW)
         self.assertEqual(after["dream"]["last_run_reason"], "transcript-backlog")
 
+    def test_dream_backfill_narrative_updates_existing_summary(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        audit_dir = self.workspace / ".opendream" / "memory" / "audit" / "dream"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = audit_dir / "dream-backfill-summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "action": "dream",
+                    "run_id": "dream-backfill",
+                    "workspace": str(self.workspace),
+                    "memory_root": str(self.workspace / ".opendream" / "memory"),
+                    "target_paths": [],
+                    "summary": {
+                        "run_id": "dream-backfill",
+                        "status": "skipped",
+                        "reason": "no-episodes",
+                        "phases": ["orient"],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = run_cli("dream", "backfill-narrative", "--workspace", str(self.workspace))
+
+        self.assertEqual(result["narratives_backfilled"], 1)
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        self.assertIn("no agent transcripts", payload["summary"]["narrative"])
+
     def test_dream_help_clarifies_worker_and_daemon_roles(self) -> None:
         dream_help = run_cli_raw("dream", "-h", check=False)
         worker_help = run_cli_raw("dream", "worker", "-h", check=False)

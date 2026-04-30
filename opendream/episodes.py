@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import MemoryEvent
+from .sessions import current_session_id
 from .util import parse_timestamp, semantic_tokens, stable_id, to_iso
 
 RELATIVE_DATE_PATTERNS = {
@@ -105,7 +106,11 @@ def row_to_event(row: dict[str, Any], *, scope: str = "project") -> MemoryEvent 
     message_ref = str(row.get("id") or stable_id("episode", timestamp, speaker, normalized_content))
     return MemoryEvent(
         event_id=stable_id("event", timestamp, speaker, normalized_content),
-        session_id=stable_id("session", row.get("session_id", "dream"), speaker),
+        session_id=(
+            row.get("session_id")
+            or current_session_id()
+            or stable_id("session", row.get("session_id", "dream"), speaker)
+        ),
         turn_id=stable_id("turn", timestamp, speaker, normalized_content[:32]),
         timestamp=to_iso(parse_timestamp(timestamp)),
         scope=scope,

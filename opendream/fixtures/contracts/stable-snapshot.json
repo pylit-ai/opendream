@@ -71,16 +71,25 @@
       "name": "retrieve"
     },
     {
+      "name": "review"
+    },
+    {
       "name": "semantic"
     },
     {
       "name": "service"
     },
     {
+      "name": "sessions"
+    },
+    {
       "name": "status"
     },
     {
       "name": "tick"
+    },
+    {
+      "name": "transcripts"
     },
     {
       "name": "uninstall-service"

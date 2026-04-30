@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from . import __version__, workspace_catalog
+from . import auto_reviewer as _auto_reviewer
 from .activation import (
     SUPPORTED_TARGETS,
     activate_agents,
@@ -38,6 +39,7 @@ from .automation import (
 from .bootstrap import bootstrap_index
 from .consolidator import consolidate
 from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
+from .dream_narrative import synthesize_dream_narrative
 from .evaluation import (
     run_advanced_runtime_report,
     run_dream_fidelity_eval,
@@ -57,7 +59,7 @@ from .integration import (
     tick_stores,
 )
 from .models import MemoryEvent
-from .observability import index_observability
+from .observability import _session_diagnostics, index_observability
 from .reconciliation import run_reconciliation_sweep
 from .retriever import retrieve
 from .service import (
@@ -76,8 +78,9 @@ from .service import (
     uninstall_service,
     update_service,
 )
+from .sessions import cleanup_orphans
 from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, store_sort_key
-from .util import FIXTURE_ROOT, json_dumps, stable_id, to_iso, utc_now
+from .util import FIXTURE_ROOT, json_dumps, read_json, stable_id, to_iso, utc_now, write_json
 from .validation import validate_document
 from .webapp import build_server
 
@@ -942,6 +945,36 @@ def command_dream_run(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def command_dream_backfill_narrative(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    updated = 0
+    scanned = 0
+    for audit_dir in (store.audit_dream_dir, store.audit_semantic_dream_dir):
+        for path in sorted(audit_dir.glob("*-summary.json")):
+            scanned += 1
+            payload = read_json(path, {})
+            summary = payload.get("summary") if isinstance(payload, dict) else None
+            if not isinstance(summary, dict) or summary.get("narrative"):
+                continue
+            summary["narrative"] = synthesize_dream_narrative(summary)
+            payload["summary"] = summary
+            write_json(path, payload)
+            updated += 1
+    if updated:
+        index_observability(store)
+    return {
+        "status": "ok",
+        "workspace": str(store.workspace),
+        "memory_root": str(store.memory_root),
+        "summary_files_scanned": scanned,
+        "narratives_backfilled": updated,
+    }
+
+
 def command_dream_status(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(
         args.workspace,
@@ -1283,6 +1316,23 @@ def command_workspace_forget(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def command_workspace_prune(args: argparse.Namespace) -> dict[str, Any]:
+    return workspace_catalog.prune_tempdir_entries(dry_run=bool(args.dry_run))
+
+
+def command_transcripts_ingest(args: argparse.Namespace) -> dict[str, Any]:
+    from . import transcripts as _transcripts
+
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if args.from_dir:
+        return _transcripts.ingest_claude_sessions(
+            store, args.from_dir, overwrite=bool(args.overwrite)
+        )
+    return _transcripts.ingest_claude_for_workspace(
+        store, overwrite=bool(args.overwrite)
+    )
+
+
 def command_workspace_doctor(args: argparse.Namespace) -> dict[str, Any]:
     if not args.workspace and not args.all_workspaces:
         raise ValueError("workspace doctor requires --workspace or --all")
@@ -1544,6 +1594,93 @@ def command_semantic_ingest(args: argparse.Namespace) -> dict[str, Any]:
     if args.path:
         return ingest_file(store, Path(args.path), now=args.now)
     return {"status": "error", "reason": "specify --path or --scan-inbox"}
+
+
+def command_review_auto_run(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    cfg = _auto_reviewer.load_config(store)
+    result = _auto_reviewer.run_auto_reviewer(store, config=cfg, dry_run=args.dry_run)
+    return result
+
+
+def command_review_auto_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    cfg = _auto_reviewer.load_config(store)
+    last_run = _auto_reviewer.load_last_run(store)
+    rules_status = []
+    for rule in _auto_reviewer.DEFAULT_RULES:
+        rc = cfg.rule(rule.rule_id)
+        rules_status.append({
+            "rule_id": rule.rule_id,
+            "description": rule.description,
+            "enabled": rc.enabled if rc else True,
+            "thresholds": rc.thresholds if rc else {},
+        })
+    cooldown_count = 0
+    if last_run:
+        cooldown_count = last_run.get("applied_count", 0)
+    return {
+        "enabled": cfg.enabled,
+        "run_in_dream_cycle": cfg.run_in_dream_cycle,
+        "rules": rules_status,
+        "last_run": last_run,
+        "cooldown_count": cooldown_count,
+    }
+
+
+def command_review_auto_config(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if args.show or not args.set:
+        cfg = _auto_reviewer.load_config(store)
+        rules_out = []
+        for rule in _auto_reviewer.DEFAULT_RULES:
+            rc = cfg.rule(rule.rule_id)
+            if rc is None:
+                continue
+            rules_out.append({"rule_id": rule.rule_id, "enabled": rc.enabled, "thresholds": rc.thresholds})
+        return {
+            "enabled": cfg.enabled,
+            "run_in_dream_cycle": cfg.run_in_dream_cycle,
+            "rules": rules_out,
+        }
+    # --set RULE.FIELD=VALUE [...]
+    cfg = _auto_reviewer.load_config(store)
+    for token in args.set:
+        if "=" not in token:
+            raise ValueError(f"--set value must be RULE.FIELD=VALUE, got: {token!r}")
+        lhs, _, rhs = token.partition("=")
+        if "." not in lhs:
+            raise ValueError(f"--set key must be RULE.FIELD, got: {lhs!r}")
+        rule_id, _, field_name = lhs.partition(".")
+        update: dict[str, Any] = {"rule_id": rule_id}
+        if field_name == "enabled":
+            update["enabled"] = rhs.lower() in ("1", "true", "yes")
+        else:
+            update["threshold_summary"] = {field_name: float(rhs)}
+        cfg = _auto_reviewer.apply_config_update(store, update)
+    rules_out = []
+    for rule in _auto_reviewer.DEFAULT_RULES:
+        rc = cfg.rule(rule.rule_id)
+        if rc is None:
+            continue
+        rules_out.append({"rule_id": rule.rule_id, "enabled": rc.enabled, "thresholds": rc.thresholds})
+    return {
+        "enabled": cfg.enabled,
+        "run_in_dream_cycle": cfg.run_in_dream_cycle,
+        "rules": rules_out,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1874,6 +2011,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_layout_arguments(dream_run_parser)
     dream_run_parser.set_defaults(func=command_dream_run)
+    dream_backfill_parser = dream_subparsers.add_parser(
+        "backfill-narrative",
+        help="Backfill deterministic narratives into existing dream audit summaries",
+    )
+    dream_backfill_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(dream_backfill_parser)
+    dream_backfill_parser.set_defaults(func=command_dream_backfill_narrative)
     dream_status_parser = dream_subparsers.add_parser("status", help="Inspect dream, queue, and worker state")
     dream_status_parser.add_argument("--workspace", required=True)
     dream_status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
@@ -2290,6 +2434,36 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(service_autowire_parser)
     service_autowire_parser.set_defaults(func=command_service_autowire)
 
+    review_parser = subparsers.add_parser(
+        "review",
+        help="Auto-review rules for the OpenDream queue",
+    )
+    review_subparsers = review_parser.add_subparsers(dest="review_command", required=True)
+
+    review_auto_run_parser = review_subparsers.add_parser(
+        "auto-run", help="Run auto-reviewer rules against the workspace"
+    )
+    review_auto_run_parser.add_argument("--workspace", required=True)
+    review_auto_run_parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=False)
+    add_layout_arguments(review_auto_run_parser)
+    review_auto_run_parser.set_defaults(func=command_review_auto_run)
+
+    review_auto_status_parser = review_subparsers.add_parser(
+        "auto-status", help="Show last-run summary and per-rule config"
+    )
+    review_auto_status_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(review_auto_status_parser)
+    review_auto_status_parser.set_defaults(func=command_review_auto_status)
+
+    review_auto_config_parser = review_subparsers.add_parser(
+        "auto-config", help="Show or update auto-reviewer config"
+    )
+    review_auto_config_parser.add_argument("--workspace", required=True)
+    review_auto_config_parser.add_argument("--show", action="store_true", default=False)
+    review_auto_config_parser.add_argument("--set", dest="set", nargs="+", metavar="RULE.FIELD=VALUE")
+    add_layout_arguments(review_auto_config_parser)
+    review_auto_config_parser.set_defaults(func=command_review_auto_config)
+
     workspace_parser = subparsers.add_parser(
         "workspace",
         help="Primary: machine-local workspace catalog and dashboard",
@@ -2338,6 +2512,41 @@ def build_parser() -> argparse.ArgumentParser:
     ws_forget_parser.add_argument("--workspace", required=True)
     ws_forget_parser.set_defaults(func=command_workspace_forget)
 
+    transcripts_parser = subparsers.add_parser(
+        "transcripts",
+        help="Ingest external session JSONLs into the workspace transcripts dir for dream",
+    )
+    transcripts_subparsers = transcripts_parser.add_subparsers(
+        dest="transcripts_command", required=True
+    )
+    ts_ingest_parser = transcripts_subparsers.add_parser(
+        "ingest",
+        help=(
+            "Flatten Claude Code session JSONL into transcripts/. "
+            "Auto-detects ~/.claude/projects/<slug>/ from --workspace; pass --from to override."
+        ),
+    )
+    ts_ingest_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(ts_ingest_parser)
+    ts_ingest_parser.add_argument("--from", dest="from_dir", help="Explicit source dir of *.jsonl files")
+    ts_ingest_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace existing transcripts/<name>.jsonl files",
+    )
+    ts_ingest_parser.set_defaults(func=command_transcripts_ingest)
+
+    ws_prune_parser = workspace_subparsers.add_parser(
+        "prune",
+        help="Remove tempdir catalog entries (test fixture leftovers under /tmp, /private/var/folders)",
+    )
+    ws_prune_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview candidates without modifying the catalog",
+    )
+    ws_prune_parser.set_defaults(func=command_workspace_prune)
+
     ws_doctor_parser = workspace_subparsers.add_parser(
         "doctor", help="Diagnose catalog entries"
     )
@@ -2352,6 +2561,45 @@ def build_parser() -> argparse.ArgumentParser:
     ws_upgrade_parser.add_argument("--all", dest="all_workspaces", action="store_true")
     add_layout_arguments(ws_upgrade_parser)
     ws_upgrade_parser.set_defaults(func=command_workspace_upgrade)
+
+    sessions_parser = subparsers.add_parser(
+        "sessions",
+        help="Advanced: session integrity diagnostics and cleanup",
+    )
+    sessions_subparsers = sessions_parser.add_subparsers(dest="sessions_command", required=True)
+
+    sessions_diagnose_parser = sessions_subparsers.add_parser(
+        "diagnose",
+        help="Report orphan events, count mismatches, and zero-event sessions",
+    )
+    sessions_diagnose_parser.add_argument("--workspace", required=True)
+    sessions_diagnose_parser.add_argument(
+        "--format", choices=["text", "json"], default="json", help="Output format"
+    )
+    add_layout_arguments(sessions_diagnose_parser)
+    sessions_diagnose_parser.set_defaults(func=command_sessions_diagnose)
+
+    sessions_cleanup_parser = sessions_subparsers.add_parser(
+        "cleanup",
+        help="Remove orphan event records and/or zero-event session records",
+    )
+    sessions_cleanup_parser.add_argument("--workspace", required=True)
+    sessions_cleanup_parser.add_argument(
+        "--orphans", action="store_true", help="Remove orphan event records"
+    )
+    sessions_cleanup_parser.add_argument(
+        "--zero-events", dest="zero_events", action="store_true",
+        help="Remove zero-event session records",
+    )
+    sessions_cleanup_parser.add_argument(
+        "--dry-run", dest="dry_run", action="store_true",
+        help="Print what would be removed without mutating the store",
+    )
+    sessions_cleanup_parser.add_argument(
+        "--yes", action="store_true", help="Skip confirmation prompt"
+    )
+    add_layout_arguments(sessions_cleanup_parser)
+    sessions_cleanup_parser.set_defaults(func=command_sessions_cleanup)
 
     return parser
 
@@ -2392,6 +2640,57 @@ def _memory_quality_failure_hint(result: dict[str, Any]) -> str | None:
     if detail_parts:
         return f"{'; '.join(detail_parts)}. {tail}"
     return tail
+
+
+def command_sessions_diagnose(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=getattr(args, "memory_dir", None))
+    result = _session_diagnostics(store)
+    fmt = getattr(args, "format", "json")
+    if fmt == "text":
+        lines = [
+            f"total_sessions:    {result['total_sessions']}",
+            f"total_events:      {result['total_events']}",
+            f"orphan_events:     {result['orphan_events_total']}",
+            f"mismatch_records:  {result['mismatch_records_total']}",
+            f"zero_event_sessions: {result['zero_event_sessions_total']}",
+        ]
+        if result["orphan_events"]:
+            lines.append("  orphan_event samples:")
+            for item in result["orphan_events"]:
+                lines.append(f"    event_id={item['event_id']} session_id={item['session_id']}")
+        if result["mismatch_records"]:
+            lines.append("  mismatch_record samples:")
+            for item in result["mismatch_records"]:
+                lines.append(
+                    f"    session_id={item['session_id']} "
+                    f"recorded={item['recorded_event_count']} actual={item['actual_event_count']}"
+                )
+        if result["zero_event_sessions"]:
+            lines.append("  zero_event_session samples:")
+            for sid in result["zero_event_sessions"]:
+                lines.append(f"    {sid}")
+        result["__raw_output__"] = "\n".join(lines)
+    return result
+
+
+def command_sessions_cleanup(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=getattr(args, "memory_dir", None))
+    do_orphans = args.orphans
+    do_zero = args.zero_events
+    if not do_orphans and not do_zero:
+        raise ValueError("specify at least one of --orphans or --zero-events")
+    dry_run = args.dry_run
+    yes = getattr(args, "yes", False)
+    if not dry_run and not yes:
+        diag = _session_diagnostics(store)
+        orphan_count = diag["orphan_events_total"] if do_orphans else 0
+        zero_count = diag["zero_event_sessions_total"] if do_zero else 0
+        print(f"Would remove: {orphan_count} orphan event record(s), {zero_count} zero-event session record(s).")
+        answer = input("Type DELETE to confirm: ").strip()
+        if answer != "DELETE":
+            raise SystemExit("Aborted.")
+    result = cleanup_orphans(store, orphans=do_orphans, zero_events=do_zero, dry_run=dry_run)
+    return result
 
 
 def main() -> int:

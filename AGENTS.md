@@ -97,3 +97,18 @@ Stop and request explicit approval before:
 |budget:warn=8192B|max=32768B
 |packs:none
 <!-- metactl:end agents-md -->
+
+<!-- BEGIN OPENDREAM MANAGED BLOCK: codex -->
+
+## OpenDream Activation
+
+Before substantial work, run:
+`sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}"`
+
+Before the final response, run:
+`sh .opendream/hooks/codex-post-task.sh "${OPENDREAM_SUMMARY:-Task completed.}"`
+
+For scripted Codex entrypoints, prefer:
+`sh .opendream/bin/codex-task-wrapper.sh --summary "${OPENDREAM_SUMMARY:-Task completed.}" -- <agent command>`
+
+<!-- END OPENDREAM MANAGED BLOCK: codex -->

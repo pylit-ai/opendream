@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .boundaries import boundary_enforcement_report, default_allowed_write_roots, verify_no_code_writes
+from .dream_narrative import synthesize_dream_narrative
 from .episodes import latest_episode_timestamp, load_episode_rows, looks_memory_worthy, row_to_event
 from .integration import maintain
 from .storage import LockError, MemoryStore
@@ -86,6 +87,7 @@ def dream_run(
                     "files_consulted": [],
                     "latest_episode_timestamp": None,
                 }
+                summary["narrative"] = synthesize_dream_narrative(summary)
                 store.save_dream_state(
                     {
                         "state": "idle",
@@ -134,6 +136,7 @@ def dream_run(
                     "latest_episode_timestamp": latest_input_timestamp,
                     "trigger_class": trigger_class,
                 }
+                summary["narrative"] = synthesize_dream_narrative(summary)
                 store.save_dream_state(
                     {
                         "state": "idle",
@@ -178,6 +181,7 @@ def dream_run(
                 "trigger_class": trigger_class,
                 "boundary_enforcement": enforcement,
             }
+            summary["narrative"] = synthesize_dream_narrative(summary)
             store.save_dream_state(
                 {
                     "state": "idle",
@@ -193,7 +197,7 @@ def dream_run(
             store.write_dream_audit(run_id, summary, before_snapshot)
             return summary
     except LockError:
-        return {
+        summary = {
             "run_id": run_id,
             "status": "skipped",
             "reason": "lock-held",
@@ -201,6 +205,8 @@ def dream_run(
             "policy": policy,
             "trigger_class": trigger_class,
         }
+        summary["narrative"] = synthesize_dream_narrative(summary)
+        return summary
 
 
 def dream_tick(
@@ -470,6 +476,16 @@ def dream_worker(
         "cli_output_version": CLI_JSON_VERSION,
     }
     summary["audit"] = store.write_worker_audit(worker_run_id, summary, before_snapshot)
+
+    # Post-dream auto-reviewer hook — gated by config; never crashes the cycle.
+    try:
+        from . import auto_reviewer as _auto_reviewer
+        _ar_cfg = _auto_reviewer.load_config(store)
+        if _ar_cfg.enabled and _ar_cfg.run_in_dream_cycle:
+            _auto_reviewer.run_auto_reviewer(store, config=_ar_cfg)
+    except Exception:
+        pass
+
     return summary
 
 

@@ -245,7 +245,9 @@ class DashboardPayloadTests(_CatalogTestCase):
         shutil.rmtree(ws2)
         workspace_catalog.refresh_entry(ws2)
 
-        payload = _workspace_dashboard_payload()
+        # Test workspaces live under tempdirs which are hidden by default
+        # since spec 446-observability-perf cleanup; opt in to surface them.
+        payload = _workspace_dashboard_payload(include_tempdir=True)
         self.assertEqual(payload["summary"]["total"], 2)
         self.assertEqual(payload["summary"]["ok"], 1)
         self.assertEqual(payload["summary"]["missing"], 1)

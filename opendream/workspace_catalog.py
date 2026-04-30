@@ -303,6 +303,37 @@ def forget_workspace(workspace: Path | str, *, home: Path | None = None) -> bool
     return True
 
 
+def prune_tempdir_entries(
+    *,
+    home: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Remove catalog entries pointing into OS tempdirs (test fixture leftovers).
+
+    Returns a summary of removed entries; in dry_run mode, returns the candidates
+    without mutating the catalog.
+    """
+    catalog = load_catalog(home)
+    entries = catalog.get("entries", [])
+    candidates: list[str] = []
+    kept: list[dict[str, Any]] = []
+    for entry in entries:
+        path = entry.get("workspace_path") if isinstance(entry, dict) else None
+        if isinstance(path, str) and _workspace_is_under_tempdir(path):
+            candidates.append(path)
+        else:
+            kept.append(entry)
+    if not dry_run and candidates:
+        catalog["entries"] = kept
+        save_catalog(catalog, home)
+    return {
+        "status": "previewed" if dry_run else "pruned",
+        "removed_count": 0 if dry_run else len(candidates),
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+    }
+
+
 def list_entries(home: Path | None = None) -> list[dict[str, Any]]:
     catalog = load_catalog(home)
     return list(catalog["entries"])

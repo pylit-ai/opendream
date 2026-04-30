@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 import threading
 import time
@@ -9,20 +8,12 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
-from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from opendream.integration import emit_event, maintain, prepare_context
 from opendream.observability import index_observability
 from opendream.storage import MemoryStore
-from opendream.webapp import INDEX_HTML, _observe_static_asset_version, build_server
-
-_OBSERVE_UI_JS = (
-    Path(__file__).resolve().parent.parent / "opendream" / "static" / "observe-ui.js"
-).read_text(encoding="utf-8")
-_OBSERVE_UI_CSS = (
-    Path(__file__).resolve().parent.parent / "opendream" / "static" / "observe-ui.css"
-).read_text(encoding="utf-8")
+from opendream.webapp import build_server
 
 FIXED_NOW = "2026-04-10T12:00:00Z"
 
@@ -674,117 +665,6 @@ class GraphRouteTests(unittest.TestCase):
     def test_depth_query_param_accepted(self) -> None:
         payload = self.get_json("/api/graph?depth=3")
         self.assertEqual(payload["depth"], 3)
-
-    def test_graph_html_links_static_assets(self) -> None:
-        # Sanity check: the SPA HTML loads observe-ui.js; graph scripts are
-        # requested from that bundle when visiting /graph.
-        self.assertIn("/static/observe-ui.js", INDEX_HTML)
-        for path in [
-            '/static/graph.js',
-            '/static/vendor/sigma.min.js',
-            '/static/vendor/graphology.umd.min.js',
-        ]:
-            self.assertIn(path, _OBSERVE_UI_JS)
-
-    def test_memories_tabs_span_main_grid(self) -> None:
-        self.assertIn("odMemoriesTabs('explorer')", _OBSERVE_UI_JS)
-        self.assertIn(".od-memories-tabs", _OBSERVE_UI_CSS)
-        self.assertRegex(_OBSERVE_UI_CSS, r"\.od-memories-tabs\s*\{[^}]*grid-column:\s*1 / -1")
-
-    def test_static_asset_version_tracks_css_changes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            static_root = Path(tmp)
-            for name in ("observe-ui.js", "observe-ui.css", "graph.css"):
-                (static_root / name).write_text(name, encoding="utf-8")
-            os.utime(static_root / "observe-ui.js", (100, 100))
-            os.utime(static_root / "graph.css", (150, 150))
-            os.utime(static_root / "observe-ui.css", (200, 200))
-            with patch("opendream.webapp._STATIC_ROOT", static_root):
-                self.assertEqual(_observe_static_asset_version(), "200")
-
-    def test_observe_shell_nav_async_and_presets(self) -> None:
-        bundle = INDEX_HTML + _OBSERVE_UI_JS
-        for needle in (
-            'href="/sessions"',
-            'href="/context"',
-            "pathMatchesNav",
-            "runRender",
-            "applyMemoryTimePreset",
-            "applyRetrievalTimePreset",
-            'aria-live="polite"',
-            "Could not load",
-            "Store metadata (read-only)",
-            "od-data-freshness",
-            "Data loaded at",
-            "odCopyApiUrl",
-            "od-copy-err-btn",
-            "err.status",
-            "sidebar-sec-catalog",
-            "sidebar-sec-this-ws",
-            "od-scope-bar",
-            "od-scope-add-bookmark",
-            "od-scope-bookmark-list",
-            "opendream-dashboard-bookmarks",
-            "od-empty-nextsteps",
-            "od-overview-strip",
-            "/api/health",
-            "/api/health/live-check",
-            "odRunLiveCheck",
-            "Health API",
-            "Run live check",
-            "Operator Snapshot",
-            "Background runtime",
-            "Semantic pipeline",
-            "Materialization state",
-            "Current memory surface",
-            "Semantic change review",
-            "Compare semantic changes",
-            "Memories surface",
-            "Memory Surface",
-            "Memory Explorer",
-            "Memory Changes",
-            "/memories/surface",
-            "/memories/explorer",
-            "/memories/changes",
-            "odSelectSemanticChangeItem",
-            "data-change-item-id",
-            "data-change-detail-payload",
-            "operator_summary",
-            "operator_next_actions",
-            "Learned-context comparison is not available yet",
-            "durable memory exists",
-            "Suppressed in this context",
-            "Removed from active learned context",
-            "Restorable now",
-            "Side by side",
-            "Overlay",
-            "/semantic-changes",
-            "/api/semantic-changes/latest",
-            "/api/learned-context/restore",
-            "odRestoreLearnedContext",
-            "Last runtime effects",
-            "od-overview-snapshot",
-            "od-snapshot-group",
-            "Snapshot APIs",
-            "odCopyCurrentViewUrl",
-            "About this dashboard",
-            "Semantic readiness card",
-            "Memory-quality warnings",
-            "Context pruning evidence",
-            "Last semantic run",
-            "Semantic setup control center",
-            "Background runtime control center",
-            "Advanced semantic controls",
-            "Changing this selector updates configuration, but readiness is still derived",
-            "od-dream-mode-select",
-            "odServiceAction",
-            "/api/service/control",
-            "Enable managed runtime",
-            "semantic-dream-mode",
-            "sidebar-mobile-open",
-            "data-mobile-nav",
-        ):
-            self.assertIn(needle, bundle)
 
     def test_graph_static_accessibility_needles(self) -> None:
         graph_js = (

@@ -80,3 +80,8 @@ Any amendment must explain:
 - what changed
 - why the old rule was insufficient
 - what enforcement or verification changes follow
+
+## Session integrity (spec 447)
+Every emitted event MUST carry a `session_id` resolvable to a session record.
+`opendream/sessions.py::current_session_id()` is the single source for new ids.
+Adding a new emit path with ad-hoc `stable_id("session", ...)` is a regression.

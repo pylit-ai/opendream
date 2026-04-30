@@ -14,6 +14,7 @@ OpenDream is a **verified, bounded, relation-aware memory control plane** that a
 - `opendream.consolidator` — single-writer durable-memory maintenance, supersession, contradiction handling, decay, and startup-index generation
 - `opendream.automation` — managed automation jobs that project typed, reviewable records from durable memory into a separate automation layer
 - `opendream.dream` + `opendream.episodes` — transcript and log ingestion plus four-phase reflective dreaming
+- `/api/dream/cycles`, `/api/dream/funnel`, and `/api/dream/coverage` — read-only dream observability projections for phase timing, proposal yield, signal coverage, and deterministic cycle narratives
 - `opendream.retriever` — hybrid retrieval with lexical, semantic, scope, recency, and type-aware scoring plus structured retrieval explanations
 - `tests/fixtures/` + `tests/` — reproducible corpora and end-to-end verification harness for the subsystem
 

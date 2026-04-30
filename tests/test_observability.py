@@ -11,11 +11,8 @@ from pathlib import Path
 from opendream.integration import emit_event, maintain, prepare_context
 from opendream.observability import index_observability
 from opendream.storage import MemoryStore
-from opendream.webapp import INDEX_HTML, build_server
-
-_OBSERVE_UI_JS = (
-    Path(__file__).resolve().parents[1] / "opendream" / "static" / "observe-ui.js"
-).read_text(encoding="utf-8")
+from opendream.util import read_json, write_json
+from opendream.webapp import build_server
 
 FIXED_NOW = "2026-03-27T12:00:00Z"
 
@@ -348,6 +345,62 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertIn("nodes", graph)
         self.assertIn("edges", graph)
 
+    def test_dream_visualization_api_endpoints(self) -> None:
+        summary_path = self.store.audit_semantic_dream_dir / "semantic-dream-viz-summary.json"
+        write_json(
+            summary_path,
+            {
+                "action": "semantic_dream",
+                "run_id": "semantic-dream-viz",
+                "workspace": str(self.workspace),
+                "memory_root": str(self.store.memory_root),
+                "target_paths": [],
+                "summary": {
+                    "run_id": "semantic-dream-viz",
+                    "mode": "hybrid",
+                    "status": "completed",
+                    "started_at": FIXED_NOW,
+                    "ended_at": FIXED_NOW,
+                    "phases": ["orient", "gather_recent_signal", "synthesize", "promote"],
+                    "duration_ms": 40,
+                    "query_families_considered": 5,
+                    "query_families_selected": 3,
+                    "proposals_generated": 2,
+                    "proposals_approved": 1,
+                    "proposals_rejected": 1,
+                    "learned_context_created": 1,
+                    "signal_row_count": 8,
+                    "latest_signal_source": "explicit_events",
+                    "narrative": (
+                        "Hybrid dream reviewed 2 proposal(s), approved 1, "
+                        "created 1 learned-context record(s), and rejected 1."
+                    ),
+                },
+            },
+        )
+        index_observability(self.store, now=FIXED_NOW)
+
+        cycles = self.get_json("/api/dream/cycles?limit=50")
+        self.assertGreaterEqual(cycles["total"], 1)
+        row = next(item for item in cycles["items"] if item["run_id"] == "semantic-dream-viz")
+        self.assertEqual(row["funnel"]["generated"], 2)
+        self.assertIn("narrative", row)
+        self.assertNotIn("diff_text", row)
+
+        detail = self.get_json("/api/dream/cycles/semantic-dream-viz")
+        self.assertEqual(detail["phase_durations"]["orient"], 10)
+        self.assertIn("summary", detail)
+
+        funnel = self.get_json("/api/dream/funnel?window=9999d")
+        self.assertGreaterEqual(funnel["funnel"]["created"], 1)
+
+        coverage = self.get_json("/api/dream/coverage?window=9999d")
+        self.assertTrue(coverage["items"])
+        self.assertIn("explicit_events", coverage["items"][0])
+
+        payload = read_json(summary_path, {})
+        self.assertEqual(payload["summary"]["narrative"], row["narrative"])
+
     def test_server_refreshes_index_when_new_capture_arrives(self) -> None:
         later = "2026-03-27T12:10:00Z"
         emit_event(
@@ -458,40 +511,7 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         for path in paths:
             with urllib.request.urlopen(f"{self.base_url}{path}") as response:
                 html = response.read().decode("utf-8")
-            self.assertIn("OpenDream Observability", html)
-
-    def test_index_html_includes_ux_ax_markers(self) -> None:
-        bundle = INDEX_HTML + _OBSERVE_UI_JS
-        for needle in (
-            "od-skip-link",
-            "od-dream-mode-select",
-            "syncDreamModeUi",
-            "/api/semantic-dream-mode",
-            "od-route-announce",
-            "od-command-palette",
-            "od-skeleton-wrap",
-            "odCopyApiCurl",
-            "odCopyApiFetch",
-            "odCopyCurrentViewUrl",
-            "/semantic-changes",
-            "/api/semantic-changes/latest",
-            "od-overview-strip",
-            "About this dashboard",
-            "od-first-steps",
-            "odDismissFirstSteps",
-            "opendream-first-steps-dismissed",
-            "focus_search=1",
-            "odCommandPalette",
-            "routeToPageId",
-            "handlePaletteAction",
-            "Agent",
-            "agent_id",
-            "reporting_agent",
-            "model_id",
-            "agent-pill",
-            "agentPillsHtml",
-        ):
-            self.assertIn(needle, bundle)
+            self.assertIn("OpenDream Observe", html)
 
     def test_graph_js_includes_a11y_banner(self) -> None:
         graph_js = Path(__file__).resolve().parents[1] / "opendream" / "static" / "graph.js"

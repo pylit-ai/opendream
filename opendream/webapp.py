@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
+import time
+from collections import deque
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,14 +15,20 @@ from . import workspace_catalog
 from .dream import dream_worker
 from .integration import emit_event
 from .observability import (
+    _build_overview_lite,
+    _session_diagnostics,
+    build_dream_coverage,
+    build_dream_funnel,
+    build_graph,
     build_semantic_change_unavailable,
     build_semantic_change_review,
-    build_graph,
     create_annotation,
     create_export,
     create_review_decision,
+    get_dream_cycle,
     index_observability,
     load_or_build_index,
+    query_dream_cycles,
     query_memories,
     query_retrievals,
     query_runs,
@@ -28,41 +38,32 @@ from .semantic_dreamer import dream_status_semantic
 from .service import disable_background_runtime, enable_background_runtime, restart_service, service_status, start_service, stop_service
 from .storage import MemoryStore
 from .util import CLI_JSON_VERSION, to_iso, utc_now
+from . import auto_reviewer as _auto_reviewer
 from .validation import SchemaValidationError, validate_document
+
+# 446-observability-perf Phase 3: request timing ring buffer.
+# Holds up to 200 entries: {path, query_keys, ms, status}.
+# /api/_perf is excluded from self-recording to avoid noise.
+_PERF_TIMINGS: deque[dict[str, Any]] = deque(maxlen=200)
+_OPENDREAM_DEV = os.environ.get("OPENDREAM_DEV") == "1"
 
 _STATIC_ROOT = (Path(__file__).parent / "static").resolve()
 
 
-def _observe_static_asset_version() -> str:
-    """Cache-bust string for observe UI assets."""
-    mtimes: list[float] = []
-    for name in ("observe-ui.js", "observe-ui.css", "graph.css"):
-        try:
-            mtimes.append((_STATIC_ROOT / name).stat().st_mtime)
-        except OSError:
-            continue
-    if not mtimes:
-        return "1"
-    return str(int(max(mtimes)))
+_SPA_DIST_DIR = (Path(__file__).parent / "static" / "dist").resolve()
+_SPA_INDEX_PATH = _SPA_DIST_DIR / "index.html"
 
 
-def _index_html() -> str:
-    """INDEX_HTML with versioned /static/* URLs so browsers pick up updated JS/CSS."""
-    v = _observe_static_asset_version()
-    return (
-        INDEX_HTML.replace(
-            'href="/static/observe-ui.css"',
-            f'href="/static/observe-ui.css?v={v}"',
+def _spa_index_html() -> bytes:
+    try:
+        return _SPA_INDEX_PATH.read_bytes()
+    except OSError:
+        return (
+            b"<!doctype html><html><body>"
+            b"<h1>OpenDream UI build missing</h1>"
+            b"<p>Run <code>pnpm --dir frontend build</code></p>"
+            b"</body></html>"
         )
-        .replace(
-            'href="/static/graph.css"',
-            f'href="/static/graph.css?v={v}"',
-        )
-        .replace(
-            'src="/static/observe-ui.js"',
-            f'src="/static/observe-ui.js?v={v}"',
-        )
-    )
 
 
 _STATIC_MIME_TYPES = {
@@ -70,11 +71,43 @@ _STATIC_MIME_TYPES = {
     ".css": "text/css",
     ".md": "text/markdown",
     ".html": "text/html; charset=utf-8",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".woff2": "font/woff2",
+    ".woff": "font/woff",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
 }
 
 _MEMORY_LIST_LIMIT_CAP = 500
 _RETRIEVAL_LIST_LIMIT_CAP = 500
 _RUN_LIST_LIMIT_CAP = 500
+_SESSION_LIST_LIMIT_CAP = 500
+
+
+def _auto_reviewer_stats_payload(
+    store: MemoryStore,
+    cfg: Any,
+) -> dict[str, Any]:
+    """Build the stats payload for GET /api/auto-reviewer/stats."""
+    last_run = _auto_reviewer.load_last_run(store)
+    rules_status = []
+    for rule in _auto_reviewer.DEFAULT_RULES:
+        rc = cfg.rule(rule.rule_id)
+        rules_status.append({
+            "rule_id": rule.rule_id,
+            "description": rule.description,
+            "enabled": rc.enabled if rc else True,
+            "thresholds": rc.thresholds if rc else {},
+        })
+    cooldown_count = last_run.get("applied_count", 0) if last_run else 0
+    return {
+        "enabled": cfg.enabled,
+        "run_in_dream_cycle": cfg.run_in_dream_cycle,
+        "rules": rules_status,
+        "last_run": last_run,
+        "cooldown_count": cooldown_count,
+    }
 
 
 def _graph_default_focus(index: dict[str, Any]) -> str | None:
@@ -95,7 +128,18 @@ def _graph_default_focus(index: dict[str, Any]) -> str | None:
 def _resolve_graph_request(index: dict[str, Any], query: dict[str, str]) -> tuple[str | None, int, str]:
     explicit_focus = (query.get("focus") or "").strip() or None
     explicit_depth = (query.get("depth") or "").strip() or None
-    focus = explicit_focus or _graph_default_focus(index)
+    explicit_limit = (query.get("limit") or "").strip() or None
+    # If the caller provided a generous limit (>= 50), assume overview-mode
+    # and DO NOT auto-pin a focus — return the first `limit` nodes.
+    # Auto-focus only kicks in for the legacy default tiny window.
+    try:
+        wants_overview = explicit_limit is not None and int(explicit_limit) >= 50
+    except ValueError:
+        wants_overview = False
+    if explicit_focus is None and wants_overview:
+        focus = None
+    else:
+        focus = explicit_focus or _graph_default_focus(index)
     if explicit_depth is not None:
         depth = _parse_query_int(explicit_depth, 1, minimum=0, maximum=3)
     else:
@@ -269,183 +313,6 @@ def _run_live_check(store: MemoryStore, *, now: str | None = None) -> dict[str, 
     }
 
 
-INDEX_HTML = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <script>
-(function(){
-  try {
-    var k='opendream-ui-theme';
-    var s=localStorage.getItem(k);
-    var pref=(s==='light'||s==='dark'||s==='system')?s:'system';
-    var resolved;
-    if(pref==='light') resolved='light';
-    else if(pref==='dark') resolved='dark';
-    else resolved=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
-    document.documentElement.setAttribute('data-theme-pref', pref);
-    document.documentElement.setAttribute('data-theme', resolved);
-  } catch(e) {
-    document.documentElement.setAttribute('data-theme-pref', 'system');
-    document.documentElement.setAttribute('data-theme','dark');
-  }
-  try {
-    var pk='opendream-ui-palette';
-    var pv=localStorage.getItem(pk);
-    var ok=['default','violet','teal','rose','emerald'];
-    document.documentElement.setAttribute('data-palette', ok.indexOf(pv)>=0 ? pv : 'default');
-  } catch(e4) { document.documentElement.setAttribute('data-palette','default'); }
-  try {
-    var sk='opendream-sidebar';
-    var sv=localStorage.getItem(sk);
-    if(sv==='wide'||sv==='narrow') document.documentElement.setAttribute('data-sidebar',sv);
-    else document.documentElement.setAttribute('data-sidebar','wide');
-  } catch(e2) { document.documentElement.setAttribute('data-sidebar','wide'); }
-  try {
-    var dk='opendream-ui-density';
-    var dv=localStorage.getItem(dk);
-    if(dv==='compact'||dv==='comfortable') document.documentElement.setAttribute('data-density',dv);
-    else document.documentElement.setAttribute('data-density','comfortable');
-  } catch(e3) { document.documentElement.setAttribute('data-density','comfortable'); }
-})();
-  </script>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OpenDream Observability</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/observe-ui.css">
-  <link rel="stylesheet" href="/static/graph.css">
-</head>
-<body>
-  <a class="od-skip-link" href="#app">Skip to main content</a>
-  <div class="app-shell">
-    <button type="button" class="icon-btn sidebar-toggle sidebar-toggle--mobile" id="sidebar-mobile-open" aria-controls="sidebar-nav" aria-expanded="false" title="Open menu">
-      <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-    </button>
-    <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
-    <aside class="sidebar" id="sidebar-aside" aria-label="App">
-      <button type="button" class="icon-btn sidebar-toggle" id="sidebar-toggle" aria-controls="sidebar-nav" title="Narrow sidebar">
-        <span class="when-wide" aria-hidden="true"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></span>
-        <span class="when-narrow" aria-hidden="true"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></span>
-      </button>
-      <div class="sidebar-brand">
-        <div class="sidebar-logo" aria-hidden="true">OD</div>
-        <div class="sidebar-brand-text">
-          <div class="sidebar-brand-kicker">Observe</div>
-          <div class="sidebar-brand-title">OpenDream</div>
-        </div>
-      </div>
-      <nav class="sidebar-nav" id="sidebar-nav" aria-label="Primary">
-        <p class="sidebar-nav-section" id="sidebar-sec-catalog">Catalog</p>
-        <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-catalog">
-          <li><a href="/workspaces" data-short="Ws" title="Workspaces"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span class="nav-label">Workspaces</span></a></li>
-        </ul>
-        <p class="sidebar-nav-section" id="sidebar-sec-this-ws">This workspace</p>
-        <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-this-ws">
-          <li><a href="/overview" data-short="Ov" title="Overview"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg><span class="nav-label">Overview</span></a></li>
-          <li><a href="/memories/surface" data-short="Mem" title="Memories"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span class="nav-label">Memories</span></a></li>
-        </ul>
-        <p class="sidebar-nav-section" id="sidebar-sec-trace">Trace</p>
-        <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-trace">
-          <li><a href="/runs" data-short="Rn" title="Runs"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span class="nav-label">Runs</span></a></li>
-          <li><a href="/retrievals" data-short="Ret" title="Retrievals"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="nav-label">Retrievals</span></a></li>
-          <li><a href="/sessions" data-short="Ses" title="Sessions"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span class="nav-label">Sessions</span></a></li>
-          <li><a href="/context" data-short="Ctx" title="Context"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span class="nav-label">Context</span></a></li>
-        </ul>
-        <p class="sidebar-nav-section" id="sidebar-sec-audit">Audit and tools</p>
-        <ul class="sidebar-nav-list" aria-labelledby="sidebar-sec-audit">
-          <li><a href="/reviews" data-short="Rev" title="Reviews"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 12 2 2 4-4"/></svg><span class="nav-label">Reviews</span></a></li>
-          <li><a href="/graph" data-short="Gr" title="Graph"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span class="nav-label">Graph</span></a></li>
-          <li><a href="/evals" data-short="Ev" title="Evals"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg><span class="nav-label">Evals</span></a></li>
-          <li><a href="/exports" data-short="Ex" title="Exports"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span class="nav-label">Exports</span></a></li>
-          <li><a href="/settings" data-short="St" title="Settings"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><span class="nav-label">Settings</span></a></li>
-        </ul>
-      </nav>
-      <div class="sidebar-footer">
-        <div class="theme-toggle" role="group" aria-label="Appearance">
-          <button type="button" data-theme-pref="light" id="theme-btn-light" class="icon-btn" aria-label="Light theme" title="Light theme">
-            <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-          </button>
-          <button type="button" data-theme-pref="dark" id="theme-btn-dark" class="icon-btn" aria-label="Dark theme" title="Dark theme">
-            <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          </button>
-          <button type="button" data-theme-pref="system" id="theme-btn-system" class="icon-btn" aria-label="Match system theme" title="Match system">
-            <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          </button>
-        </div>
-      </div>
-    </aside>
-    <div class="main-wrap">
-      <div id="od-scope-bar" class="od-scope-bar" role="region" aria-label="Observability scope">
-        <div class="od-scope-bar-inner">
-          <div class="od-scope-main">
-            <p class="od-scope-title">Observability scope</p>
-            <div class="od-scope-path-row">
-            <p id="od-scope-path" class="od-scope-path" title="">Loading workspace…</p>
-            <a id="od-scope-health-pill" class="od-scope-health-pill od-scope-health-pill--loading" aria-live="polite" title="" href="/overview">…</a>
-            </div>
-            <div class="od-dream-mode-row" id="od-dream-mode-row">
-              <div class="od-dream-mode-control">
-                <span id="od-dream-mode-sparkle" class="od-dream-mode-sparkle-wrap" aria-hidden="true" hidden></span>
-                <label for="od-dream-mode-select" class="od-dream-mode-label">Advanced semantic mode</label>
-                <select id="od-dream-mode-select" class="od-dream-mode-select" disabled aria-describedby="od-dream-mode-help">
-                  <option value="deterministic" title='Same as opendream semantic config JSON "mode": "deterministic" — consolidation only; semantic synthesis stays off until providers are configured.'>Deterministic only — consolidation only (matches CLI mode deterministic)</option>
-                  <option value="hybrid" title='Same as "mode": "hybrid" — run deterministic consolidation, then learned-context / semantic phases.'>Hybrid — consolidation then learned-context (matches CLI mode hybrid)</option>
-                  <option value="semantic" title='Same as "mode": "semantic" — learned-context phases without a deterministic consolidation pass first.'>Semantic only — learned-context without consolidation first (matches CLI mode semantic)</option>
-                </select>
-                <span id="od-dream-mode-status" class="od-dream-mode-status muted" aria-live="polite"></span>
-              </div>
-              <p id="od-dream-mode-help" class="od-dream-mode-help muted">This is an advanced control for the raw <code>mode</code> field in <code>memory/state/semantic_config.json</code>. It does not by itself prove semantic readiness. Use <a href="/overview">Overview</a> and <a href="/settings">Settings</a> for readiness, state reason, next action, memory-quality warnings, and pruning evidence. Each <code>opendream dream run --mode …</code> can still override for a single run.</p>
-            </div>
-            <p id="od-scope-origin" class="od-scope-origin muted"></p>
-            <details class="od-scope-about">
-              <summary class="od-scope-about-summary muted">About this dashboard</summary>
-              <p class="od-scope-hint muted">The Workspaces page lists every catalog entry on this machine. Overview, Memories, Trace, and Audit tabs show data for the workspace bound to this <code>observe serve</code> process only. Overview and Settings lead with semantic readiness, degraded fallback, memory-quality warnings, and pruning evidence; the raw mode selector remains available as an advanced control.</p>
-            </details>
-          </div>
-          <div class="od-scope-actions">
-            <details class="od-scope-bookmarks" aria-label="Other saved observe serve dashboards">
-              <summary class="od-scope-summary">Other dashboards</summary>
-              <div class="od-scope-bookmarks-body">
-                <p class="muted" style="font-size:11px;margin:0 0 6px;line-height:1.45">Bookmark each running server (different port = different workspace). Open jumps to that origin.</p>
-                <button type="button" class="od-scope-add-btn" id="od-scope-add-bookmark">Bookmark this</button>
-                <ul id="od-scope-bookmark-list" class="od-scope-bookmark-list" aria-label="Saved dashboard URLs"></ul>
-              </div>
-            </details>
-          </div>
-        </div>
-      </div>
-      <div id="od-data-freshness" class="od-data-freshness muted" aria-live="polite"></div>
-      <div id="od-route-announce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-      <main id="app" class="main-content" tabindex="-1" aria-busy="false" aria-label="Main content"></main>
-    </div>
-  </div>
-  <dialog id="od-fs-dialog" class="od-fs-dialog" aria-labelledby="od-fs-title" aria-modal="true">
-    <div class="od-fs-chrome">
-      <h2 id="od-fs-title" class="od-fs-title"></h2>
-      <button type="button" class="icon-btn" id="od-fs-close" aria-label="Close fullscreen" title="Close">
-        <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-      </button>
-    </div>
-    <div class="od-fs-scroll" id="od-fs-host"></div>
-  </dialog>
-  <dialog id="od-command-palette" class="od-command-palette" aria-labelledby="od-palette-title">
-    <div class="od-palette-head">
-      <h2 id="od-palette-title" class="od-palette-title">Command palette</h2>
-      <button type="button" class="icon-btn" id="od-palette-close" aria-label="Close command palette" title="Close">
-        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-      </button>
-    </div>
-    <input type="search" id="od-palette-input" class="od-palette-input" autocomplete="off" placeholder="Filter pages and actions…" />
-    <ul id="od-palette-list" class="od-palette-list"></ul>
-    <p class="muted od-palette-hint">⌘K / Ctrl+K · ↑↓ · Enter · Esc · Empty filter shows recent routes · Actions (copy path, latest run) match search keywords</p>
-  </dialog>
-  <script src="/static/observe-ui.js" defer></script>
-</body>
-</html>"""
-
-
 class ObservabilityHandler(BaseHTTPRequestHandler):
     store: MemoryStore
 
@@ -481,9 +348,10 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 self.send_header("Location", location)
                 self.end_headers()
                 return
-        self._write_html(_index_html(), head_only=head_only)
+        self._serve_spa_html(head_only=head_only)
 
     def do_POST(self) -> None:  # noqa: N802
+        _t0 = time.monotonic()
         parsed = urlparse(self.path)
         if not parsed.path.startswith("/api/"):
             self.send_error(HTTPStatus.NOT_FOUND)
@@ -580,6 +448,67 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                     }
                 )
                 return
+            elif parsed.path == "/api/auto-reviewer/run-dry":
+                cfg = _auto_reviewer.load_config(self.store)
+                result = _auto_reviewer.run_auto_reviewer(self.store, config=cfg, dry_run=True, now=payload.get("now"))
+                self._write_json({
+                    "proposed_count": result.get("proposed_count", 0),
+                    "by_rule": result.get("by_rule", {}),
+                    "dry_run": True,
+                })
+                return
+            elif parsed.path == "/api/auto-reviewer/config":
+                cfg = _auto_reviewer.apply_config_update(self.store, payload)
+                self._write_json(_auto_reviewer_stats_payload(self.store, cfg))
+                return
+            elif parsed.path == "/api/dream/run":
+                from .dream import dream_run
+                mode = str(payload.get("mode") or "").strip().lower() or None
+                episode_paths = sorted(self.store.transcripts_dir.glob("*.jsonl"))
+                if mode in ("semantic", "hybrid"):
+                    from .semantic_dreamer import semantic_dream_run
+                    result = semantic_dream_run(
+                        self.store,
+                        episode_paths=episode_paths,
+                        mode=mode,
+                        now=payload.get("now"),
+                    )
+                else:
+                    result = dream_run(
+                        self.store,
+                        episode_paths=episode_paths,
+                        now=payload.get("now"),
+                    )
+                # Force a fresh build so subsequent /api/overview reflects the run
+                from .observability import invalidate_index_cache
+                invalidate_index_cache(self.store)
+                self._write_json({
+                    "status": result.get("status"),
+                    "reason": result.get("reason"),
+                    "phases": result.get("phases", []),
+                    "narrative": result.get("narrative"),
+                    "duration_ms": result.get("duration_ms"),
+                    "appended_events": result.get("appended_events", 0),
+                    "gathered_rows": result.get("gathered_rows", 0),
+                    "run_id": result.get("run_id"),
+                    "trigger_class": result.get("trigger_class"),
+                    "mode": mode or "full",
+                })
+                return
+            elif parsed.path == "/api/transcripts/ingest":
+                from . import transcripts as _transcripts
+                explicit = payload.get("from_dir")
+                overwrite = bool(payload.get("overwrite"))
+                if explicit:
+                    result = _transcripts.ingest_claude_sessions(
+                        self.store, explicit, overwrite=overwrite
+                    )
+                else:
+                    result = _transcripts.ingest_claude_for_workspace(
+                        self.store, overwrite=overwrite
+                    )
+                self._write_json(result)
+                return
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
@@ -588,25 +517,85 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             return
         index_observability(self.store)
         self._write_json(response)
+        _ms = (time.monotonic() - _t0) * 1000
+        _PERF_TIMINGS.append({"path": parsed.path, "query_keys": [], "ms": round(_ms, 2), "status": 200})
+        if _OPENDREAM_DEV and _ms > 250:
+            print(f"[opendream perf] slow POST: {parsed.path} {_ms:.1f}ms", file=sys.stderr)
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A003
         return
 
     def _handle_api_get(self, parsed: Any) -> None:
+        _t0 = time.monotonic()
         query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+        _record_timing = parsed.path != "/api/_perf"
+
+        def _finish(status: int = 200) -> None:
+            if not _record_timing:
+                return
+            ms = (time.monotonic() - _t0) * 1000
+            _PERF_TIMINGS.append({
+                "path": parsed.path,
+                "query_keys": sorted(query.keys()),
+                "ms": round(ms, 2),
+                "status": status,
+            })
+            if _OPENDREAM_DEV and ms > 250:
+                print(f"[opendream perf] slow request: {parsed.path} {ms:.1f}ms", file=sys.stderr)
+
+        if parsed.path == "/api/_perf":
+            self._write_json({"timings": list(_PERF_TIMINGS)})
+            return
         if parsed.path == "/api/ui-context":
             self._write_json(_ui_context_payload(self.store))
+            _finish()
             return
         if parsed.path == "/api/ui-meta":
             self._write_json(_ui_meta_payload())
+            _finish()
             return
         if parsed.path == "/api/health":
             self._write_json(_health_payload(self.store))
+            _finish()
+            return
+        if parsed.path == "/api/overview/lite":
+            self._write_json(_build_overview_lite(self.store))
+            _finish()
             return
         index = load_or_build_index(self.store)
         entities = index["entities"]
         if parsed.path == "/api/overview":
             self._write_json(index["overview"])
+            _finish()
+            return
+        if parsed.path == "/api/dream/cycles":
+            limit = _parse_query_int(query.get("limit"), 50, minimum=1, maximum=_RUN_LIST_LIMIT_CAP)
+            self._write_json(
+                query_dream_cycles(
+                    index,
+                    limit=limit,
+                    since=(query.get("since") or "").strip() or None,
+                )
+            )
+            _finish()
+            return
+        if parsed.path.startswith("/api/dream/cycles/"):
+            run_id = parsed.path.split("/")[-1]
+            cycle = get_dream_cycle(index, run_id)
+            if cycle is None:
+                self._write_json({"error": f"dream cycle not found: {run_id}"}, status=HTTPStatus.NOT_FOUND)
+                _finish(404)
+                return
+            self._write_json(cycle)
+            _finish()
+            return
+        if parsed.path == "/api/dream/coverage":
+            self._write_json(build_dream_coverage(self.store, window=query.get("window", "7d")))
+            _finish()
+            return
+        if parsed.path == "/api/dream/funnel":
+            self._write_json(build_dream_funnel(index, window=query.get("window", "7d")))
+            _finish()
             return
         if parsed.path == "/api/semantic-changes/latest":
             payload = build_semantic_change_review(
@@ -636,7 +625,8 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             self._write_json(payload)
             return
         if parsed.path == "/api/workspaces":
-            self._write_json(_workspace_dashboard_payload())
+            include_tempdir = str(query.get("include_tempdir", "")).lower() in ("1", "true", "yes")
+            self._write_json(_workspace_dashboard_payload(include_tempdir=include_tempdir))
             return
         if parsed.path.startswith("/api/workspaces/"):
             from urllib.parse import unquote
@@ -686,8 +676,20 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             memory_id = parsed.path.split("/")[-1]
             self._write_json(_find_by_id(entities["memories"], "memory_id", memory_id) or {})
             return
+        if parsed.path == "/api/sessions/diagnostics":
+            self._write_json(_session_diagnostics(self.store))
+            _finish()
+            return
         if parsed.path == "/api/sessions":
-            self._write_json({"items": entities["sessions"]})
+            sessions = list(entities["sessions"])
+            # ?limit and ?since filtering for sessions
+            since = (query.get("since") or "").strip() or None
+            if since:
+                sessions = [s for s in sessions if str(s.get("started_at") or "") >= since]
+            limit = _parse_query_int(query.get("limit"), 50, minimum=1, maximum=_SESSION_LIST_LIMIT_CAP)
+            sessions = sessions[:limit]
+            self._write_json({"items": sessions})
+            _finish()
             return
         if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/timeline"):
             session_id = parsed.path.split("/")[-2]
@@ -704,6 +706,8 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 maximum=_RUN_LIST_LIMIT_CAP,
             )
             offset = _parse_query_int(query.get("offset"), 0, minimum=0, maximum=10_000_000)
+            # ?since is a shorthand for ended_after (ISO timestamp filter)
+            since = (query.get("since") or "").strip() or None
             result = query_runs(
                 index,
                 search=query.get("search", ""),
@@ -711,10 +715,18 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 sort_dir=sort_dir,
                 offset=offset,
                 limit=limit,
-                ended_after=(query.get("ended_after") or "").strip() or None,
+                ended_after=(query.get("ended_after") or "").strip() or since or None,
                 ended_before=(query.get("ended_before") or "").strip() or None,
             )
+            # List projection: strip heavy fields not needed in list view.
+            # Detail endpoints (/api/runs/<id>) retain full payloads.
+            _RUN_LIST_STRIP = frozenset({"phase_traces", "operations", "candidates", "explanations"})
+            result["items"] = [
+                {k: v for k, v in row.items() if k not in _RUN_LIST_STRIP}
+                for row in result.get("items", [])
+            ]
             self._write_json(result)
+            _finish()
             return
         if parsed.path.startswith("/api/runs/") and parsed.path.endswith("/diff"):
             run_id = parsed.path.split("/")[-2]
@@ -735,6 +747,8 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 maximum=_RETRIEVAL_LIST_LIMIT_CAP,
             )
             offset = _parse_query_int(query.get("offset"), 0, minimum=0, maximum=10_000_000)
+            # ?since is a shorthand for timestamp_after (ISO timestamp filter)
+            since = (query.get("since") or "").strip() or None
             result = query_retrievals(
                 index,
                 search=query.get("search", ""),
@@ -743,7 +757,7 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 sort_dir=sort_dir,
                 offset=offset,
                 limit=limit,
-                timestamp_after=(query.get("timestamp_after") or "").strip() or None,
+                timestamp_after=(query.get("timestamp_after") or "").strip() or since or None,
                 timestamp_before=(query.get("timestamp_before") or "").strip() or None,
                 min_selected=_parse_query_int(query.get("min_selected"), 0, minimum=0, maximum=1_000_000)
                 if (query.get("min_selected") or "").strip()
@@ -752,7 +766,15 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 if (query.get("max_selected") or "").strip()
                 else None,
             )
+            # List projection: strip heavy fields not needed in list view.
+            # Detail endpoints (/api/retrievals/<id>) retain full payloads.
+            _RETRIEVAL_LIST_STRIP = frozenset({"candidates", "explanations"})
+            result["items"] = [
+                {k: v for k, v in row.items() if k not in _RETRIEVAL_LIST_STRIP}
+                for row in result.get("items", [])
+            ]
             self._write_json(result)
+            _finish()
             return
         if parsed.path.startswith("/api/retrievals/"):
             retrieval_id = parsed.path.split("/")[-1]
@@ -765,15 +787,23 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/graph":
             index = load_or_build_index(self.store)
             focus, depth, layout = _resolve_graph_request(index, query)
+            try:
+                limit = max(1, min(int(query.get("limit", "100")), 2000))
+            except ValueError:
+                limit = 100
             self._write_json(
                 build_graph(
                     index,
                     focus=focus,
-                    limit=int(query.get("limit", "24")),
+                    limit=limit,
                     depth=depth,
                     layout=layout,
                 )
             )
+            return
+        if parsed.path == "/api/auto-reviewer/stats":
+            cfg = _auto_reviewer.load_config(self.store)
+            self._write_json(_auto_reviewer_stats_payload(self.store, cfg))
             return
         if parsed.path == "/api/reviews":
             self._write_json({"items": entities["reviews"], "decisions": self.store.load_review_decisions()})
@@ -809,6 +839,16 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if not head_only:
             self.wfile.write(payload)
+
+    def _serve_spa_html(self, *, head_only: bool = False) -> None:
+        body = _spa_index_html()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if not head_only:
+            self.wfile.write(body)
 
     def _serve_static(self, request_path: str, *, head_only: bool = False) -> None:
         relative = unquote(request_path[len("/static/"):])
@@ -928,9 +968,21 @@ def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
     contested = int(overview.get("contested_memories") or 0)
     pending_events = store.pending_event_count() if initialized else 0
     freshness = overview.get("freshness", {})
-    product_posture = str(overview.get("product_posture") or "deterministic-by-choice")
-    semantic_capability_state = str(overview.get("semantic_capability_state") or "unknown")
-    semantic_unavailability_reason = overview.get("semantic_unavailability_reason")
+    semantic_mode = str(semantic_status.get("mode") or "")
+    product_posture = (
+        "deterministic-by-choice"
+        if semantic_mode in {"", "deterministic"}
+        else "semantic-first"
+    )
+    semantic_capability_state = str(
+        semantic_status.get("semantic_capability_state")
+        or overview.get("semantic_capability_state")
+        or "unknown"
+    )
+    semantic_unavailability_reason = (
+        semantic_status.get("availability_reason")
+        or overview.get("semantic_unavailability_reason")
+    )
     next_action = overview.get("next_action")
     memory_quality = overview.get("memory_quality") or {"state": "unknown", "warnings": [], "metrics": {}}
     context_pruning = overview.get("context_pruning") or {}
@@ -1038,18 +1090,33 @@ def _ui_meta_payload() -> dict[str, Any]:
     """Build metadata for Settings / diagnostics (no index load)."""
     return {
         "cli_json_version": CLI_JSON_VERSION,
-        "observe_ui": {"static_assets": ["observe-ui.css", "observe-ui.js"]},
     }
 
 
-def _workspace_dashboard_payload() -> dict[str, Any]:
+def _workspace_dashboard_payload(*, include_tempdir: bool = False) -> dict[str, Any]:
     """Build the read-model payload used by the /workspaces dashboard route.
 
     Uses the machine-local catalog for fast initial render; the dashboard
     can trigger re-probes via the CLI (``opendream workspace doctor``) rather
     than performing synchronous disk work inside the HTTP handler.
+
+    Tempdir catalog entries (test fixture leftovers under /tmp,
+    /private/var/folders, ...) are filtered out unless ``include_tempdir`` is
+    set; callers can pass ``?include_tempdir=1`` to surface them.
     """
-    entries = workspace_catalog.list_entries()
+    all_entries = workspace_catalog.list_entries()
+    if include_tempdir:
+        entries = list(all_entries)
+        hidden = 0
+    else:
+        entries = []
+        hidden = 0
+        for entry in all_entries:
+            path = entry.get("workspace_path")
+            if isinstance(path, str) and workspace_catalog._workspace_is_under_tempdir(path):
+                hidden += 1
+                continue
+            entries.append(entry)
     summary = {
         "total": len(entries),
         "ok": sum(1 for e in entries if e.get("status_kind") == "ok"),
@@ -1058,6 +1125,8 @@ def _workspace_dashboard_payload() -> dict[str, Any]:
         "broken": sum(1 for e in entries if e.get("status_kind") == "broken"),
         "with_service": sum(1 for e in entries if e.get("service_state_summary")),
         "with_semantic": sum(1 for e in entries if e.get("semantic_state_summary")),
+        "tempdir_hidden": hidden,
+        "tempdir_total": len(all_entries) - len(entries) if not include_tempdir else 0,
     }
     return {
         "summary": summary,

@@ -1,0 +1,94 @@
+{
+  "name": "sigma",
+  "version": "3.0.2",
+  "description": "A JavaScript library aimed at visualizing graphs of thousands of nodes and edges.",
+  "homepage": "https://www.sigmajs.org",
+  "bugs": "http://github.com/jacomyal/sigma.js/issues",
+  "main": "dist/sigma.cjs.js",
+  "module": "dist/sigma.esm.js",
+  "types": "dist/sigma.cjs.d.ts",
+  "files": [
+    "/dist",
+    "/types",
+    "/settings",
+    "/rendering",
+    "/utils"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build-bundle": "vite build",
+    "prepublishOnly": "cp ../../README.md ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://github.com/jacomyal/sigma.js.git"
+  },
+  "contributors": [
+    {
+      "name": "Alexis Jacomy",
+      "url": "http://github.com/jacomyal"
+    },
+    {
+      "name": "Guillaume Plique",
+      "url": "http://github.com/Yomguithereal"
+    },
+    {
+      "name": "Benoît Simard",
+      "url": "http://github.com/sim51"
+    }
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "events": "^3.3.0",
+    "graphology-utils": "^2.5.2"
+  },
+  "devDependencies": {
+    "vite": "^6.0.7"
+  },
+  "keywords": [
+    "graph",
+    "graphology",
+    "renderer",
+    "sigma",
+    "canvas",
+    "webgl"
+  ],
+  "preconstruct": {
+    "entrypoints": [
+      "index.ts",
+      "types.ts",
+      "settings.ts",
+      "rendering/index.ts",
+      "utils/index.ts"
+    ]
+  },
+  "exports": {
+    ".": {
+      "module": "./dist/sigma.esm.js",
+      "import": "./dist/sigma.cjs.mjs",
+      "default": "./dist/sigma.cjs.js"
+    },
+    "./types": {
+      "module": "./types/dist/sigma-types.esm.js",
+      "import": "./types/dist/sigma-types.cjs.mjs",
+      "default": "./types/dist/sigma-types.cjs.js"
+    },
+    "./settings": {
+      "module": "./settings/dist/sigma-settings.esm.js",
+      "import": "./settings/dist/sigma-settings.cjs.mjs",
+      "default": "./settings/dist/sigma-settings.cjs.js"
+    },
+    "./utils": {
+      "module": "./utils/dist/sigma-utils.esm.js",
+      "import": "./utils/dist/sigma-utils.cjs.mjs",
+      "default": "./utils/dist/sigma-utils.cjs.js"
+    },
+    "./rendering": {
+      "module": "./rendering/dist/sigma-rendering.esm.js",
+      "import": "./rendering/dist/sigma-rendering.cjs.mjs",
+      "default": "./rendering/dist/sigma-rendering.cjs.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "gitHead": "13062dc5be4f876d7c188411b120bb5a3a0be6f4"
+}

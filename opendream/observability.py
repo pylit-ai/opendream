@@ -3,19 +3,91 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections import Counter, defaultdict
+import os
+import threading
+import time
+from collections import Counter, OrderedDict, defaultdict
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from .dream_narrative import synthesize_dream_narrative
 from .memory_quality import LOW_SIGNAL_TYPES, analyze_memory_quality
 from .models import Annotation, ObservabilityConsolidationOp, PhaseTrace, ReviewDecision
 from .semantic_readiness import empty_context_pruning
 from .storage import MemoryStore
 from .util import parse_timestamp, read_json, sha256_path, stable_id, to_iso, utc_now
 
+# 446-observability-perf: in-process index cache.
+# Avoids per-request fingerprint computation + disk read for hot endpoints.
+# Fingerprint TTL is short enough to remain near-real-time but lets request
+# bursts skip redundant stat() calls.
+_INDEX_CACHE_DISABLED = bool(os.environ.get("OPENDREAM_DISABLE_INDEX_CACHE"))
+_FINGERPRINT_TTL_SECONDS = 0.0
+_INDEX_CACHE_MAX_ENTRIES = 16
+_index_cache_lock = threading.Lock()
+_index_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+# key -> (fingerprint, expires_at)
+_fingerprint_cache: dict[str, tuple[str, float]] = {}
+
+
+def _store_cache_key(store: MemoryStore) -> str:
+    return str(store.memory_root.resolve())
+
+
+def _cached_fingerprint(store: MemoryStore) -> str:
+    if _INDEX_CACHE_DISABLED:
+        return _observability_source_fingerprint(store)
+    key = _store_cache_key(store)
+    cached = _fingerprint_cache.get(key)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
+    fp = _observability_source_fingerprint(store)
+    # Compute expiry AFTER the expensive call so the TTL window is measured
+    # from when the cache was actually populated, not from when we entered
+    # the function. Otherwise long fingerprint computations leave the cache
+    # already-expired before the next caller arrives.
+    _fingerprint_cache[key] = (fp, time.monotonic() + _FINGERPRINT_TTL_SECONDS)
+    return fp
+
+
+def _cache_get(key: str, fingerprint: str) -> dict[str, Any] | None:
+    if _INDEX_CACHE_DISABLED:
+        return None
+    with _index_cache_lock:
+        entry = _index_cache.get(key)
+        if entry is not None and entry.get("source_fingerprint") == fingerprint:
+            _index_cache.move_to_end(key)
+            return entry
+        return None
+
+
+def _cache_put(key: str, payload: dict[str, Any]) -> None:
+    if _INDEX_CACHE_DISABLED:
+        return
+    with _index_cache_lock:
+        _index_cache[key] = payload
+        _index_cache.move_to_end(key)
+        while len(_index_cache) > _INDEX_CACHE_MAX_ENTRIES:
+            _index_cache.popitem(last=False)
+
+
+def invalidate_index_cache(store: MemoryStore | None = None) -> None:
+    """Force a rebuild on next call. Pass a store to invalidate one entry."""
+    if store is None:
+        with _index_cache_lock:
+            _index_cache.clear()
+        _fingerprint_cache.clear()
+        return
+    key = _store_cache_key(store)
+    with _index_cache_lock:
+        _index_cache.pop(key, None)
+    _fingerprint_cache.pop(key, None)
+
 _SEMANTIC_CHANGE_COMPARE_FILTERS = ["all", "suppressed", "deactivated", "restorable", "restored"]
 _SEMANTIC_CHANGE_COMPARE_MODES = ["summary", "side_by_side", "overlay"]
 _LEARNED_CONTEXT_DEACTIVATED_STATUSES = frozenset({"superseded", "archived", "rejected"})
+_FUNNEL_KEYS = ("considered", "selected", "generated", "approved", "created")
 
 
 def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
@@ -29,15 +101,110 @@ def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[s
         "entities": _build_entities(store),
     }
     store.save_observability_index(index)
+    _cache_put(_store_cache_key(store), index)
+    # The fingerprint we just computed is fresh; record it so the next
+    # cached read does not redo the stat sweep.
+    _fingerprint_cache[_store_cache_key(store)] = (
+        source_fingerprint,
+        time.monotonic() + _FINGERPRINT_TTL_SECONDS,
+    )
     return index
 
 
-def load_or_build_index(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+def load_or_build_index(
+    store: MemoryStore,
+    *,
+    now: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    if force:
+        invalidate_index_cache(store)
+        return index_observability(store, now=now)
+    fingerprint = _cached_fingerprint(store)
+    key = _store_cache_key(store)
+    cached = _cache_get(key, fingerprint)
+    if cached is not None:
+        return cached
     if store.observability_index_path.exists():
         payload = store.load_observability_index()
-        if payload.get("entities") and payload.get("source_fingerprint") == _observability_source_fingerprint(store):
+        if payload.get("entities") and payload.get("source_fingerprint") == fingerprint:
+            _cache_put(key, payload)
             return payload
     return index_observability(store, now=now)
+
+
+def _build_overview_lite(store: MemoryStore) -> dict[str, Any]:
+    """Cheap overview projection for /api/overview/lite.
+
+    Reads only the minimal fields needed: memory count by status, a small
+    recent-runs projection (no phase_traces/operations/candidates), and
+    recent sessions.  Reuses the in-process index cache when available so
+    the hot path avoids any disk I/O.
+    """
+    timestamp = to_iso(utc_now())
+    key = _store_cache_key(store)
+    fingerprint = _cached_fingerprint(store)
+    cached = _cache_get(key, fingerprint)
+    if cached is not None:
+        overview = cached["overview"]
+        generated_at = cached.get("generated_at", timestamp)
+    else:
+        # Build cheap projection without touching entities
+        records = store.load_durable_records()
+        status_counts: dict[str, int] = {}
+        for rec in records:
+            s = str(rec.get("status", "unknown"))
+            status_counts[s] = status_counts.get(s, 0) + 1
+        overview = {
+            "generated_at": timestamp,
+            "store_health": {
+                "state": "locked" if store.lock_state().get("present") else "ready",
+                "memory_root": str(store.memory_root),
+                "pending_events": store.pending_event_count(),
+            },
+            "memory_counts": {
+                "total": len(records),
+                "by_status": dict(sorted(status_counts.items())),
+            },
+        }
+        generated_at = timestamp
+
+    # Slim recent_runs: strip heavy fields from list rows
+    raw_runs = (overview.get("recent_runs") or [])[:5]
+    _RUN_LITE_STRIP = frozenset({"phase_traces", "operations", "candidates", "explanations"})
+    recent_runs = [{k: v for k, v in run.items() if k not in _RUN_LITE_STRIP} for run in raw_runs]
+
+    # Slim recent_sessions: keep only cheap fields
+    raw_sessions = (overview.get("recent_sessions") or [])[:5]
+    recent_sessions = [
+        {
+            "session_id": s.get("session_id"),
+            "event_count": s.get("event_count"),
+            "started_at": s.get("started_at"),
+        }
+        for s in raw_sessions
+    ]
+
+    store_health_full = overview.get("store_health", {})
+    result: dict[str, Any] = {
+        "generated_at": generated_at,
+        "store_health": {
+            "state": store_health_full.get("state"),
+            "memory_root": store_health_full.get("memory_root"),
+            "pending_events": store_health_full.get("pending_events"),
+        },
+        "memory_counts": {
+            "total": overview.get("memory_counts", {}).get("total", 0),
+            "by_status": overview.get("memory_counts", {}).get("by_status", {}),
+        },
+        "recent_runs": recent_runs,
+        "recent_sessions": recent_sessions,
+    }
+    # Include posture if available
+    posture = overview.get("product_posture")
+    if posture:
+        result["posture"] = posture
+    return result
 
 
 def _observability_source_fingerprint(store: MemoryStore) -> str:
@@ -90,12 +257,23 @@ def _iter_observability_source_paths(store: MemoryStore) -> list[Path]:
         store.audit_reconciliation_dir,
         store.audit_boundary_dir,
     ]
+    # Spec 446: per-directory stat instead of per-file rglob.
+    # The audit dirs contain thousands of append-only files; their parent
+    # directory mtime bumps whenever a file is added/removed/replaced, which
+    # is what we need for cache invalidation. Recursing every file was
+    # ~480ms for 14k files in dogfood workspaces.
     for root in roots:
         if not root.exists():
             continue
-        for child in sorted(root.rglob("*")):
-            if child.is_file():
-                paths.append(child)
+        paths.append(root)
+        # Include immediate sub-directories too so daily-rotated audit folders
+        # invalidate the cache when their own contents change.
+        try:
+            for child in root.iterdir():
+                if child.is_dir():
+                    paths.append(child)
+        except OSError:
+            pass
     paths.sort(key=lambda item: str(item))
     return paths
 
@@ -541,6 +719,271 @@ def query_runs(
     rows.sort(key=lambda row: _run_sort_key(row, sort_field, reverse=reverse))
     total = len(rows)
     return {"total": total, "items": rows[offset : offset + limit]}
+
+
+def query_dream_cycles(
+    index: dict[str, Any],
+    *,
+    limit: int = 50,
+    since: str | None = None,
+) -> dict[str, Any]:
+    rows = [
+        _build_dream_cycle_projection(run, include_detail=False)
+        for run in index["entities"]["runs"]
+        if _is_dream_run(run)
+    ]
+    if since:
+        rows = [
+            row
+            for row in rows
+            if _memory_passes_time_bound(
+                row.get("ended_at") if isinstance(row.get("ended_at"), str) else row.get("started_at"),
+                since,
+                None,
+            )
+        ]
+    rows.sort(key=lambda row: str(row.get("ended_at") or row.get("started_at") or row.get("run_id")), reverse=True)
+    return {"total": len(rows), "items": rows[:limit]}
+
+
+def get_dream_cycle(index: dict[str, Any], run_id: str) -> dict[str, Any] | None:
+    run = _find_row_by_id(index["entities"]["runs"], "run_id", run_id)
+    if not run or not _is_dream_run(run):
+        return None
+    return _build_dream_cycle_projection(run, include_detail=True)
+
+
+def build_dream_funnel(index: dict[str, Any], *, window: str = "7d") -> dict[str, Any]:
+    rows = _dream_runs_in_window(index, window)
+    totals = {key: 0 for key in _FUNNEL_KEYS}
+    cycles: list[dict[str, Any]] = []
+    for run in rows:
+        projection = _build_dream_cycle_projection(run, include_detail=False)
+        funnel = projection["funnel"]
+        for key in _FUNNEL_KEYS:
+            totals[key] += int(funnel.get(key, 0) or 0)
+        cycles.append(
+            {
+                "run_id": projection["run_id"],
+                "started_at": projection.get("started_at"),
+                "ended_at": projection.get("ended_at"),
+                "funnel": funnel,
+            }
+        )
+    return {
+        "window": window,
+        "total_cycles": len(rows),
+        "funnel": totals,
+        "cycles": cycles,
+    }
+
+
+def build_dream_coverage(store: MemoryStore, *, window: str = "7d") -> dict[str, Any]:
+    cutoff = _window_cutoff_iso(window)
+    buckets: dict[str, Counter[str]] = defaultdict(Counter)
+    for event in store.load_events():
+        timestamp = event.get("timestamp")
+        if not isinstance(timestamp, str) or (cutoff and timestamp < cutoff):
+            continue
+        bucket = timestamp[:10] if len(timestamp) >= 10 else "unknown"
+        buckets[bucket][_signal_source_class(event)] += 1
+    items = []
+    for bucket in sorted(buckets):
+        counts = dict(buckets[bucket])
+        total = sum(counts.values())
+        items.append(
+            {
+                "bucket": bucket,
+                "total": total,
+                "explicit_events": counts.get("explicit_events", 0),
+                "transcript_episodes": counts.get("transcript_episodes", 0),
+                "automation": counts.get("automation", 0),
+                "shares": {
+                    "explicit_events": round(counts.get("explicit_events", 0) / max(total, 1), 4),
+                    "transcript_episodes": round(counts.get("transcript_episodes", 0) / max(total, 1), 4),
+                    "automation": round(counts.get("automation", 0) / max(total, 1), 4),
+                },
+            }
+        )
+    return {"window": window, "items": items}
+
+
+def _is_dream_run(run: dict[str, Any]) -> bool:
+    kind = str(run.get("type") or run.get("kind") or "").lower()
+    run_id = str(run.get("run_id") or run.get("id") or "").lower()
+    return "dream" in kind or run_id.startswith("dream") or run_id.startswith("semantic-dream")
+
+
+def _find_row_by_id(rows: list[dict[str, Any]], key: str, value: str) -> dict[str, Any] | None:
+    for row in rows:
+        if str(row.get(key, "")) == value:
+            return row
+    return None
+
+
+def _build_dream_cycle_projection(run: dict[str, Any], *, include_detail: bool) -> dict[str, Any]:
+    summary = run.get("summary") if isinstance(run.get("summary"), dict) else {}
+    assert isinstance(summary, dict)
+    phase_traces = _phase_traces_with_duration(run)
+    phase_durations = {
+        str(trace.get("phase") or "unknown"): int(trace.get("duration_ms", 0) or 0)
+        for trace in phase_traces
+    }
+    narrative = str(run.get("narrative") or summary.get("narrative") or "").strip()
+    if not narrative:
+        narrative = synthesize_dream_narrative({**summary, "status": run.get("status"), "type": run.get("type")})
+    projection: dict[str, Any] = {
+        "id": run.get("id") or run.get("run_id"),
+        "run_id": run.get("run_id"),
+        "type": run.get("type"),
+        "mode": summary.get("mode") or run.get("mode") or run.get("type"),
+        "status": run.get("status") or summary.get("status"),
+        "reason": summary.get("reason") or run.get("reason"),
+        "started_at": run.get("started_at") or summary.get("started_at") or summary.get("last_started_at"),
+        "ended_at": run.get("ended_at") or summary.get("ended_at") or summary.get("last_ran_at"),
+        "duration_ms": _run_duration_ms(run, summary),
+        "model_id": summary.get("model_id") or summary.get("provider_id"),
+        "cost_usd": summary.get("cost_usd"),
+        "tokens_used": summary.get("tokens_used"),
+        "signal_source": summary.get("latest_signal_source") or summary.get("trigger_class"),
+        "signal_row_count": _int(summary.get("signal_row_count") or summary.get("gathered_rows")),
+        "funnel": _dream_funnel_counts(summary),
+        "phase_durations": phase_durations,
+        "phase_traces": phase_traces if include_detail else [],
+        "phases": summary.get("phases") or [trace.get("phase") for trace in phase_traces],
+        "narrative": narrative,
+        "reporting_agent_label": run.get("reporting_agent_label"),
+        "warnings": run.get("warnings", []),
+    }
+    if include_detail:
+        projection["summary"] = summary
+        projection["target_paths"] = run.get("target_paths", [])
+        projection["source_paths"] = run.get("source_paths", [])
+        projection["diff_path"] = run.get("diff_path")
+        projection["diff_text"] = run.get("diff_text", "")
+    return projection
+
+
+def _phase_traces_with_duration(run: dict[str, Any]) -> list[dict[str, Any]]:
+    traces = [dict(item) for item in run.get("phase_traces", []) if isinstance(item, dict)]
+    summary = run.get("summary") if isinstance(run.get("summary"), dict) else {}
+    total = _run_duration_ms(run, summary if isinstance(summary, dict) else {})
+    known_total = 0
+    missing: list[dict[str, Any]] = []
+    for trace in traces:
+        phase = str(trace.get("phase") or trace.get("name") or "unknown")
+        trace.setdefault("name", phase)
+        trace.setdefault("summary_short", phase.replace("_", " "))
+        duration = _phase_duration_ms(trace)
+        if duration <= 0:
+            missing.append(trace)
+        else:
+            trace["duration_ms"] = duration
+            known_total += duration
+    fallback = max(total - known_total, 0)
+    share = round(fallback / max(len(missing), 1)) if missing else 0
+    for trace in missing:
+        trace["duration_ms"] = share
+    return traces
+
+
+def _phase_duration_ms(trace: dict[str, Any]) -> int:
+    explicit = trace.get("duration_ms")
+    if isinstance(explicit, (int, float)):
+        return max(0, round(explicit))
+    started = trace.get("started_at")
+    ended = trace.get("ended_at")
+    if isinstance(started, str) and isinstance(ended, str) and started and ended:
+        try:
+            return max(0, round((parse_timestamp(ended) - parse_timestamp(started)).total_seconds() * 1000))
+        except (ValueError, TypeError):
+            return 0
+    return 0
+
+
+def _run_duration_ms(run: dict[str, Any], summary: dict[str, Any]) -> int:
+    for value in (run.get("duration_ms"), summary.get("duration_ms")):
+        if isinstance(value, (int, float)):
+            return max(0, round(value))
+    started = run.get("started_at") or summary.get("started_at") or summary.get("last_started_at")
+    ended = run.get("ended_at") or summary.get("ended_at") or summary.get("last_ran_at")
+    if isinstance(started, str) and isinstance(ended, str) and started and ended:
+        try:
+            return max(0, round((parse_timestamp(ended) - parse_timestamp(started)).total_seconds() * 1000))
+        except (ValueError, TypeError):
+            return 0
+    return 0
+
+
+def _dream_funnel_counts(summary: dict[str, Any]) -> dict[str, int]:
+    considered = _int(
+        summary.get("query_families_considered")
+        or summary.get("families_considered")
+        or summary.get("signal_row_count")
+        or summary.get("gathered_rows")
+    )
+    selected = _int(
+        summary.get("query_families_selected")
+        or summary.get("families_selected")
+        or summary.get("appended_events")
+    )
+    generated = _int(summary.get("proposals_generated"))
+    approved = _int(summary.get("proposals_approved"))
+    created = _int(summary.get("learned_context_created") or summary.get("memories_created"))
+    return {
+        "considered": considered,
+        "selected": selected,
+        "generated": generated,
+        "approved": approved,
+        "created": created,
+    }
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _dream_runs_in_window(index: dict[str, Any], window: str) -> list[dict[str, Any]]:
+    cutoff = _window_cutoff_iso(window)
+    rows = [run for run in index["entities"]["runs"] if _is_dream_run(run)]
+    if cutoff:
+        rows = [
+            run
+            for run in rows
+            if str(run.get("ended_at") or run.get("started_at") or "") >= cutoff
+        ]
+    return rows
+
+
+def _window_cutoff_iso(window: str) -> str | None:
+    value = str(window or "").strip().lower()
+    if not value:
+        return None
+    try:
+        if value.endswith("d"):
+            delta = timedelta(days=int(value[:-1]))
+        elif value.endswith("h"):
+            delta = timedelta(hours=int(value[:-1]))
+        else:
+            return None
+    except ValueError:
+        return None
+    return to_iso(utc_now() - delta)
+
+
+def _signal_source_class(event: dict[str, Any]) -> str:
+    source = event.get("source") if isinstance(event.get("source"), dict) else {}
+    assert isinstance(source, dict)
+    channel = str(event.get("channel") or source.get("channel") or "").lower()
+    refs = source.get("file_refs")
+    if isinstance(refs, list) and refs:
+        return "transcript_episodes"
+    if "automation" in channel or str(source.get("adapter_id") or "").strip():
+        return "automation"
+    return "explicit_events"
 
 
 def _select_subgraph(
@@ -2155,6 +2598,110 @@ def _recent_sessions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
     sessions.sort(key=lambda item: str(item.get("ended_at", "")), reverse=True)
     return sessions[:5]
+
+
+_DIAG_SAMPLE_CAP = 25
+
+
+def _session_diagnostics(store: MemoryStore) -> dict[str, Any]:
+    """Read-only diagnostics: orphan events, count mismatches, zero-event sessions.
+
+    Compares the live event log against the freshly-built session entity list so
+    that orphan and mismatch signals are always current.  Never mutates the store.
+
+    Orphan events: events whose session_id does not appear in any session entity.
+    Because session entities are built from events AND context assemblies, an
+    event can be orphaned only when its session_id is missing from *all* other
+    evidence — practically this surfaces events injected with a session_id that
+    was never tracked through a maintain/index cycle (e.g. raw file injection,
+    a now-deleted event file, or a session_id that was pruned).
+
+    The implementation rebuilds session entities from scratch (matching what
+    maintain + index_observability would produce) rather than reading a cached
+    index, so the diagnostics remain accurate even on a stale index.
+    """
+    events = store.load_events()
+    contexts = store.load_context_assemblies()
+
+    # Group events by session_id
+    grouped: dict[str, list[str]] = {}
+    for event in events:
+        sid = str(event.get("session_id") or "")
+        if not sid:
+            continue
+        grouped.setdefault(sid, []).append(str(event.get("event_id", "")))
+
+    # Build session entity map from contexts only (independent of events).
+    # A session_id appearing *only* in events but not in contexts or a prior
+    # index is the orphan signal.
+    context_sessions: set[str] = set()
+    for ctx in contexts:
+        sid = str(ctx.get("session_id") or "")
+        if sid:
+            context_sessions.add(sid)
+
+    # Also load the saved index sessions (if available) as additional known ids.
+    index_sessions: set[str] = set()
+    if store.observability_index_path.exists():
+        try:
+            saved = store.load_observability_index()
+            for s in (saved.get("entities") or {}).get("sessions") or []:
+                sid = str(s.get("session_id") or "")
+                if sid:
+                    index_sessions.add(sid)
+        except Exception:
+            pass
+
+    known_session_ids: set[str] = context_sessions | index_sessions
+
+    # Orphan events: session_id not in known_session_ids
+    orphan_events_all: list[dict[str, str]] = []
+    for sid, eids in grouped.items():
+        if sid not in known_session_ids:
+            for eid in eids:
+                orphan_events_all.append({"event_id": eid, "session_id": sid})
+    orphan_total = len(orphan_events_all)
+
+    # Mismatch records: compare index event_count vs actual grouped count.
+    # Only meaningful when the saved index exists.
+    mismatch_all: list[dict[str, Any]] = []
+    if index_sessions:
+        index_entity_counts: dict[str, int] = {}
+        try:
+            saved = store.load_observability_index()
+            for s in (saved.get("entities") or {}).get("sessions") or []:
+                sid = str(s.get("session_id") or "")
+                cnt = int(s.get("event_count") or 0)
+                if sid:
+                    index_entity_counts[sid] = cnt
+        except Exception:
+            pass
+        for sid, recorded in index_entity_counts.items():
+            actual = len(grouped.get(sid, []))
+            if recorded != actual:
+                mismatch_all.append(
+                    {
+                        "session_id": sid,
+                        "recorded_event_count": recorded,
+                        "actual_event_count": actual,
+                    }
+                )
+    mismatch_total = len(mismatch_all)
+
+    # Zero-event sessions: known sessions with no events in the live log.
+    zero_all = [sid for sid in known_session_ids if not grouped.get(sid)]
+    zero_total = len(zero_all)
+
+    return {
+        "orphan_events": orphan_events_all[:_DIAG_SAMPLE_CAP],
+        "orphan_events_total": orphan_total,
+        "mismatch_records": mismatch_all[:_DIAG_SAMPLE_CAP],
+        "mismatch_records_total": mismatch_total,
+        "zero_event_sessions": zero_all[:_DIAG_SAMPLE_CAP],
+        "zero_event_sessions_total": zero_total,
+        "total_sessions": len(known_session_ids | set(grouped.keys())),
+        "total_events": len(events),
+    }
 
 
 def _max_iso_timestamp(values: Any) -> str | None:

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .dream import _gather_recent_signal, _orient, _rows_to_events, dream_run
+from .dream_narrative import synthesize_dream_narrative
 from .episodes import latest_episode_timestamp, load_episode_rows
 from .integration import maintain
 from .memory_quality import derive_semantic_product_state, next_action_for_semantic_state
@@ -213,6 +214,7 @@ def semantic_dream_run(
             summary["latest_signal_source"] = signal_status["latest_signal_source"]
             summary["latest_signal_timestamp"] = signal_status["latest_signal_timestamp"]
             summary["signal_row_count"] = signal_status["signal_row_count"]
+            summary["narrative"] = synthesize_dream_narrative(summary)
             summary["audit"] = store.write_semantic_dream_audit(
                 run_id,
                 summary,
@@ -235,14 +237,16 @@ def semantic_dream_run(
             return summary
 
     except LockError:
-        return {
-            "run_id": run_id,
-            "mode": mode,
-            "status": "skipped",
-            "reason": "lock-held",
-            "phases": ["orient"],
-            "trigger_class": trigger_class,
-        }
+            summary = {
+                "run_id": run_id,
+                "mode": mode,
+                "status": "skipped",
+                "reason": "lock-held",
+                "phases": ["orient"],
+                "trigger_class": trigger_class,
+            }
+            summary["narrative"] = synthesize_dream_narrative(summary)
+            return summary
 
 
 def _run_deterministic_phase(

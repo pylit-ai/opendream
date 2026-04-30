@@ -850,3 +850,108 @@ specs:
       - CLI and observe UI expose service policy, current runtime state, and reversible start-stop-restart controls
       - overview exposes digestible memory-surface summaries and last dream mutation effects in addition to detailed evidence
       - make verify and make release-check remain green with new runtime and UI coverage
+  - id: 445-auto-reviewer
+    title: deterministic auto-reviewer for review queue triage
+    status: active
+    owner: platform
+    created: 2026-04-29
+    touched_surfaces:
+      - cli
+      - observability
+      - api
+      - observability-ui
+      - tests
+      - docs
+    depends_on:
+      - 417-memory-review-and-fidelity-tooling
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/auto_reviewer.py
+      - opendream/cli.py
+      - opendream/observability.py
+      - opendream/webapp.py
+    verification:
+      - rule engine produces deterministic decisions on fixture queues
+      - every auto-decision has matching annotation and cooldown row
+      - reverted items not re-auto-resolved within cooldown window
+      - dry-run mode mutates nothing
+  - id: 446-observability-perf
+    title: observability index cache and progressive loading
+    status: active
+    owner: platform
+    created: 2026-04-29
+    touched_surfaces:
+      - observability
+      - api
+      - observability-ui
+      - tests
+    depends_on:
+      - 414-memory-observability-read-model
+      - 444-managed-runtime-and-memory-surface-overview
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/observability.py
+      - opendream/webapp.py
+      - frontend/src/lib/cache.ts
+    verification:
+      - p95 of /api/overview under 250ms with 1k memories warm cache
+      - cached vs rebuilt index payload identical for same fingerprint
+      - post-mutation freshness within 1s of fingerprint cycle
+      - first-paint of every route under 500ms with warm cache
+  - id: 447-session-lifecycle-audit
+    title: canonical session id minter and aggregator integrity
+    status: active
+    owner: platform
+    created: 2026-04-29
+    touched_surfaces:
+      - sessions
+      - cli
+      - observability
+      - api
+      - observability-ui
+      - docs
+      - tests
+    depends_on: []
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/sessions.py
+      - opendream/observability.py
+      - opendream/cli.py
+      - docs/architecture/session-lifecycle.md
+    verification:
+      - canonical session id minter is the only source for new ids
+      - integration test produces single session record per agent span with correct event_count
+      - /api/sessions/diagnostics surfaces orphan and mismatch counts
+  - id: 448-dreams-visualization
+    title: dreams page v2 with phase progression, proposal funnel, signal coverage, and narrative
+    status: active
+    owner: platform
+    created: 2026-04-29
+    touched_surfaces:
+      - dreams
+      - observability
+      - api
+      - observability-ui
+      - cli
+      - docs
+      - tests
+    depends_on:
+      - 446-observability-perf
+    conflicts_with: []
+    supersedes: []
+    promoted_outputs:
+      - opendream/observability.py
+      - opendream/dream_narrative.py
+      - opendream/webapp.py
+      - frontend/src/routes/Dreams.tsx
+      - frontend/src/components/dreams/PhaseBar.tsx
+      - frontend/src/components/dreams/Funnel.tsx
+      - frontend/src/components/dreams/CoverageTrend.tsx
+    verification:
+      - /api/dream/cycles serves projections without diff_text payload and < 100ms warm
+      - each dream run record carries phase_traces and narrative
+      - frontend dreams page renders phase, funnel, coverage widgets without new dependencies
+      - operator can answer "is the system learning" within ten seconds of opening Dreams

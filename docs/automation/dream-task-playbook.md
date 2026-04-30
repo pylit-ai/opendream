@@ -187,6 +187,18 @@ Automation behavior is covered by integration tests under `tests/test_memory_cli
 3. Copy a job spec template from [README Automation](../../README.md) or from [`examples/feature-mining.md`](examples/feature-mining.md).
 4. Document SoT and cron in your `AGENTS.md` / operator runbook.
 
+## 10. Reading the Dreams page
+
+The Dreams page is the operator view for cycle health.
+
+- Cycle health shows total cycles, completion rate, average duration, and approved proposals in the current list window.
+- Phase progression uses stacked bars; wide segments show phases consuming most cycle time.
+- Proposal funnel counts flow from considered signal/families to selected, generated, approved, and created learned context.
+- Signal coverage separates explicit events, transcript episodes, and automation signal. A dip usually means a hook, ingest, or scheduled job stopped feeding the workspace.
+- Each cycle row includes a deterministic narrative generated from run counts and reasons, not from an LLM.
+
+Scripted operators can read the same projections from `/api/dream/cycles`, `/api/dream/funnel`, and `/api/dream/coverage` after `opendream observe serve --workspace "$WORKSPACE"`.
+
 ---
 
 ## Copy-paste: OpenDream appendix for skill prompts

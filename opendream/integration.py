@@ -10,6 +10,7 @@ from .consolidator import consolidate
 from .extractor import extract_candidates, filter_by_salience
 from .models import ContextAssembly, MemoryEvent, normalize_reporting_agent
 from .retriever import retrieve
+from .sessions import current_session_id
 from .storage import STORE_KIND_PRECEDENCE, MemoryStore, store_sort_key
 from .util import (
     CLI_JSON_VERSION,
@@ -264,7 +265,11 @@ def emit_event(
         raise ValueError("sensitive events must not be routed to the global store")
 
     event_timestamp = timestamp or to_iso(utc_now())
-    computed_session_id = session_id or stable_id("session", event_timestamp, store.store_kind, scope)
+    computed_session_id = (
+        session_id
+        or current_session_id()
+        or stable_id("session", event_timestamp, store.store_kind, scope)
+    )
     computed_turn_id = turn_id or stable_id("turn", event_timestamp, kind, message_ref)
     computed_event_id = event_id or stable_id("event", event_timestamp, kind, content, message_ref)
     source: dict[str, Any] = {"channel": channel, "message_ref": message_ref}
@@ -989,7 +994,7 @@ def prepare_context(
 
     assembly = ContextAssembly(
         context_id=context_id,
-        session_id=stable_id("session", query),
+        session_id=current_session_id() or stable_id("session", query),
         turn_id=stable_id("turn", timestamp, query),
         retrieval_run_id=retrieval_run_id,
         startup_index_snapshot=filtered_startup_entries,
