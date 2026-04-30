@@ -54,6 +54,18 @@ export function Table<T>(props: TableProps<T>): JSX.Element {
                   onClick={
                     props.onRowClick ? () => props.onRowClick?.(item) : undefined
                   }
+                  onKeyDown={
+                    props.onRowClick
+                      ? (e: KeyboardEvent) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            props.onRowClick?.(item);
+                          }
+                        }
+                      : undefined
+                  }
+                  tabIndex={props.onRowClick ? 0 : undefined}
+                  role={props.onRowClick ? 'button' : undefined}
                   class={cn(
                     'row-hover hairline-b text-text',
                     props.onRowClick &&

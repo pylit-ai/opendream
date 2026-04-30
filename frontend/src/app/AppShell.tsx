@@ -197,6 +197,7 @@ function Sidebar(): JSX.Element {
                       <li>
                         <A
                           href={route.path}
+                          title={expanded() ? undefined : route.name}
                           onMouseEnter={() => ROUTE_PREFETCH[route.path]?.()}
                           onFocus={() => ROUTE_PREFETCH[route.path]?.()}
                           class={cn(

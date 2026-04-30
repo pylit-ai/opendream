@@ -1,7 +1,18 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, on, Show, type JSX } from 'solid-js';
 import { useNavigate, useSearchParams } from '@solidjs/router';
 import { CheckCircle } from 'lucide-solid';
-import { getAutoReviewerStats, getMemory, getReviews, getRun, getRunDiff, submitReviewDecision } from '~/api/client';
+import {
+  applyReviewRecommendations,
+  getAutoReviewerStats,
+  getMemory,
+  getReviewRecommendations,
+  getReviews,
+  getRun,
+  getRunDiff,
+  submitReviewDecision,
+  type ReviewRecommendation,
+  type ReviewRecommendationsResponse,
+} from '~/api/client';
 import type { AutoReviewerStats } from '~/api/types';
 import type { MemoryRecord, ReviewsResponse, RunDiff, RunRecord } from '~/api/types';
 import { Page } from '~/components/Page';
@@ -83,6 +94,46 @@ export default function ReviewsRoute(): JSX.Element {
   const [autoStats] = createResource<AutoReviewerStats | null>(getAutoReviewerStats);
   const autoAppliedCount = (): number => autoStats()?.last_run?.applied_count ?? 0;
 
+  // Recommendations: deterministic per-rule suggestions for every queue item.
+  const [recsResp, { refetch: refetchRecs }] = createResource<ReviewRecommendationsResponse | null>(
+    getReviewRecommendations,
+  );
+  const recMap = createMemo<Map<string, ReviewRecommendation>>(() => {
+    const m = new Map<string, ReviewRecommendation>();
+    for (const r of recsResp()?.items ?? []) m.set(r.queue_item_id, r);
+    return m;
+  });
+  const [showOnlyRecs, setShowOnlyRecs] = createSignal(false);
+  const [applyAllPending, setApplyAllPending] = createSignal(false);
+  const [applyAllResult, setApplyAllResult] = createSignal<string | null>(null);
+
+  const applyAllRecommendations = async (): Promise<void> => {
+    const total = recsResp()?.total_recommended ?? 0;
+    if (total === 0) return;
+    if (
+      !window.confirm(
+        `Apply ${total} recommended action${total === 1 ? '' : 's'}? Each becomes a ReviewDecision with actor=auto-reviewer:<rule>. Reversible per item.`,
+      )
+    )
+      return;
+    setApplyAllPending(true);
+    setApplyAllResult(null);
+    try {
+      const res = await applyReviewRecommendations();
+      setApplyAllResult(`Applied ${res.applied_count} of ${res.proposed_count}.`);
+    } catch (e) {
+      setApplyAllResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      invalidate('reviews');
+      await Promise.allSettled([refetch(), refetchRecs()]);
+      setApplyAllPending(false);
+      // Auto-clear the "Applied N of M" text when the queue is now empty
+      if ((reviews()?.items?.length ?? 0) === 0) {
+        setApplyAllResult(null);
+      }
+    }
+  };
+
   // URL ↔ state for ?id= and ?type=
   createEffect(
     on(typeFilter, (v) => {
@@ -137,6 +188,7 @@ export default function ReviewsRoute(): JSX.Element {
   const filteredItems = (): RichReviewItem[] => {
     let list = (reviews()?.items ?? []) as RichReviewItem[];
     if (typeFilter()) list = list.filter((r) => r.queue_item_type === typeFilter());
+    if (showOnlyRecs()) list = list.filter((r) => recMap().has(r.queue_item_id ?? r.id));
     if (sort() === 'type:asc') {
       list = [...list].sort((a, b) => (a.queue_item_type ?? '').localeCompare(b.queue_item_type ?? ''));
     }
@@ -373,6 +425,36 @@ export default function ReviewsRoute(): JSX.Element {
       render: (r) => <span class="text-sm text-text">{r.reason ?? '—'}</span>,
     },
     {
+      key: 'recommended',
+      header: 'Recommended',
+      width: '160px',
+      render: (r) => {
+        const rec = recMap().get(r.queue_item_id ?? r.id);
+        if (!rec) return <span class="text-text-subtle">—</span>;
+        const tone =
+          rec.action === 'approve'
+            ? 'ok'
+            : rec.action === 'suppress'
+              ? 'danger'
+              : 'warn';
+        return (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void submitAction(r, rec.action as ReviewAction);
+            }}
+            disabled={!r.actions?.includes(rec.action as ReviewAction)}
+            title={`${rec.rule_id}: ${rec.rationale}\n\nClick to apply just this one.`}
+            class="row-hover flex items-center gap-1.5"
+          >
+            <Chip variant={tone as ChipVariant}>{rec.action.replace(/_/g, ' ')}</Chip>
+            <span class="font-mono text-[10px] text-text-subtle">{rec.rule_id}</span>
+          </button>
+        );
+      },
+    },
+    {
       key: 'actions',
       header: '',
       width: '210px',
@@ -406,7 +488,10 @@ export default function ReviewsRoute(): JSX.Element {
   ];
 
   return (
-    <Page title="Review queue" subtitle="Items requiring operator attention">
+    <Page
+      title="Review queue"
+      subtitle="Optional. Memories the runtime is uncertain about. Reviewing improves recall quality but is not required — auto-reviewer rules can clear most items."
+    >
       <Show when={!autoStats.loading && autoStats() !== null && autoAppliedCount() > 0}>
         <button
           type="button"
@@ -416,6 +501,60 @@ export default function ReviewsRoute(): JSX.Element {
           <span class="font-medium">{autoAppliedCount()} item{autoAppliedCount() === 1 ? '' : 's'} auto-resolved this session</span>
           <span class="text-text-muted">· View automation settings →</span>
         </button>
+      </Show>
+
+      <Show when={(recsResp()?.total_recommended ?? 0) > 0}>
+        <div class="flex flex-wrap items-center gap-2 rounded-md hairline bg-surface px-3 py-2 text-[12px]">
+          <span class="font-medium text-text">
+            {recsResp()!.total_recommended} of {recsResp()!.total_items} have a recommended action
+          </span>
+          <Show when={Object.keys(recsResp()!.by_action).length > 0}>
+            <span class="text-text-subtle">·</span>
+            <span class="font-mono text-[10.5px] text-text-muted">
+              {Object.entries(recsResp()!.by_action)
+                .map(([k, v]) => `${k}:${v}`)
+                .join(' / ')}
+            </span>
+          </Show>
+          <span class="flex-1" />
+          <label class="flex items-center gap-1.5 text-text-muted">
+            <input
+              type="checkbox"
+              checked={showOnlyRecs()}
+              onChange={(e) => setShowOnlyRecs(e.currentTarget.checked)}
+              class="h-3.5 w-3.5 accent-accent"
+            />
+            Only show recommended
+          </label>
+          <button
+            type="button"
+            disabled={applyAllPending()}
+            onClick={() => void applyAllRecommendations()}
+            class="rounded-md bg-accent px-3 py-1 text-[11.5px] font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
+            title="Apply every recommended action across all rules. Each becomes a reversible ReviewDecision."
+          >
+            {applyAllPending()
+              ? 'Applying…'
+              : `Apply all ${recsResp()!.total_recommended} recommendations`}
+          </button>
+        </div>
+        <Show when={applyAllResult()}>
+          <p class="text-[11px] text-text-muted">
+            {applyAllResult()}{' '}
+            <Show when={applyAllResult()?.startsWith('Applied')}>
+              <span>Queue will refresh — configure rules in{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate('/settings?tab=automation')}
+                  class="text-accent underline"
+                >
+                  Automation settings
+                </button>{' '}
+                to reduce future manual work.
+              </span>
+            </Show>
+          </p>
+        </Show>
       </Show>
 
       <div class="flex items-center justify-between gap-3">

@@ -365,6 +365,14 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 response = create_export(self.store, **payload)
             elif parsed.path == "/api/health/live-check":
                 response = _run_live_check(self.store, now=payload.get("now"))
+            elif parsed.path == "/api/reviews/recommendations/apply":
+                rule_ids = payload.get("rule_ids") if isinstance(payload, dict) else None
+                if rule_ids is not None and not isinstance(rule_ids, list):
+                    rule_ids = None
+                self._write_json(
+                    _auto_reviewer.apply_recommendations(self.store, rule_ids=rule_ids)
+                )
+                return
             elif parsed.path.startswith("/api/reviews/"):
                 review_id = parsed.path.split("/")[3]
                 action = parsed.path.split("/")[-1]
@@ -447,6 +455,15 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                         "result": response,
                     }
                 )
+                return
+            elif parsed.path == "/api/reviews/recommendations/apply":
+                rule_ids = payload.get("rule_ids") if isinstance(payload, dict) else None
+                if rule_ids is not None and not isinstance(rule_ids, list):
+                    rule_ids = None
+                result = _auto_reviewer.apply_recommendations(
+                    self.store, rule_ids=rule_ids
+                )
+                self._write_json(result)
                 return
             elif parsed.path == "/api/auto-reviewer/run-dry":
                 cfg = _auto_reviewer.load_config(self.store)
@@ -688,6 +705,9 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 sessions = [s for s in sessions if str(s.get("started_at") or "") >= since]
             limit = _parse_query_int(query.get("limit"), 50, minimum=1, maximum=_SESSION_LIST_LIMIT_CAP)
             sessions = sessions[:limit]
+            # 446-observability-perf: strip timeline from list view; use /api/sessions/<id>/timeline
+            _SESSION_LIST_STRIP = frozenset({"timeline", "events", "raw_events"})
+            sessions = [{k: v for k, v in s.items() if k not in _SESSION_LIST_STRIP} for s in sessions]
             self._write_json({"items": sessions})
             _finish()
             return
@@ -718,13 +738,22 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 ended_after=(query.get("ended_after") or "").strip() or since or None,
                 ended_before=(query.get("ended_before") or "").strip() or None,
             )
-            # List projection: strip heavy fields not needed in list view.
+            # 446-observability-perf: list projection — strip heavy fields.
             # Detail endpoints (/api/runs/<id>) retain full payloads.
-            _RUN_LIST_STRIP = frozenset({"phase_traces", "operations", "candidates", "explanations"})
-            result["items"] = [
-                {k: v for k, v in row.items() if k not in _RUN_LIST_STRIP}
-                for row in result.get("items", [])
-            ]
+            _RUN_LIST_STRIP = frozenset({"phase_traces", "operations", "candidates", "explanations", "diff_text"})
+            def _project_run_row(row: dict[str, Any]) -> dict[str, Any]:
+                out = {k: v for k, v in row.items() if k not in _RUN_LIST_STRIP}
+                # summary dict is large; drop it in list view
+                if isinstance(out.get("summary"), dict):
+                    out.pop("summary")
+                elif isinstance(out.get("summary"), str) and len(out["summary"]) > 200:
+                    out["summary"] = out["summary"][:200]
+                # phase_durations: keep only phase count
+                pd = out.get("phase_durations")
+                if isinstance(pd, dict) and len(pd) > 0:
+                    out["phase_durations"] = {"count": len(pd)}
+                return out
+            result["items"] = [_project_run_row(row) for row in result.get("items", [])]
             self._write_json(result)
             _finish()
             return
@@ -766,13 +795,21 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 if (query.get("max_selected") or "").strip()
                 else None,
             )
-            # List projection: strip heavy fields not needed in list view.
+            # 446-observability-perf: list projection — strip heavy fields.
             # Detail endpoints (/api/retrievals/<id>) retain full payloads.
-            _RETRIEVAL_LIST_STRIP = frozenset({"candidates", "explanations"})
-            result["items"] = [
-                {k: v for k, v in row.items() if k not in _RETRIEVAL_LIST_STRIP}
-                for row in result.get("items", [])
-            ]
+            _RETRIEVAL_LIST_STRIP = frozenset({
+                "candidates", "explanations", "why", "excluded", "near_threshold",
+                "final_context_assembly_order", "lexical_only_selected_memory_ids",
+            })
+            def _project_retrieval_row(row: dict[str, Any]) -> dict[str, Any]:
+                out = {k: v for k, v in row.items() if k not in _RETRIEVAL_LIST_STRIP}
+                # Keep count only for selected_memory_ids (list can be large)
+                smi = out.get("selected_memory_ids")
+                if isinstance(smi, list):
+                    out["selected_memory_ids_count"] = len(smi)
+                    out.pop("selected_memory_ids")
+                return out
+            result["items"] = [_project_retrieval_row(row) for row in result.get("items", [])]
             self._write_json(result)
             _finish()
             return
@@ -805,8 +842,16 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             cfg = _auto_reviewer.load_config(self.store)
             self._write_json(_auto_reviewer_stats_payload(self.store, cfg))
             return
+        if parsed.path == "/api/reviews/recommendations":
+            self._write_json(_auto_reviewer.preview_recommendations(self.store))
+            return
         if parsed.path == "/api/reviews":
-            self._write_json({"items": entities["reviews"], "decisions": self.store.load_review_decisions()})
+            # 446-observability-perf: cap decisions at 50 (most recent by created_at desc).
+            # decisions_total added so clients can detect truncation without a separate call.
+            all_decisions = self.store.load_review_decisions()
+            decisions_total = len(all_decisions)
+            decisions_sorted = sorted(all_decisions, key=lambda d: str(d.get("created_at") or ""), reverse=True)[:50]
+            self._write_json({"items": entities["reviews"], "decisions": decisions_sorted, "decisions_total": decisions_total})
             return
         if parsed.path == "/api/evals":
             self._write_json({"health": entities["health"], "evals": entities["evals"]})

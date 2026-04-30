@@ -359,7 +359,7 @@ function SurfaceDashboard(): JSX.Element {
                           navigate(`/memories/explorer?id=${encodeURIComponent(h.memory_id)}`)
                         }
                         class="row-hover hairline-b grid w-full grid-cols-[170px_1fr_100px] items-center gap-3 px-1 py-1.5 text-left"
-                        title={h.summary ?? h.title ?? h.memory_id}
+                        title={asPreview(h.summary) ?? asPreview(h.title) ?? h.memory_id}
                       >
                         <span class="font-mono text-[10.5px] text-text-subtle">
                           {h.memory_id ?? '—'}
@@ -433,6 +433,8 @@ function MemoriesTable(props: {
   const params = (): MemoryListParams => {
     const out: MemoryListParams = { limit: props.pageSize };
     if (props.search) out.search = props.search;
+    if (props.statusFilter) out.status = props.statusFilter;
+    if (props.typeFilter) out.type = props.typeFilter;
     return out;
   };
   const [resp, { refetch }] = createResource<MemoryListResponse, MemoryListParams>(
@@ -758,7 +760,16 @@ export function MemoriesChanges(): JSX.Element {
                 <EmptyState
                   icon={Database}
                   title="No memory changes yet"
-                  description="Run a dream cycle (full or semantic). Changes appear here when proposals are approved or learned-context is superseded."
+                  description="Run a dream cycle to produce memory changes."
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => navigate('/dreams')}
+                      class="mt-2 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-fg hover:opacity-90"
+                    >
+                      Go to Dreams →
+                    </button>
+                  }
                 />
               }
             />

@@ -6,7 +6,7 @@ import { Page } from '~/components/Page';
 import { Table, type TableColumn } from '~/components/Table';
 import { Chip, type ChipVariant } from '~/components/Chip';
 import { EmptyState } from '~/components/EmptyState';
-import { LoadingPage } from '~/components/Loading';
+import { SkeletonRows } from '~/components/Skeleton';
 import { ErrorState } from '~/components/ErrorState';
 import { formatDate } from '~/lib/format';
 
@@ -95,28 +95,29 @@ export default function EvalsRoute(): JSX.Element {
 
   return (
     <Page title="Evals" subtitle="Quality + health checks">
-      <Show when={data.loading}>
-        <LoadingPage />
-      </Show>
-      <Show when={data.error}>
-        <ErrorState
-          message={data.error instanceof Error ? data.error.message : String(data.error)}
-          onRetry={refetch}
-        />
-      </Show>
-      <Show when={!data.loading && !data.error}>
-        <Table
-          items={extractItems(data())}
-          columns={COLS}
-          rowKey={(item, i) => String(item.name ?? i)}
-          empty={
-            <EmptyState
-              icon={CheckCircle}
-              title="No eval results"
-              description="Run evals to see quality and health checks."
+      <Show when={!data.loading} fallback={<SkeletonRows rows={4} />}>
+        <Show
+          when={!data.error}
+          fallback={
+            <ErrorState
+              message={data.error instanceof Error ? data.error.message : String(data.error)}
+              onRetry={refetch}
             />
           }
-        />
+        >
+          <Table
+            items={extractItems(data())}
+            columns={COLS}
+            rowKey={(item, i) => String(item.name ?? i)}
+            empty={
+              <EmptyState
+                icon={CheckCircle}
+                title="No eval results"
+                description="Run evals to see quality and health checks."
+              />
+            }
+          />
+        </Show>
       </Show>
     </Page>
   );

@@ -2,6 +2,7 @@ import { createResource, createSignal, Show, type JSX } from 'solid-js';
 import { Dialog } from '@kobalte/core/dialog';
 import { Download, Package } from 'lucide-solid';
 import { createExport, getExports } from '~/api/client';
+import { invalidate } from '~/lib/cache';
 import type { ExportItem, ExportsResponse } from '~/api/types';
 import { Page } from '~/components/Page';
 import { Table, type TableColumn } from '~/components/Table';
@@ -102,6 +103,7 @@ export default function ExportsRoute(): JSX.Element {
       await createExport({ format: format(), scope: scope() || undefined });
       setCreateOpen(false);
       setScope('');
+      invalidate('exports');
       refetch();
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : String(e));
@@ -115,6 +117,7 @@ export default function ExportsRoute(): JSX.Element {
       title="Exports"
       actions={
         <button
+          type="button"
           onClick={() => setCreateOpen(true)}
           class="inline-flex items-center gap-1.5 rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-accent-fg transition-all duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
         >
@@ -145,6 +148,7 @@ export default function ExportsRoute(): JSX.Element {
               description="Create one to download memory data as JSON or CSV."
               action={
                 <button
+                  type="button"
                   onClick={() => setCreateOpen(true)}
                   class="inline-flex items-center gap-1.5 rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-accent-fg transition-all duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
                 >

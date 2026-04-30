@@ -172,6 +172,10 @@ def append_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
+    try:
+        os.utime(path.parent, None)
+    except OSError:
+        pass
 
 
 def prune_recent_failures(

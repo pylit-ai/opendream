@@ -4,7 +4,6 @@ import type { MemoryLineage, MemoryRecord } from '~/api/types';
 import { cachedFetch, invalidate } from '~/lib/cache';
 import { Chip, type ChipVariant } from './Chip';
 import { CopyButton } from './CopyButton';
-import { IdLink } from './IdLink';
 import { SkeletonStats } from './Skeleton';
 import { formatDateLong } from '~/lib/format';
 import { RawFormattedView } from './RawFormattedView';
@@ -94,6 +93,11 @@ export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
       </header>
 
       <Show when={!data.loading} fallback={<SkeletonStats />}>
+        <Show when={data.error}>
+          <p class="text-[12.5px] text-danger">
+            {data.error instanceof Error ? data.error.message : 'Failed to load memory.'}
+          </p>
+        </Show>
         <Show when={data()}>
           {(d) => {
             const m = d().memory;
@@ -360,7 +364,7 @@ export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
             );
           }}
         </Show>
-        <Show when={!data() && !data.loading}>
+        <Show when={!data() && !data.loading && !data.error}>
           <p class="text-[12.5px] text-text-muted">Memory not found.</p>
         </Show>
       </Show>
@@ -418,7 +422,10 @@ function AnnotationComposer(props: {
           </button>
         }
       >
-        <div class="flex flex-col gap-2 rounded-md hairline bg-surface-elevated p-3">
+        <form
+          class="flex flex-col gap-2 rounded-md hairline bg-surface-elevated p-3"
+          onSubmit={(e) => { e.preventDefault(); void submit(); }}
+        >
           <div class="grid grid-cols-2 gap-2">
             <label class="flex flex-col gap-1 text-[10px] uppercase tracking-[0.06em] text-text-subtle">
               Actor
@@ -469,15 +476,14 @@ function AnnotationComposer(props: {
               Cancel
             </button>
             <button
-              type="button"
-              onClick={() => void submit()}
+              type="submit"
               disabled={submitting() || !note().trim()}
               class="rounded-md bg-accent px-3 py-1 text-[12px] font-medium text-accent-fg disabled:opacity-50"
             >
               {submitting() ? 'Saving…' : 'Save'}
             </button>
           </div>
-        </div>
+        </form>
       </Show>
     </div>
   );
@@ -499,10 +505,11 @@ function LineageBlock(props: {
             {(entry) => (
               <button
                 type="button"
+                aria-label={`Navigate to ${entry.id}${entry.preview ? `: ${entry.preview}` : ''}`}
                 onClick={() => props.onNav?.(entry.id)}
                 class="row-hover flex flex-col items-start gap-0.5 rounded-md hairline bg-surface px-2.5 py-1.5 text-left transition-colors hover:border-accent/40 hover:bg-surface-elevated"
               >
-                <IdLink id={entry.id} onClick={() => props.onNav?.(entry.id)} />
+                <span class="font-mono text-[11.5px] text-text-muted">{entry.id}</span>
                 <Show when={entry.preview}>
                   <span class="line-clamp-1 text-[11.5px] text-text-muted">
                     {entry.preview}

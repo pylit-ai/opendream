@@ -1,4 +1,4 @@
-import { createEffect, on, onMount } from 'solid-js';
+import { createEffect, on } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
 
 /**
@@ -29,11 +29,6 @@ export function useDeepLink(paramName: string = 'id'): {
       replace: false,
     });
   };
-
-  // No-op effect to keep import-on-mount semantics consistent.
-  onMount(() => {
-    void selected();
-  });
 
   return { selected, setSelected, searchParams };
 }

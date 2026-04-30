@@ -54,7 +54,7 @@ export default function WorkspacesRoute(): JSX.Element {
       { label: 'Total', value: total },
       { label: 'Healthy', value: ok, tone: ok > 0 ? 'ok' : 'default' },
       { label: 'With service', value: withService },
-      { label: 'Stale / missing / broken', value: degraded, tone: degraded > 0 ? 'warn' : 'default' },
+      { label: 'Degraded', value: degraded, tone: degraded > 0 ? 'warn' : 'default' },
     ];
   };
 

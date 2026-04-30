@@ -59,9 +59,14 @@ class AutoReviewerConfig:
     run_in_dream_cycle: bool = True
     cooldown_hours: int = 168
     # low_confidence_age rule
+    # Threshold matches the queue trigger ceiling in _build_review_queue
+    # (< 0.65). The queue itself only emits items below that threshold, so
+    # the rule will only see already-flagged candidates. Default age window
+    # is 0 — the queue's own filter is the gate; operators can tighten via
+    # auto-config if they want only aged items auto-resolved.
     low_confidence_age_enabled: bool = True
-    low_confidence_threshold: float = 0.45
-    low_confidence_min_age_hours: int = 24
+    low_confidence_threshold: float = 0.65
+    low_confidence_min_age_hours: int = 0
     # contested_dominant rule
     contested_dominant_enabled: bool = False
     contested_min_delta: float = 0.25
@@ -72,6 +77,8 @@ class AutoReviewerConfig:
     # unused_retrieval rule
     unused_retrieval_enabled: bool = False
     retrieval_grace_hours: int = 48
+    # fallback_mark_stale rule (off by default; preview force-enables for operator scan)
+    fallback_mark_stale_enabled: bool = False
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> AutoReviewerConfig:
@@ -97,6 +104,10 @@ class AutoReviewerConfig:
         "unused_retrieval": (
             "unused_retrieval_enabled",
             ("retrieval_grace_hours",),
+        ),
+        "fallback_mark_stale": (
+            "fallback_mark_stale_enabled",
+            (),
         ),
     }
 
@@ -368,12 +379,75 @@ class UnusedRetrievalRule:
         )
 
 
-# Bundled rules. Add new rules here as they are implemented per plan.md.
+class FallbackMarkStaleRule:
+    """Catch-all: defer any queue item no specific rule matched.
+
+    Recommends ``mark_stale`` so the operator can apply a deferring action
+    in bulk. Off by default in real auto-runs (operator opts in via config),
+    but the recommendation preview force-enables it so every queue row gets
+    a suggestion the operator can accept or override.
+    """
+
+    rule_id = "fallback_mark_stale"
+    description = (
+        "Catch-all: defer items no specific rule matched. "
+        "Recommends mark_stale so the queue does not grow unbounded. "
+        "Operator can override per-row."
+    )
+
+    _ACTION_PRIORITY = ("mark_stale", "escalate", "attach_note", "suppress")
+
+    def _pick_action(self, ctx: RuleContext) -> str | None:
+        actions = ctx.queue_item.get("actions") or []
+        for candidate in self._ACTION_PRIORITY:
+            if candidate in actions:
+                return candidate
+        return None
+
+    def applies(self, ctx: RuleContext) -> bool:
+        if not ctx.config.fallback_mark_stale_enabled:
+            return False
+        item_type = str(ctx.queue_item.get("queue_item_type") or "")
+        if item_type not in {
+            "contested_memory",
+            "low_confidence_memory",
+            "large_diff",
+            "failed_run",
+            "suspicious_retrieval",
+        }:
+            return False
+        return self._pick_action(ctx) is not None
+
+    def propose(self, ctx: RuleContext) -> RuleProposal:
+        action = self._pick_action(ctx) or "mark_stale"
+        verb = {
+            "mark_stale": "Defer (mark stale)",
+            "escalate": "Escalate",
+            "attach_note": "Attach note",
+            "suppress": "Suppress",
+        }.get(action, action)
+        return RuleProposal(
+            rule_id=self.rule_id,
+            action=action,
+            rationale=(
+                f"{verb} — no specific rule matched. Keeps the queue bounded; "
+                "reverse with approve / suppress if needed."
+            ),
+            snapshot={
+                "queue_item_type": ctx.queue_item.get("queue_item_type"),
+                "available_actions": list(ctx.queue_item.get("actions") or []),
+                "chosen_action": action,
+            },
+        )
+
+
+# Bundled rules. Order matters: specific rules first, fallback last.
 DEFAULT_RULES: tuple[Rule, ...] = (
     LowConfidenceAgeRule(),
     ContestedDominantRule(),
     StaleDiffRule(),
     UnusedRetrievalRule(),
+    FallbackMarkStaleRule(),
 )
 
 
@@ -431,6 +505,180 @@ def in_cooldown(
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return now - dt < timedelta(hours=config.cooldown_hours)
+
+
+def force_all_enabled(cfg: AutoReviewerConfig | None = None) -> AutoReviewerConfig:
+    """Return a copy of `cfg` with every rule + the global toggle enabled.
+
+    Used by recommendation preview endpoints so rules that are off-by-default
+    can still surface their suggestions for operator review.
+    """
+    base = cfg or AutoReviewerConfig()
+    payload: dict[str, Any] = {}
+    for f in AutoReviewerConfig.__dataclass_fields__:
+        if f.startswith("_"):
+            continue
+        payload[f] = getattr(base, f)
+    payload["enabled"] = True
+    for _rule_id, (enabled_field, _thresholds) in AutoReviewerConfig._RULE_FIELDS.items():
+        payload[enabled_field] = True
+    return AutoReviewerConfig.from_dict(payload)
+
+
+def preview_recommendations(
+    store: MemoryStore,
+    *,
+    config: AutoReviewerConfig | None = None,
+    now: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Run every rule against the current review queue without persisting.
+
+    Returns:
+        {
+            "items": [{queue_item_id, rule_id, action, rationale, snapshot}],
+            "by_action": {"approve": N, "suppress": N, ...},
+            "by_rule": {<rule_id>: N, ...},
+            "total_items": N,
+            "total_recommended": N,
+        }
+
+    Cooldown is honored — items in cooldown for a rule do not get a
+    recommendation from that rule.
+    """
+    from . import observability
+
+    cfg = force_all_enabled(config)
+    index = observability.load_or_build_index(store)
+    entities = index.get("entities", {})
+    queue = entities.get("reviews", [])
+    proposals = apply_rules(
+        queue=queue,
+        memories=entities.get("memories", []),
+        runs=entities.get("runs", []),
+        retrievals=entities.get("retrievals", []),
+        contexts=entities.get("contexts", []),
+        config=cfg,
+        cooldown=load_cooldown(store),
+        now=now,
+    )
+    items: list[dict[str, Any]] = []
+    by_action: dict[str, int] = {}
+    by_rule: dict[str, int] = {}
+    for queue_item, proposal in proposals:
+        items.append(
+            {
+                "queue_item_id": str(queue_item.get("queue_item_id") or queue_item.get("id")),
+                "queue_item_type": queue_item.get("queue_item_type"),
+                "object_type": queue_item.get("object_type"),
+                "object_id": queue_item.get("object_id"),
+                "rule_id": proposal.rule_id,
+                "action": proposal.action,
+                "rationale": proposal.rationale,
+                "snapshot": proposal.snapshot,
+            }
+        )
+        by_action[proposal.action] = by_action.get(proposal.action, 0) + 1
+        by_rule[proposal.rule_id] = by_rule.get(proposal.rule_id, 0) + 1
+    return {
+        "items": items,
+        "by_action": by_action,
+        "by_rule": by_rule,
+        "total_items": len(queue),
+        "total_recommended": len(items),
+    }
+
+
+def apply_recommendations(
+    store: MemoryStore,
+    *,
+    config: AutoReviewerConfig | None = None,
+    now: datetime | str | None = None,
+    rule_ids: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Apply every recommendation produced by ``preview_recommendations``.
+
+    Persists ReviewDecisions + paired Annotations identical to a real
+    auto-reviewer run, but with all rules enabled regardless of operator
+    config. ``rule_ids`` optionally restricts to a subset of rules.
+    """
+    from . import observability
+
+    cfg = force_all_enabled(config)
+    if isinstance(now, str):
+        try:
+            now_dt = parse_timestamp(now)
+        except Exception:
+            now_dt = utc_now()
+    else:
+        now_dt = now or utc_now()
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=UTC)
+    started_at = to_iso(now_dt)
+    index = observability.load_or_build_index(store)
+    entities = index.get("entities", {})
+    rules = (
+        tuple(r for r in DEFAULT_RULES if r.rule_id in set(rule_ids))
+        if rule_ids is not None
+        else DEFAULT_RULES
+    )
+    proposals = apply_rules(
+        queue=entities.get("reviews", []),
+        memories=entities.get("memories", []),
+        runs=entities.get("runs", []),
+        retrievals=entities.get("retrievals", []),
+        contexts=entities.get("contexts", []),
+        config=cfg,
+        cooldown=load_cooldown(store),
+        rules=rules,
+        now=now_dt,
+    )
+    by_rule: dict[str, int] = {}
+    decisions: list[dict[str, Any]] = []
+    for item, proposal in proposals:
+        rationale = (
+            f"auto-reviewer:{proposal.rule_id} (operator-applied recommendation): "
+            f"{proposal.rationale} snapshot={json.dumps(proposal.snapshot, sort_keys=True)}"
+        )
+        actor = f"auto-reviewer:{proposal.rule_id}"
+        decision_now = to_iso(now_dt)
+        try:
+            decision = observability.create_review_decision(
+                store,
+                queue_item_type=str(item.get("queue_item_type", "review")),
+                queue_item_id=str(item.get("queue_item_id") or item.get("id")),
+                action=proposal.action,
+                rationale=rationale,
+                actor=actor,
+                now=decision_now,
+            )
+            decisions.append(decision)
+            by_rule[proposal.rule_id] = by_rule.get(proposal.rule_id, 0) + 1
+            try:
+                observability.create_annotation(
+                    store,
+                    object_type=str(item.get("object_type", "memory")),
+                    object_id=str(item.get("object_id") or item.get("queue_item_id")),
+                    actor=actor,
+                    label="auto-resolved",
+                    note=rationale,
+                    now=decision_now,
+                )
+            except Exception:
+                pass
+        except Exception:
+            continue
+    if decisions:
+        observability.invalidate_index_cache(store)
+    finished_at = to_iso(utc_now())
+    return {
+        "status": "applied",
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "applied_count": len(decisions),
+        "proposed_count": len(proposals),
+        "by_rule": by_rule,
+        "decisions": decisions,
+    }
 
 
 def apply_rules(

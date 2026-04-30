@@ -188,7 +188,7 @@ function AdvancedTab(props: { overview: OverviewPayload | undefined; onRefetch: 
             </Collapsible.Trigger>
             <Collapsible.Content>
               <pre class="mt-2 overflow-x-auto rounded bg-surface-elevated p-3 text-2xs text-text-muted">
-                {JSON.stringify(ov().readiness, null, 2)}
+                {JSON.stringify(readinessOf(ov()), null, 2)}
               </pre>
             </Collapsible.Content>
           </Collapsible>
@@ -288,28 +288,56 @@ function DreamControls(props: { onAfter: () => void }): JSX.Element {
         )}
       </Show>
       <Show when={dream()}>
-        {(r) => (
-          <div class="rounded-md hairline bg-surface px-3 py-2 text-[11.5px] text-text">
-            <span class="font-mono text-text-subtle">dream:</span>{' '}
-            {r().status}
-            <Show when={r().reason}>
-              {' '}· <span class="text-warn">{r().reason}</span>
-            </Show>
-            {' '}· phases [{(r().phases ?? []).join(', ')}]
-            <Show when={r().duration_ms !== undefined}>
-              {' '}· {r().duration_ms}ms
-            </Show>
-            <Show when={r().appended_events !== undefined}>
-              {' '}· appended {r().appended_events}
-            </Show>
-            <Show when={r().gathered_rows !== undefined}>
-              {' '}· gathered {r().gathered_rows}
-            </Show>
-            <Show when={r().run_id}>
-              {' '}· <span class="font-mono">{r().run_id}</span>
-            </Show>
-          </div>
-        )}
+        {(r) => {
+          const idle =
+            r().reason === 'no-episodes' || r().reason === 'insufficient-signal';
+          const reasonLabel =
+            r().reason === 'no-episodes'
+              ? 'no transcripts'
+              : r().reason === 'insufficient-signal'
+                ? 'no new signal'
+                : r().reason ?? null;
+          const explainer = idle
+            ? r().reason === 'no-episodes'
+              ? 'No agent transcripts to consume yet. Click "Ingest transcripts" or run more agent sessions.'
+              : 'Pipeline ran and found nothing new — healthy idle state. New events appear once agents generate fresh sessions.'
+            : null;
+          return (
+            <div class="flex flex-col gap-1.5 rounded-md hairline bg-surface px-3 py-2 text-[11.5px]">
+              <div class="flex flex-wrap items-center gap-2 text-text">
+                <Chip variant={idle ? 'neutral' : 'ok'}>
+                  {idle ? 'Idle cycle' : (r().status ?? 'completed')}
+                </Chip>
+                <Show when={reasonLabel}>
+                  <span class="font-mono text-[10.5px] text-text-subtle">{reasonLabel}</span>
+                </Show>
+                <span class="text-text-subtle">·</span>
+                <span class="font-mono text-[10.5px] text-text-muted">
+                  {(r().phases ?? []).join(' → ') || '—'}
+                </span>
+                <Show when={r().duration_ms !== undefined}>
+                  <span class="text-text-subtle">·</span>
+                  <span class="font-mono text-[10.5px] text-text-muted">{r().duration_ms}ms</span>
+                </Show>
+                <Show when={r().appended_events !== undefined}>
+                  <span class="text-text-subtle">·</span>
+                  <span class="font-mono text-[10.5px] text-text-muted">
+                    appended {r().appended_events}
+                  </span>
+                </Show>
+                <Show when={r().gathered_rows !== undefined}>
+                  <span class="text-text-subtle">·</span>
+                  <span class="font-mono text-[10.5px] text-text-muted">
+                    gathered {r().gathered_rows}
+                  </span>
+                </Show>
+              </div>
+              <Show when={explainer}>
+                <p class="text-[11px] leading-snug text-text-muted">{explainer}</p>
+              </Show>
+            </div>
+          );
+        }}
       </Show>
     </div>
   );
@@ -500,6 +528,11 @@ const RULE_LABELS: Record<string, { name: string; explainer: string }> = {
     explainer:
       'Suppresses `suspicious_retrieval` items that no downstream context assembly references after the grace window. If a retrieval was never used, the suspicion is moot. Off by default.',
   },
+  fallback_mark_stale: {
+    name: 'Fallback · defer (mark stale)',
+    explainer:
+      'Catch-all for queue items no specific rule matched. Recommends mark_stale so the queue stays bounded; operator can override per row. Off by default — turn on if you want a deterministic suggestion for every queue row.',
+  },
 };
 
 function AutomationRuleRow(props: {
@@ -515,6 +548,14 @@ function AutomationRuleRow(props: {
   );
   const [saving, setSaving] = createSignal(false);
   const [msg, setMsg] = createSignal('');
+  const isDirty = () =>
+    enabled() !== props.rule.enabled ||
+    JSON.stringify(thresholds()) !== JSON.stringify(props.rule.threshold_summary);
+  const handleReset = () => {
+    setEnabled(props.rule.enabled);
+    setThresholds({ ...props.rule.threshold_summary });
+    setMsg('');
+  };
 
   async function handleSave() {
     setSaving(true);
@@ -594,6 +635,15 @@ function AutomationRuleRow(props: {
         >
           {saving() ? 'Saving…' : 'Save'}
         </button>
+        <Show when={isDirty() && !saving()}>
+          <button
+            type="button"
+            onClick={handleReset}
+            class="rounded-md hairline px-3 py-1 text-[11px] text-text-muted hover:bg-surface-elevated hover:text-text"
+          >
+            Reset
+          </button>
+        </Show>
         <Show when={msg()}>
           <span class="text-[11px] text-text-muted">{msg()}</span>
         </Show>
@@ -800,7 +850,9 @@ export default function SettingsRoute(): JSX.Element {
           </KTabs.Content>
 
           <KTabs.Content value="about" class="pt-6">
-            <AboutTab meta={meta()} />
+            <Show when={!meta.loading} fallback={<p class="text-[12.5px] text-text-muted">Loading version info…</p>}>
+              <AboutTab meta={meta()} />
+            </Show>
           </KTabs.Content>
         </KTabs>
       </Show>

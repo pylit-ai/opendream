@@ -171,7 +171,7 @@ export function DiffView(props: DiffViewProps): JSX.Element {
                     >
                       {row.afterLine ?? ''}
                     </td>
-                    <td class={cn('whitespace-pre-wrap break-words pl-2 pr-3', accent)}>
+                    <td class={cn('max-w-0 whitespace-pre-wrap break-words pl-2 pr-3', accent)}>
                       <span class="select-none pr-2 text-text-subtle">{sign}</span>
                       {row.text}
                     </td>

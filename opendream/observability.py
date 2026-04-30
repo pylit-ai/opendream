@@ -169,10 +169,22 @@ def _build_overview_lite(store: MemoryStore) -> dict[str, Any]:
         }
         generated_at = timestamp
 
-    # Slim recent_runs: strip heavy fields from list rows
+    # 446-observability-perf: slim recent_runs — strip heavy fields and cap summary string.
     raw_runs = (overview.get("recent_runs") or [])[:5]
-    _RUN_LITE_STRIP = frozenset({"phase_traces", "operations", "candidates", "explanations"})
-    recent_runs = [{k: v for k, v in run.items() if k not in _RUN_LITE_STRIP} for run in raw_runs]
+    _RUN_LITE_STRIP = frozenset({
+        "phase_traces", "operations", "candidates", "explanations",
+        "diff_text", "phase_durations",
+    })
+    def _lite_run_row(run: dict[str, Any]) -> dict[str, Any]:
+        row = {k: v for k, v in run.items() if k not in _RUN_LITE_STRIP}
+        # summary may be a large dict or a long string — keep only short string form
+        s = run.get("summary")
+        if isinstance(s, dict):
+            row.pop("summary", None)
+        elif isinstance(s, str) and len(s) > 200:
+            row["summary"] = s[:200]
+        return row
+    recent_runs = [_lite_run_row(run) for run in raw_runs]
 
     # Slim recent_sessions: keep only cheap fields
     raw_sessions = (overview.get("recent_sessions") or [])[:5]
@@ -258,10 +270,9 @@ def _iter_observability_source_paths(store: MemoryStore) -> list[Path]:
         store.audit_boundary_dir,
     ]
     # Spec 446: per-directory stat instead of per-file rglob.
-    # The audit dirs contain thousands of append-only files; their parent
-    # directory mtime bumps whenever a file is added/removed/replaced, which
-    # is what we need for cache invalidation. Recursing every file was
-    # ~480ms for 14k files in dogfood workspaces.
+    # The audit dirs contain thousands of append-only files. append_jsonl()
+    # touches the parent directory after same-file appends, so directory stats
+    # remain a cheap invalidation signal without recursing every audit file.
     for root in roots:
         if not root.exists():
             continue

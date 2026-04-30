@@ -440,7 +440,9 @@ export default function GraphRoute(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => toggleType(t)}
-                  class="transition-opacity duration-150 focus-visible:outline-none"
+                  aria-label={`${activeTypes().has(t) ? 'Hide' : 'Show'} ${t} nodes`}
+                  aria-pressed={activeTypes().has(t)}
+                  class="transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 rounded"
                   style={{ opacity: activeTypes().has(t) || activeTypes().size === 0 ? 1 : 0.45 }}
                 >
                   <Chip variant={activeTypes().has(t) ? 'accent' : 'neutral'}>{t}</Chip>
@@ -459,7 +461,9 @@ export default function GraphRoute(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => toggleEdgeKind(k)}
-                  class="transition-opacity duration-150"
+                  aria-label={`${activeEdgeKinds().has(k) ? 'Hide' : 'Show'} ${k.replace(/_/g, ' ')} edges`}
+                  aria-pressed={activeEdgeKinds().has(k)}
+                  class="transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 rounded"
                   style={{ opacity: activeEdgeKinds().has(k) || activeEdgeKinds().size === 0 ? 1 : 0.45 }}
                 >
                   <Chip variant={activeEdgeKinds().has(k) ? 'accent' : 'neutral'}>
@@ -508,11 +512,18 @@ export default function GraphRoute(): JSX.Element {
               onNodeClick={(id, type) => setSelectedNode({ id, type })}
               onCounts={setCounts}
             />
-            <div class="pointer-events-none absolute right-4 top-4 rounded-md bg-surface-elevated/85 px-3 py-1.5 text-[11px] text-text-muted hairline backdrop-blur">
-              <span class="font-mono text-text">{counts().nodes}</span> nodes ·{' '}
-              <span class="font-mono text-text">{counts().edges}</span> edges
-              <Show when={counts().total > counts().nodes}>
-                <span class="text-text-subtle"> · of {counts().total} fetched</span>
+            <div class="pointer-events-none absolute right-4 top-4 flex flex-col items-end gap-1.5">
+              <div class="rounded-md bg-surface-elevated/85 px-3 py-1.5 text-[11px] text-text-muted hairline backdrop-blur">
+                <span class="font-mono text-text">{counts().nodes}</span> nodes ·{' '}
+                <span class="font-mono text-text">{counts().edges}</span> edges
+                <Show when={counts().total > counts().nodes}>
+                  <span class="text-text-subtle"> · of {counts().total} fetched</span>
+                </Show>
+              </div>
+              <Show when={counts().nodes > 0 && counts().edges === 0}>
+                <div class="rounded-md bg-surface-elevated/85 px-3 py-1.5 text-[11px] text-text-subtle hairline backdrop-blur max-w-[220px] text-right">
+                  No edges visible. Try increasing Depth or selecting a Focus node to see relationships.
+                </div>
               </Show>
             </div>
             <SlideOver

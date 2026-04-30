@@ -39,6 +39,7 @@ export function FilterBar(props: FilterBarProps): JSX.Element {
             />
             <input
               type="text"
+              aria-label={props.searchPlaceholder ?? 'Search'}
               value={props.search ?? ''}
               placeholder={props.searchPlaceholder ?? 'Search'}
               onInput={(e) => props.onSearchChange?.(e.currentTarget.value)}
@@ -70,6 +71,7 @@ export function FilterBar(props: FilterBarProps): JSX.Element {
         <Show when={props.sortOptions && props.onSortChange}>
           <label class="relative inline-flex h-9 items-center">
             <select
+              aria-label="Sort order"
               value={props.sort ?? ''}
               onChange={(e) => props.onSortChange?.(e.currentTarget.value)}
               class="h-9 appearance-none rounded-md bg-surface pl-3 pr-7 text-xs text-text-muted hairline transition-colors duration-150 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"

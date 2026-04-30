@@ -1,4 +1,5 @@
 import { createResource, createSignal, For, Show, type JSX } from 'solid-js';
+import { useNavigate } from '@solidjs/router';
 import { FileText } from 'lucide-solid';
 import { getContext, getSessions } from '~/api/client';
 import { cachedFetch } from '~/lib/cache';
@@ -55,6 +56,7 @@ function extractContextEntries(sessions: { items: unknown[] }): ContextEntry[] {
 }
 
 export default function ContextRoute(): JSX.Element {
+  const navigate = useNavigate();
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
 
   const [sessionsData, { refetch: refetchSessions }] = createResource(() =>
@@ -206,9 +208,14 @@ export default function ContextRoute(): JSX.Element {
                                   <div class="flex flex-col gap-1">
                                     <For each={selected}>
                                       {(id) => (
-                                        <div class="rounded-md hairline bg-surface-elevated px-3 py-1.5 text-[12px]">
-                                          <span class="font-mono text-text">{id}</span>
-                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => navigate(`/memories/explorer?id=${encodeURIComponent(id)}`)}
+                                          class="rounded-md hairline bg-surface-elevated px-3 py-1.5 text-[12px] text-left w-full hover:bg-surface transition-colors"
+                                          title={`Open memory ${id} in Explorer`}
+                                        >
+                                          <span class="font-mono text-accent hover:underline">{id}</span>
+                                        </button>
                                       )}
                                     </For>
                                   </div>

@@ -426,7 +426,7 @@ export default function SessionsRoute(): JSX.Element {
                     <Show
                       when={events().length > 0}
                       fallback={
-                        <p class="text-[12.5px] text-text-muted">No timeline events recorded.</p>
+                        <p class="text-[12.5px] text-text-muted">No timeline events recorded for this session. Events appear when the agent assembles memory context.</p>
                       }
                     >
                       <section class="flex flex-col gap-1">

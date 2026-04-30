@@ -102,7 +102,7 @@ function routeForKind(kind: string, id: string): string {
   const k = kind.toLowerCase();
   if (k.includes('retrieval')) return `/retrievals?id=${encodeURIComponent(id)}`;
   if (k.includes('session')) return `/sessions?id=${encodeURIComponent(id)}`;
-  if (k.includes('memory')) return `/memories?id=${encodeURIComponent(id)}`;
+  if (k.includes('memory')) return `/memories/explorer?id=${encodeURIComponent(id)}`;
   return `/runs?id=${encodeURIComponent(id)}`;
 }
 
@@ -236,23 +236,23 @@ export default function OverviewRoute(): JSX.Element {
       {
         label: 'Durable',
         value: durable,
-        onClick: () => navigate('/memories?status=active'),
+        onClick: () => navigate('/memories/explorer?status=active'),
       },
       {
         label: 'Contested',
         value: contested,
         tone: contested > 0 ? 'warn' : 'default',
-        onClick: () => navigate('/memories?status=contested'),
+        onClick: () => navigate('/memories/explorer?status=contested'),
       },
       {
         label: 'Learned active',
         value: learned,
-        onClick: () => navigate('/memories?status=learned'),
+        onClick: () => navigate('/memories/explorer?status=learned'),
       },
       {
         label: 'Recently pruned',
         value: pruned,
-        onClick: () => navigate('/memories?status=pruned'),
+        onClick: () => navigate('/memories/explorer?status=pruned'),
       },
       {
         label: 'Retrievals',
@@ -292,7 +292,7 @@ export default function OverviewRoute(): JSX.Element {
               <Show when={next().nextAction}>
                 <span class="text-text-subtle">·</span>
                 <span class="text-text">Next</span>
-                <span class="text-xs">{next().nextAction}</span>
+                <span class="max-w-xs truncate text-xs" title={next().nextAction}>{next().nextAction}</span>
               </Show>
             </div>
           </Show>

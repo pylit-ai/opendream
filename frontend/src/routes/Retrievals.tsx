@@ -412,19 +412,17 @@ export default function RetrievalsRoute(): JSX.Element {
                     </section>
                   </Show>
 
-                  <Show when={excluded.length > 0 || true}>
-                    <section class="flex flex-col gap-1">
-                      <h4 class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">
-                        Raw retrieval
-                      </h4>
-                      <RawFormattedView
-                        content={JSON.stringify(item, null, 2)}
-                        language="json"
-                        storageKey="retrieval-raw"
-                        defaultMode="raw"
-                      />
-                    </section>
-                  </Show>
+                  <section class="flex flex-col gap-1">
+                    <h4 class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">
+                      Raw retrieval
+                    </h4>
+                    <RawFormattedView
+                      content={JSON.stringify(item, null, 2)}
+                      language="json"
+                      storageKey="retrieval-raw"
+                      defaultMode="raw"
+                    />
+                  </section>
                   <Show when={assemblyOrder.length > 0}>
                     <section class="flex flex-col gap-2">
                       <h4 class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">

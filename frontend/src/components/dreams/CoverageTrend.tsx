@@ -6,9 +6,9 @@ const SERIES: Array<[
   string,
   string,
 ]> = [
-  ['explicit_events', 'Explicit events', '#14b8a6'],
-  ['transcript_episodes', 'Transcripts', '#6366f1'],
-  ['automation', 'Automation', '#f59e0b'],
+  ['explicit_events', 'Explicit events', 'rgb(var(--c-success))'],
+  ['transcript_episodes', 'Transcripts', 'rgb(var(--c-accent))'],
+  ['automation', 'Automation', 'rgb(var(--c-warn))'],
 ];
 
 export function CoverageTrend(props: { buckets: DreamCoverageBucket[] }): JSX.Element {

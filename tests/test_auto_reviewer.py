@@ -1,8 +1,10 @@
 """Unit tests for opendream.auto_reviewer (spec 445)."""
 from __future__ import annotations
 
+import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from opendream.auto_reviewer import (
     AutoReviewerConfig,
@@ -10,9 +12,13 @@ from opendream.auto_reviewer import (
     LowConfidenceAgeRule,
     StaleDiffRule,
     UnusedRetrievalRule,
+    apply_recommendations,
     apply_rules,
     in_cooldown,
 )
+from opendream.models import Annotation, MemoryRecord, ReviewDecision
+from opendream.observability import index_observability, load_or_build_index
+from opendream.storage import MemoryStore
 
 
 def _now() -> datetime:
@@ -66,11 +72,16 @@ class LowConfidenceAgeRuleTests(unittest.TestCase):
         self.assertGreaterEqual(proposal.snapshot["age_hours"], 47.0)
 
     def test_skips_recent_low_confidence_memory(self) -> None:
-        # Below threshold but too young
+        # Below threshold but too young — only fires when operator explicitly
+        # configures a non-zero min_age. Default age gate is 0 since the
+        # queue trigger (< 0.65 confidence) already pre-filters.
+        cfg = AutoReviewerConfig(low_confidence_min_age_hours=24)
         item = _queue_item("mem_young")
         memory = _memory("mem_young", confidence=0.3, age_hours=2)
         self.assertEqual(
-            apply_rules(queue=[item], memories=[memory], runs=[], retrievals=[], now=_now()),
+            apply_rules(
+                queue=[item], memories=[memory], runs=[], retrievals=[], config=cfg, now=_now()
+            ),
             [],
         )
 
@@ -577,6 +588,80 @@ class UnusedRetrievalRuleTests(unittest.TestCase):
             now=_now(),
         )
         self.assertEqual(proposals, [])
+
+
+class ApplyRecommendationsPersistenceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="auto-reviewer-")
+        self.workspace = Path(self.tmp.name) / "workspace"
+        self.workspace.mkdir(parents=True, exist_ok=True)
+        self.store = MemoryStore(self.workspace)
+        self.store.initialize(store_kind="project")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_apply_recommendations_invalidates_stale_disk_index_after_same_day_append(self) -> None:
+        now = _iso(_now())
+        record = MemoryRecord(
+            memory_id="mem_apply_stale",
+            type="semantic_fact",
+            scope="project",
+            title="Low confidence memory",
+            summary="Needs review",
+            body="Needs review",
+            status="active",
+            confidence=0.2,
+            salience=0.5,
+            source_event_ids=[],
+            supersedes=[],
+            conflicts_with=[],
+            valid_from=now,
+            valid_to=None,
+            access_count=0,
+            last_accessed_at=None,
+            created_at=_iso(_now() - timedelta(hours=72)),
+            updated_at=_iso(_now() - timedelta(hours=72)),
+        )
+        self.store.save_durable_records([record])
+
+        # Existing same-day files make apply append to files instead of creating
+        # them. That was the stale on-disk index path.
+        self.store.append_review_decision(
+            ReviewDecision(
+                id="review-existing",
+                queue_item_type="low_confidence_memory",
+                queue_item_id="mem_already_resolved",
+                action="approve",
+                rationale="seed",
+                actor="operator",
+                created_at=now,
+            )
+        )
+        self.store.append_annotation(
+            Annotation(
+                id="annotation-existing",
+                object_type="memory",
+                object_id="mem_already_resolved",
+                actor="operator",
+                label="seed",
+                score=None,
+                note="seed",
+                created_at=now,
+            )
+        )
+
+        baseline = index_observability(self.store, now=now)
+        self.assertEqual(
+            [item["queue_item_id"] for item in baseline["entities"]["reviews"]],
+            ["mem_apply_stale"],
+        )
+
+        result = apply_recommendations(self.store, now=now)
+        self.assertEqual(result["applied_count"], 1)
+
+        rebuilt = load_or_build_index(self.store)
+        self.assertEqual(rebuilt["entities"]["reviews"], [])
 
 
 if __name__ == "__main__":

@@ -187,6 +187,47 @@ export const submitReviewDecision = (subpath: string, payload: ReviewDecisionReq
     body: JSON.stringify(payload),
   });
 
+export interface ReviewRecommendation {
+  queue_item_id: string;
+  queue_item_type?: string;
+  object_type?: string;
+  object_id?: string;
+  rule_id: string;
+  action: string;
+  rationale: string;
+  snapshot?: Record<string, unknown>;
+}
+
+export interface ReviewRecommendationsResponse {
+  items: ReviewRecommendation[];
+  by_action: Record<string, number>;
+  by_rule: Record<string, number>;
+  total_items: number;
+  total_recommended: number;
+}
+
+export const getReviewRecommendations = async (): Promise<ReviewRecommendationsResponse | null> => {
+  try {
+    return await api<ReviewRecommendationsResponse>('/api/reviews/recommendations');
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+};
+
+export interface ApplyRecommendationsResponse {
+  status: string;
+  applied_count: number;
+  proposed_count: number;
+  by_rule: Record<string, number>;
+}
+
+export const applyReviewRecommendations = (rule_ids?: string[]) =>
+  api<ApplyRecommendationsResponse>('/api/reviews/recommendations/apply', {
+    method: 'POST',
+    body: JSON.stringify(rule_ids ? { rule_ids } : {}),
+  });
+
 export const setSemanticDreamMode = (payload: SemanticDreamModeRequest) =>
   api<unknown>('/api/semantic-dream-mode', { method: 'POST', body: JSON.stringify(payload) });
 

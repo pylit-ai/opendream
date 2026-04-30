@@ -1,5 +1,5 @@
-import { createResource, createSignal, For, Show, type JSX } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
+import { createEffect, createResource, createSignal, For, on, Show, type JSX } from 'solid-js';
+import { useNavigate, useSearchParams } from '@solidjs/router';
 import { Moon } from 'lucide-solid';
 import {
   getDreamCoverage,
@@ -37,9 +37,34 @@ function statusVariant(s: string | undefined): ChipVariant {
 function reasonVariant(r: string | undefined): ChipVariant {
   if (!r) return 'neutral';
   const v = r.toLowerCase();
-  if (v === 'no-episodes' || v.includes('insufficient')) return 'warn';
+  // Idle reasons aren't failures — they mean the pipeline ran and correctly
+  // found nothing new to consume. Render neutral, not warn.
+  if (v === 'no-episodes' || v.includes('insufficient')) return 'neutral';
   if (v.includes('fail') || v.includes('error')) return 'danger';
   return 'neutral';
+}
+
+const IDLE_REASONS = new Set(['no-episodes', 'insufficient-signal']);
+
+function isIdleReason(r: string | undefined): boolean {
+  return r != null && IDLE_REASONS.has(r);
+}
+
+function reasonLabel(r: string | undefined): string {
+  if (!r) return '—';
+  if (r === 'no-episodes') return 'no transcripts';
+  if (r === 'insufficient-signal') return 'no new signal';
+  return r;
+}
+
+function reasonExplainer(r: string | undefined): string | null {
+  if (r === 'no-episodes') {
+    return 'No agent transcripts available. Run "Ingest transcripts" to pull from ~/.claude/projects (or pass --from for Codex/Cursor/Gemini).';
+  }
+  if (r === 'insufficient-signal') {
+    return 'Dream completed but found no new content to consume. Pipeline is healthy and idle — it will produce new events once your agents generate fresh sessions.';
+  }
+  return null;
 }
 
 function durationOf(r: DreamCycle): string {
@@ -54,6 +79,7 @@ function durationOf(r: DreamCycle): string {
 
 export default function DreamsRoute(): JSX.Element {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [cycles, { refetch }] = createResource<DreamCycleListResponse>(() =>
     cachedFetch('dream-cycles', () => getDreamCycles({ limit: 200 }), 15_000),
   );
@@ -69,6 +95,37 @@ export default function DreamsRoute(): JSX.Element {
   const [lastIngest, setLastIngest] = createSignal<TranscriptsIngestResult | null>(null);
   const [err, setErr] = createSignal<string | null>(null);
   const [selected, setSelected] = createSignal<DreamCycle | null>(null);
+  const [expandedGroups, setExpandedGroups] = createSignal<Set<string>>(new Set());
+  const [collapseIdle, setCollapseIdle] = createSignal(true);
+
+  const toggleGroup = (key: string): void => {
+    const next = new Set(expandedGroups());
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setExpandedGroups(next);
+  };
+
+  const openCycle = (c: DreamCycle | null): void => {
+    setSelected(c);
+    setSearchParams({ id: c ? c.run_id ?? undefined : undefined }, { replace: false });
+  };
+
+  // ?id= deep-link: open SlideOver for the referenced cycle once data loads
+  createEffect(
+    on(
+      () => [cycles(), searchParams.id] as const,
+      ([data, id]) => {
+        const wanted = typeof id === 'string' ? id : null;
+        if (!wanted) {
+          if (selected() !== null) setSelected(null);
+          return;
+        }
+        const items = (data?.items ?? []) as DreamCycle[];
+        const found = items.find((c) => c.run_id === wanted || c.id === wanted) ?? null;
+        if (found && selected()?.run_id !== found.run_id) setSelected(found);
+      },
+    ),
+  );
   const [showAllPhases, setShowAllPhases] = createSignal(false);
   const phaseLimit = () => (showAllPhases() ? dreams().length : 5);
   const observedPhases = (): string[] => {
@@ -106,31 +163,130 @@ export default function DreamsRoute(): JSX.Element {
 
   const skipped = (): DreamCycle[] =>
     dreams().filter((r) => (r.status ?? '').toLowerCase() === 'skipped');
+  const skippedFailures = (): DreamCycle[] =>
+    skipped().filter((r) => !isIdleReason(r.reason));
+  const idleStreakLength = (): number => {
+    let n = 0;
+    for (const r of dreams()) {
+      if ((r.status ?? '').toLowerCase() === 'skipped' && isIdleReason(r.reason)) n += 1;
+      else break;
+    }
+    return n;
+  };
+  const idleStreakActive = (): boolean => idleStreakLength() >= 1;
+  const lastSignalTimestamp = (): string | undefined => {
+    for (const r of dreams()) {
+      const ts =
+        (r as { latest_episode_timestamp?: string }).latest_episode_timestamp ??
+        (r.summary as { latest_signal_timestamp?: string } | undefined)?.latest_signal_timestamp;
+      if (ts) return ts;
+    }
+    return undefined;
+  };
 
-  const columns: TableColumn<DreamCycle>[] = [
+  type IdleGroup = {
+    kind: 'idle-group';
+    key: string;
+    cycles: DreamCycle[];
+    reason: string | undefined;
+    firstTs: string | undefined;
+    lastTs: string | undefined;
+    totalMs: number;
+  };
+  type CycleRow = { kind: 'cycle'; cycle: DreamCycle };
+  type Row = CycleRow | IdleGroup;
+
+  const groupedRows = (): Row[] => {
+    const items = dreams();
+    if (!collapseIdle()) return items.map((c) => ({ kind: 'cycle', cycle: c }));
+    const expanded = expandedGroups();
+    const out: Row[] = [];
+    let i = 0;
+    while (i < items.length) {
+      const c = items[i]!;
+      const idle =
+        (c.status ?? '').toLowerCase() === 'skipped' && isIdleReason(c.reason);
+      if (!idle) {
+        out.push({ kind: 'cycle', cycle: c });
+        i += 1;
+        continue;
+      }
+      let j = i;
+      while (j < items.length) {
+        const n = items[j]!;
+        if (
+          (n.status ?? '').toLowerCase() !== 'skipped' ||
+          !isIdleReason(n.reason) ||
+          n.reason !== c.reason
+        ) break;
+        j += 1;
+      }
+      const run = items.slice(i, j);
+      const first = run[0]!;
+      const last = run[run.length - 1]!;
+      const key = `idle:${c.reason ?? 'unknown'}:${first.run_id}:${last.run_id}`;
+      if (run.length === 1 || expanded.has(key)) {
+        for (const x of run) out.push({ kind: 'cycle', cycle: x });
+      } else {
+        const totalMs = run.reduce(
+          (s, x) => s + (typeof x.duration_ms === 'number' ? x.duration_ms : 0),
+          0,
+        );
+        out.push({
+          kind: 'idle-group',
+          key,
+          cycles: run,
+          reason: c.reason,
+          firstTs: last.started_at,
+          lastTs: first.started_at,
+          totalMs,
+        });
+      }
+      i = j;
+    }
+    return out;
+  };
+
+  const collapsedCount = (): number => {
+    return groupedRows().reduce(
+      (n, r) => n + (r.kind === 'idle-group' ? r.cycles.length - 1 : 0),
+      0,
+    );
+  };
+
+  const columns: TableColumn<Row>[] = [
     {
       key: 'when',
       header: 'When',
       width: '150px',
-      render: (r) =>
-        r.started_at ? (
+      render: (row) => {
+        if (row.kind === 'idle-group') {
+          return (
+            <span class="text-xs text-text-muted" title={`${row.firstTs ?? ''} → ${row.lastTs ?? ''}`}>
+              {row.firstTs ? formatDate(row.firstTs) : '—'}
+              <span class="text-text-subtle"> → </span>
+              {row.lastTs ? formatDate(row.lastTs) : '—'}
+            </span>
+          );
+        }
+        const r = row.cycle;
+        return r.started_at ? (
           <span title={formatDateLong(r.started_at)} class="text-xs text-text">
             {formatDate(r.started_at)}
           </span>
         ) : (
           <span class="text-text-subtle">—</span>
-        ),
+        );
+      },
     },
     {
       key: 'mode',
       header: 'Mode',
       width: '110px',
-      render: (r) => {
-        const mode = String(
-          r.mode ??
-            r.type ??
-            'dream',
-        );
+      render: (row) => {
+        if (row.kind === 'idle-group') return <span class="text-text-subtle">—</span>;
+        const r = row.cycle;
+        const mode = String(r.mode ?? r.type ?? 'dream');
         return <Chip variant="neutral">{mode}</Chip>;
       },
     },
@@ -138,21 +294,39 @@ export default function DreamsRoute(): JSX.Element {
       key: 'status',
       header: 'Status',
       width: '120px',
-      render: (r) => <Chip variant={statusVariant(r.status)}>{r.status ?? '—'}</Chip>,
+      render: (row) => {
+        if (row.kind === 'idle-group') {
+          return <Chip variant="neutral">{`× ${row.cycles.length} idle`}</Chip>;
+        }
+        return <Chip variant={statusVariant(row.cycle.status)}>{row.cycle.status ?? '—'}</Chip>;
+      },
     },
     {
       key: 'reason',
       header: 'Reason',
       width: '160px',
-      render: (r) => {
-        const reason = r.reason;
-        return reason ? <Chip variant={reasonVariant(reason)}>{reason}</Chip> : <span class="text-text-subtle">—</span>;
+      render: (row) => {
+        const reason = row.kind === 'idle-group' ? row.reason : row.cycle.reason;
+        if (!reason) return <span class="text-text-subtle">—</span>;
+        return (
+          <Chip variant={reasonVariant(reason)}>
+            <span title={reasonExplainer(reason) ?? reason}>{reasonLabel(reason)}</span>
+          </Chip>
+        );
       },
     },
     {
       key: 'phases',
       header: 'Phases',
-      render: (r) => {
+      render: (row) => {
+        if (row.kind === 'idle-group') {
+          return (
+            <span class="text-[11px] text-text-muted">
+              No new signal across {row.cycles.length} consecutive cycles
+            </span>
+          );
+        }
+        const r = row.cycle;
         const phases = r.phases ?? [];
         return (
           <div class="min-w-[160px]">
@@ -170,16 +344,24 @@ export default function DreamsRoute(): JSX.Element {
       width: '90px',
       align: 'right',
       numeric: true,
-      render: (r) => <span class="font-mono text-xs text-text-muted">{durationOf(r)}</span>,
+      render: (row) => {
+        const txt =
+          row.kind === 'idle-group'
+            ? row.totalMs > 0
+              ? formatDuration(row.totalMs)
+              : '—'
+            : durationOf(row.cycle);
+        return <span class="font-mono text-xs text-text-muted">{txt}</span>;
+      },
     },
     {
       key: 'agent',
       header: 'Agent',
       width: '120px',
-      render: (r) => {
-        const ag = r.reporting_agent_label
-          ?? (r as { agent_id?: string }).agent_id
-          ?? '—';
+      render: (row) => {
+        if (row.kind === 'idle-group') return <span class="text-text-subtle">—</span>;
+        const r = row.cycle;
+        const ag = r.reporting_agent_label ?? (r as { agent_id?: string }).agent_id ?? '—';
         return <span class="font-mono text-[11px] text-text-muted">{ag}</span>;
       },
     },
@@ -187,21 +369,38 @@ export default function DreamsRoute(): JSX.Element {
       key: 'model',
       header: 'Model',
       width: '120px',
-      render: (r) => {
-        const mid = r.model_id || '—';
-        return <span class="font-mono text-[11px] text-text-muted">{mid}</span>;
+      render: (row) => {
+        if (row.kind === 'idle-group') return <span class="text-text-subtle">—</span>;
+        return <span class="font-mono text-[11px] text-text-muted">{row.cycle.model_id || '—'}</span>;
       },
     },
     {
       key: 'id',
       header: 'Run',
       width: '170px',
-      render: (r) => (
-        <div class="flex flex-col gap-0.5">
-          <IdLink id={r.run_id} onClick={() => setSelected(r)} />
-          <span class="line-clamp-2 text-[11px] text-text-muted">{r.narrative}</span>
-        </div>
-      ),
+      render: (row) => {
+        if (row.kind === 'idle-group') {
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleGroup(row.key);
+              }}
+              class="text-[11px] text-accent hover:underline"
+            >
+              Expand {row.cycles.length} cycles
+            </button>
+          );
+        }
+        const r = row.cycle;
+        return (
+          <div class="flex flex-col gap-0.5">
+            <IdLink id={r.run_id} onClick={() => openCycle(r)} />
+            <span class="line-clamp-2 text-[11px] text-text-muted">{r.narrative}</span>
+          </div>
+        );
+      },
     },
   ];
 
@@ -260,48 +459,86 @@ export default function DreamsRoute(): JSX.Element {
           )}
         </Show>
         <Show when={lastDream()}>
-          {(r) => (
-            <div class="rounded-md hairline bg-surface px-3 py-2 text-[11.5px] text-text">
-              <span class="font-mono text-text-subtle">dream:</span> {r().status}
-              <Show when={r().reason}>
-                {' '}· <span class="text-warn">{r().reason}</span>
-              </Show>{' '}
-              · phases [{(r().phases ?? []).join(', ')}]
-              <Show when={r().duration_ms !== undefined}> · {r().duration_ms}ms</Show>
-              <Show when={r().run_id}>
-                {' '}·{' '}
-                <button
-                  type="button"
-                  onClick={() => navigate(`/runs?id=${encodeURIComponent(r().run_id!)}`)}
-                  class="font-mono text-accent hover:underline"
-                >
-                  {r().run_id}
-                </button>
-              </Show>
-            </div>
-          )}
+          {(r) => {
+            const idle = () => isIdleReason(r().reason);
+            const headline = () => (idle() ? 'Idle cycle' : (r().status ?? 'completed'));
+            return (
+              <div class="flex flex-col gap-1.5 rounded-md hairline bg-surface px-3 py-2 text-[11.5px]">
+                <div class="flex flex-wrap items-center gap-2 text-text">
+                  <Chip variant={idle() ? 'neutral' : statusVariant(r().status)}>
+                    {headline()}
+                  </Chip>
+                  <Show when={r().reason}>
+                    <span class="font-mono text-[10.5px] text-text-subtle">
+                      {reasonLabel(r().reason)}
+                    </span>
+                  </Show>
+                  <span class="text-text-subtle">·</span>
+                  <span class="font-mono text-[10.5px] text-text-muted">
+                    {(r().phases ?? []).join(' → ') || '—'}
+                  </span>
+                  <Show when={r().duration_ms !== undefined}>
+                    <span class="text-text-subtle">·</span>
+                    <span class="font-mono text-[10.5px] text-text-muted">
+                      {r().duration_ms}ms
+                    </span>
+                  </Show>
+                  <Show when={r().run_id}>
+                    <span class="text-text-subtle">·</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/runs?id=${encodeURIComponent(r().run_id!)}`)}
+                      class="font-mono text-[10.5px] text-accent hover:underline"
+                    >
+                      {r().run_id}
+                    </button>
+                  </Show>
+                </div>
+                <Show when={reasonExplainer(r().reason)}>
+                  <p class="text-[11px] leading-snug text-text-muted">
+                    {reasonExplainer(r().reason)}
+                  </p>
+                </Show>
+              </div>
+            );
+          }}
         </Show>
       </section>
 
-      <Show when={skipped().length > 0}>
+      <Show when={idleStreakActive()}>
+        <section class="flex items-start gap-3 rounded-md border border-border-subtle bg-surface px-4 py-3">
+          <div class="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-text-subtle" />
+          <div class="flex flex-col gap-0.5">
+            <div class="text-[12.5px] font-medium text-text">
+              Idle and healthy · {idleStreakLength()} consecutive cycle
+              {idleStreakLength() === 1 ? '' : 's'} with no new signal
+            </div>
+            <p class="text-[11.5px] leading-snug text-text-muted">
+              The dream pipeline is running on schedule but nothing new to consume.
+              Transcripts last contained signal at{' '}
+              <Show
+                when={lastSignalTimestamp()}
+                fallback={<span class="font-mono">unknown</span>}
+              >
+                <span class="font-mono">{formatDateLong(lastSignalTimestamp()!)}</span>
+              </Show>
+              . New cycles will produce events automatically once your agents generate
+              fresh sessions. No action required.
+            </p>
+          </div>
+        </section>
+      </Show>
+
+      <Show when={skippedFailures().length > 0}>
         <section class="flex flex-col gap-2">
           <div class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">
-            Skipped cycles · {skipped().length}
+            Cycles that failed unexpectedly · {skippedFailures().length}
           </div>
-          <p class="text-[11.5px] text-text-muted">
-            These cycles short-circuited. Most common reasons:
-            <code class="mx-1 rounded bg-surface-elevated px-1 font-mono text-[11px]">no-episodes</code>
-            (transcripts not ingested) and
-            <code class="mx-1 rounded bg-surface-elevated px-1 font-mono text-[11px]">insufficient-signal</code>
-            (orientation tokens didn't match recent rows).
-          </p>
           <div class="flex flex-col">
-            <For each={skipped().slice(0, 5)}>
+            <For each={skippedFailures().slice(0, 5)}>
               {(r) => (
                 <div class="hairline-b flex items-center gap-3 py-1.5 text-[12px]">
-                  <Chip variant={reasonVariant((r as { reason?: string }).reason)}>
-                    {(r as { reason?: string }).reason ?? 'unknown'}
-                  </Chip>
+                  <Chip variant={reasonVariant(r.reason)}>{r.reason ?? 'unknown'}</Chip>
                   <span class="font-mono text-[11px] text-text-muted">{r.run_id}</span>
                   <Show when={r.started_at}>
                     <span class="text-[11px] text-text-subtle">{formatDate(r.started_at!)}</span>
@@ -315,10 +552,18 @@ export default function DreamsRoute(): JSX.Element {
 
       <section class="flex flex-wrap items-stretch gap-x-6 gap-y-2 rounded-md hairline bg-surface px-4 py-2.5">
         <CompactStat label="Cycles" value={formatNumber(dreams().length)} />
-        <CompactStat label="Success" value={`${successRate(dreams())}%`} tone={successRate(dreams()) >= 80 ? 'ok' : successRate(dreams()) >= 50 ? 'warn' : 'danger'} />
+        <CompactStat label="Success" value={`${successRate(dreams())}%`} tone={successRate(dreams()) >= 80 ? 'ok' : successRate(dreams()) > 50 ? 'warn' : successRate(dreams()) > 0 ? 'danger' : 'default'} />
         <CompactStat label="Avg duration" value={avgDuration(dreams())} />
         <CompactStat label="Approved" value={formatNumber(sumFunnel(dreams(), 'approved'))} />
-        <CompactStat label="Skipped" value={formatNumber(skipped().length)} tone={skipped().length === 0 ? 'ok' : 'warn'} />
+        <CompactStat
+          label="Idle"
+          value={formatNumber(skipped().length - skippedFailures().length)}
+        />
+        <CompactStat
+          label="Failed"
+          value={formatNumber(skippedFailures().length)}
+          tone={skippedFailures().length === 0 ? 'default' : 'danger'}
+        />
       </section>
 
       <section class="grid gap-3 lg:grid-cols-[1.1fr_1fr]">
@@ -360,7 +605,7 @@ export default function DreamsRoute(): JSX.Element {
               {(r) => (
                 <button
                   type="button"
-                  onClick={() => setSelected(r)}
+                  onClick={() => openCycle(r)}
                   class="row-hover grid grid-cols-[110px_1fr_70px] items-center gap-3 rounded px-1 text-left"
                   title={r.narrative ?? r.run_id}
                 >
@@ -375,8 +620,23 @@ export default function DreamsRoute(): JSX.Element {
       </Show>
 
       <section class="flex flex-col gap-2">
-        <div class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">
-          Recent dream cycles · {dreams().length}
+        <div class="flex items-center justify-between">
+          <div class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">
+            Recent dream cycles · {dreams().length}
+            <Show when={collapseIdle() && collapsedCount() > 0}>
+              <span class="ml-1 normal-case tracking-normal text-text-muted">
+                ({collapsedCount()} idle collapsed)
+              </span>
+            </Show>
+          </div>
+          <label class="flex items-center gap-1.5 text-[11px] text-text-muted">
+            <input
+              type="checkbox"
+              checked={collapseIdle()}
+              onChange={(e) => setCollapseIdle(e.currentTarget.checked)}
+            />
+            Collapse idle runs
+          </label>
         </div>
         <Show when={!cycles.loading} fallback={<SkeletonRows rows={6} />}>
           <Show
@@ -389,10 +649,13 @@ export default function DreamsRoute(): JSX.Element {
             }
           >
             <Table
-              items={dreams()}
+              items={groupedRows()}
               columns={columns}
-              rowKey={(r) => r.run_id}
-              onRowClick={(r) => setSelected(r)}
+              rowKey={(r) => (r.kind === 'cycle' ? r.cycle.run_id : r.key)}
+              onRowClick={(r) => {
+                if (r.kind === 'cycle') openCycle(r.cycle);
+                else toggleGroup(r.key);
+              }}
               empty={
                 <EmptyState
                   icon={Moon}
@@ -407,7 +670,7 @@ export default function DreamsRoute(): JSX.Element {
 
       <SlideOver
         open={selected() !== null}
-        onOpenChange={(o) => !o && setSelected(null)}
+        onOpenChange={(o) => !o && openCycle(null)}
         title="Dream cycle"
         description={selected()?.run_id}
       >
@@ -548,7 +811,9 @@ function DreamDetail(props: { run: DreamCycle; onOpenRun: (id: string) => void }
           {props.run.status ?? '—'}
         </Chip>
         <Show when={summaryDict().reason}>
-          <Chip variant="warn">{summaryDict().reason}</Chip>
+          <Chip variant={isIdleReason(summaryDict().reason as string) ? 'neutral' : 'warn'}>
+            {reasonLabel(summaryDict().reason as string)}
+          </Chip>
         </Show>
         <Show when={summaryDict().trigger_class}>
           <Chip variant="neutral">{summaryDict().trigger_class}</Chip>
