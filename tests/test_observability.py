@@ -385,10 +385,13 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         row = next(item for item in cycles["items"] if item["run_id"] == "semantic-dream-viz")
         self.assertEqual(row["funnel"]["generated"], 2)
         self.assertIn("narrative", row)
+        self.assertEqual(row["change_point"]["kind"], "material")
+        self.assertGreaterEqual(row["change_point"]["score"], 80)
         self.assertNotIn("diff_text", row)
 
         detail = self.get_json("/api/dream/cycles/semantic-dream-viz")
         self.assertEqual(detail["phase_durations"]["orient"], 10)
+        self.assertEqual(detail["change_point"], row["change_point"])
         self.assertIn("summary", detail)
 
         funnel = self.get_json("/api/dream/funnel?window=9999d")

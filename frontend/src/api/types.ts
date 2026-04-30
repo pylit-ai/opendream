@@ -165,6 +165,30 @@ export interface DreamPhaseTrace {
   [key: string]: unknown;
 }
 
+export interface DreamChangePointContributor {
+  key: string;
+  value?: string | number | boolean;
+  from?: unknown;
+  to?: unknown;
+  delta?: number;
+  phase?: string;
+  baseline_ms?: number;
+  duration_ms?: number;
+  ratio?: number;
+  weight?: number;
+  [key: string]: unknown;
+}
+
+export interface DreamChangePoint {
+  score: number;
+  severity: 'low' | 'medium' | 'high';
+  kind: 'material' | 'failure' | 'drift' | 'duration_anomaly' | 'noop';
+  label: string;
+  contributors: DreamChangePointContributor[];
+  signature: string;
+  is_noop: boolean;
+}
+
 export interface DreamCycle {
   run_id: string;
   type?: string;
@@ -179,6 +203,7 @@ export interface DreamCycle {
   tokens_used?: number;
   signal_source?: string;
   signal_row_count?: number;
+  appended_events?: number;
   funnel: DreamFunnelCounts;
   phase_durations: Record<string, number>;
   phase_traces?: DreamPhaseTrace[];
@@ -192,6 +217,7 @@ export interface DreamCycle {
   proposals_generated?: number;
   proposals_approved?: number;
   proposals_rejected?: number;
+  change_point?: DreamChangePoint;
   [key: string]: unknown;
 }
 

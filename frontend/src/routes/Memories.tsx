@@ -27,6 +27,8 @@ import { formatDate, formatDateLong } from '~/lib/format';
 import { MemoryInspector } from '~/components/MemoryInspector';
 import { IdLink } from '~/components/IdLink';
 import { cachedFetch } from '~/lib/cache';
+import { MemoryTypeChip } from '~/components/MemoryTypeChip';
+import { memoryPreview, memoryTypePresentation, stripMemoryPrefix } from '~/lib/memoryPresentation';
 
 function asPreview(v: unknown): string | undefined {
   if (v == null) return undefined;
@@ -74,7 +76,11 @@ function memoryColumns(onSelect: (id: string) => void): TableColumn<MemoryRecord
       key: 'type',
       header: 'Type',
       width: '110px',
-      render: (m) => <span class="text-xs text-text">{m.type ?? '—'}</span>,
+      render: (m) => (
+        <Show when={m.type} fallback={<span class="text-text-subtle">—</span>}>
+          <MemoryTypeChip type={m.type} />
+        </Show>
+      ),
     },
     {
       key: 'status',
@@ -87,7 +93,11 @@ function memoryColumns(onSelect: (id: string) => void): TableColumn<MemoryRecord
       header: 'Summary / preview',
       render: (m) => {
         const text = asPreview(m.summary) ?? asPreview(m.body) ?? '—';
-        return <span class="line-clamp-1 text-[12.5px] text-text">{text}</span>;
+        return (
+          <span class="line-clamp-1 text-[12.5px] text-text">
+            {stripMemoryPrefix(text, m.type)}
+          </span>
+        );
       },
     },
     {
@@ -314,7 +324,9 @@ function SurfaceDashboard(): JSX.Element {
                         class="row-hover grid grid-cols-[180px_1fr_50px] items-center gap-3 rounded px-1 py-1 text-left"
                         title={`Filter Explorer by type=${k}`}
                       >
-                        <span class="truncate font-mono text-[11px] text-text">{k}</span>
+                        <span class="truncate text-[11px] text-text">
+                          {memoryTypePresentation(k).label}
+                        </span>
                         <span class="relative h-3 overflow-hidden rounded-sm bg-surface-elevated">
                           <span
                             class="absolute inset-y-0 left-0 bg-accent"
@@ -348,6 +360,11 @@ function SurfaceDashboard(): JSX.Element {
               when={recent().length > 0}
               fallback={<p class="text-[11px] text-text-muted">No recently updated memories.</p>}
             >
+              <div class="grid grid-cols-[120px_110px_1fr] gap-3 px-1 pb-1 text-[10px] uppercase tracking-[0.08em] text-text-subtle">
+                <span>Updated</span>
+                <span>Type</span>
+                <span>Summary / preview</span>
+              </div>
               <ul class="flex flex-col">
                 <For each={recent().slice(0, 8)}>
                   {(h) => (
@@ -358,19 +375,25 @@ function SurfaceDashboard(): JSX.Element {
                           h.memory_id &&
                           navigate(`/memories/explorer?id=${encodeURIComponent(h.memory_id)}`)
                         }
-                        class="row-hover hairline-b grid w-full grid-cols-[170px_1fr_100px] items-center gap-3 px-1 py-1.5 text-left"
-                        title={asPreview(h.summary) ?? asPreview(h.title) ?? h.memory_id}
+                        class="row-hover hairline-b grid w-full grid-cols-[120px_110px_1fr] items-center gap-3 px-1 py-1.5 text-left"
+                        title={
+                          memoryPreview(asPreview(h.summary), asPreview(h.title), h.type) ??
+                          h.memory_id
+                        }
                       >
-                        <span class="font-mono text-[10.5px] text-text-subtle">
-                          {h.memory_id ?? '—'}
+                        <span
+                          class="font-mono text-[11px] tabular-nums text-text-muted"
+                          title={h.updated_at ? formatDateLong(h.updated_at) : undefined}
+                        >
+                          {h.updated_at ? formatDate(h.updated_at) : '—'}
                         </span>
-                        <span class="line-clamp-1 text-[12px] text-text">
-                          {h.title ?? h.summary ?? '—'}
-                        </span>
-                        <span class="text-right">
+                        <span>
                           <Show when={h.type}>
-                            <Chip variant="neutral">{h.type}</Chip>
+                            <MemoryTypeChip type={h.type} />
                           </Show>
+                        </span>
+                        <span class="line-clamp-1 min-w-0 text-[12.5px] text-text">
+                          {memoryPreview(asPreview(h.summary), asPreview(h.title), h.type) ?? '—'}
                         </span>
                       </button>
                     </li>

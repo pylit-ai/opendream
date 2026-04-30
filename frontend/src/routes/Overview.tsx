@@ -16,6 +16,8 @@ import { ErrorState } from '~/components/ErrorState';
 import { EmptyState } from '~/components/EmptyState';
 import { formatDate, formatDateLong, formatDuration } from '~/lib/format';
 import { cachedFetch } from '~/lib/cache';
+import { MemoryTypeChip } from '~/components/MemoryTypeChip';
+import { memoryPreview } from '~/lib/memoryPresentation';
 
 interface MemorySurface {
   durable_active_total?: number;
@@ -419,11 +421,11 @@ export default function OverviewRoute(): JSX.Element {
                             }}
                             class="cursor-pointer rounded transition-opacity hover:opacity-80"
                           >
-                            <Chip variant="neutral">{h.type}</Chip>
+                            <MemoryTypeChip type={h.type} />
                           </span>
                         </Show>
                         <span class="line-clamp-1 flex-1 text-[12.5px] text-text">
-                          {asPreview(h.summary) ?? asPreview(h.title) ?? '—'}
+                          {memoryPreview(asPreview(h.summary), asPreview(h.title), h.type) ?? '—'}
                         </span>
                         <Show when={h.updated_at}>
                           <span class="font-mono text-[11px] text-text-subtle">

@@ -11,6 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from .dream_change_points import score_dream_change_points
 from .dream_narrative import synthesize_dream_narrative
 from .memory_quality import LOW_SIGNAL_TYPES, analyze_memory_quality
 from .models import Annotation, ObservabilityConsolidationOp, PhaseTrace, ReviewDecision
@@ -754,6 +755,7 @@ def query_dream_cycles(
             )
         ]
     rows.sort(key=lambda row: str(row.get("ended_at") or row.get("started_at") or row.get("run_id")), reverse=True)
+    rows = score_dream_change_points(rows, newest_first=True)
     return {"total": len(rows), "items": rows[:limit]}
 
 
@@ -761,7 +763,21 @@ def get_dream_cycle(index: dict[str, Any], run_id: str) -> dict[str, Any] | None
     run = _find_row_by_id(index["entities"]["runs"], "run_id", run_id)
     if not run or not _is_dream_run(run):
         return None
-    return _build_dream_cycle_projection(run, include_detail=True)
+    rows = [
+        _build_dream_cycle_projection(candidate, include_detail=False)
+        for candidate in index["entities"]["runs"]
+        if _is_dream_run(candidate)
+    ]
+    rows.sort(key=lambda row: str(row.get("ended_at") or row.get("started_at") or row.get("run_id")), reverse=True)
+    scored = score_dream_change_points(rows, newest_first=True)
+    change_point = next(
+        (row.get("change_point") for row in scored if str(row.get("run_id")) == run_id),
+        None,
+    )
+    detail = _build_dream_cycle_projection(run, include_detail=True)
+    if isinstance(change_point, dict):
+        detail["change_point"] = change_point
+    return detail
 
 
 def build_dream_funnel(index: dict[str, Any], *, window: str = "7d") -> dict[str, Any]:
@@ -858,6 +874,7 @@ def _build_dream_cycle_projection(run: dict[str, Any], *, include_detail: bool) 
         "tokens_used": summary.get("tokens_used"),
         "signal_source": summary.get("latest_signal_source") or summary.get("trigger_class"),
         "signal_row_count": _int(summary.get("signal_row_count") or summary.get("gathered_rows")),
+        "appended_events": _int(summary.get("appended_events") or summary.get("staged_events")),
         "funnel": _dream_funnel_counts(summary),
         "phase_durations": phase_durations,
         "phase_traces": phase_traces if include_detail else [],

@@ -15,6 +15,7 @@ export interface TableProps<T> {
   columns: TableColumn<T>[];
   onRowClick?: (item: T) => void;
   rowKey?: (item: T, index: number) => string | number;
+  rowClass?: (item: T, index: number) => string | undefined;
   empty?: JSX.Element;
 }
 
@@ -70,6 +71,7 @@ export function Table<T>(props: TableProps<T>): JSX.Element {
                     'row-hover hairline-b text-text',
                     props.onRowClick &&
                       'cursor-pointer hover:bg-[color-mix(in_oklab,rgb(var(--c-surface-elevated))_70%,transparent)]',
+                    props.rowClass?.(item, idx()),
                   )}
                   data-row-key={
                     props.rowKey ? props.rowKey(item, idx()) : idx()

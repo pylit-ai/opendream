@@ -45,6 +45,7 @@ function reasonVariant(r: string | undefined): ChipVariant {
 }
 
 const IDLE_REASONS = new Set(['no-episodes', 'insufficient-signal']);
+const SIGNAL_BUCKET_SIZE = 10;
 
 function isIdleReason(r: string | undefined): boolean {
   return r != null && IDLE_REASONS.has(r);
@@ -75,6 +76,131 @@ function durationOf(r: DreamCycle): string {
   const b = Date.parse(r.ended_at);
   if (Number.isNaN(a) || Number.isNaN(b)) return '—';
   return formatDuration(Math.max(0, b - a));
+}
+
+function shortId(id: string | undefined): string {
+  if (!id) return '—';
+  if (id.length <= 14) return id;
+  return `${id.slice(0, 10)}…${id.slice(-4)}`;
+}
+
+function cycleMode(r: DreamCycle): string {
+  return String(r.mode ?? r.type ?? 'dream');
+}
+
+function numericField(r: DreamCycle, key: string): number {
+  const direct = r[key];
+  if (typeof direct === 'number') return direct;
+  const summary = r.summary;
+  if (summary && typeof summary[key] === 'number') return summary[key];
+  return 0;
+}
+
+function funnelValue(r: DreamCycle, key: keyof DreamCycle['funnel']): number {
+  return typeof r.funnel?.[key] === 'number' ? r.funnel[key] : 0;
+}
+
+function effectCount(r: DreamCycle): number {
+  return (
+    funnelValue(r, 'generated') +
+    funnelValue(r, 'approved') +
+    funnelValue(r, 'created') +
+    numericField(r, 'learned_context_superseded') +
+    numericField(r, 'proposals_rejected') +
+    numericField(r, 'appended_events')
+  );
+}
+
+function hasMaterialEffect(r: DreamCycle): boolean {
+  if (r.change_point) return r.change_point.kind === 'material';
+  return effectCount(r) > 0;
+}
+
+function isFailureCycle(r: DreamCycle): boolean {
+  if (r.change_point) return r.change_point.kind === 'failure';
+  return (r.status ?? '').toLowerCase() === 'skipped' && !isIdleReason(r.reason);
+}
+
+function isNoopCycle(r: DreamCycle): boolean {
+  if (r.change_point) return r.change_point.is_noop;
+  return !hasMaterialEffect(r) && !isFailureCycle(r);
+}
+
+function changePointLabel(r: DreamCycle): string | undefined {
+  return r.change_point?.is_noop ? undefined : r.change_point?.label;
+}
+
+function changePointKind(r: DreamCycle): string | undefined {
+  return r.change_point?.kind;
+}
+
+function changePointVariant(r: DreamCycle): ChipVariant {
+  const cp = r.change_point;
+  if (!cp) return 'accent';
+  if (cp.kind === 'material') return 'ok';
+  if (cp.kind === 'failure') return 'danger';
+  if (cp.severity === 'high') return 'danger';
+  if (cp.severity === 'medium') return 'accent';
+  return 'neutral';
+}
+
+function scoreText(r: DreamCycle): string {
+  const score = r.change_point?.score;
+  return typeof score === 'number' ? String(score) : '—';
+}
+
+function scoreExplainer(r: DreamCycle): string {
+  const cp = r.change_point;
+  if (!cp) return 'No backend score available; row uses local fallback grouping.';
+  return `${cp.kind.replace('_', ' ')} · ${cp.severity} · ${cp.label}`;
+}
+
+function noopLabel(r: DreamCycle): string {
+  if (r.change_point?.label) return r.change_point.label;
+  if ((r.status ?? '').toLowerCase() === 'skipped' && isIdleReason(r.reason)) {
+    return reasonExplainer(r.reason) ?? reasonLabel(r.reason);
+  }
+  return 'No memory changes, staged events, failures, drift, or phase anomalies.';
+}
+
+function rowAccentClass(r: DreamCycle): string | undefined {
+  const cp = r.change_point;
+  if (!cp) {
+    if (hasMaterialEffect(r)) return 'border-l-2 border-l-success bg-[color-mix(in_oklab,rgb(var(--c-success))_5%,transparent)]';
+    if (isFailureCycle(r)) return 'border-l-2 border-l-danger bg-[color-mix(in_oklab,rgb(var(--c-danger))_5%,transparent)]';
+    return undefined;
+  }
+  if (cp.kind === 'noop') return undefined;
+  if (cp.kind === 'material') return 'border-l-2 border-l-success bg-[color-mix(in_oklab,rgb(var(--c-success))_5%,transparent)]';
+  if (cp.kind === 'failure') return 'border-l-2 border-l-danger bg-[color-mix(in_oklab,rgb(var(--c-danger))_5%,transparent)]';
+  return 'border-l-2 border-l-accent bg-[color-mix(in_oklab,rgb(var(--c-accent))_5%,transparent)]';
+}
+
+function signalBucket(r: DreamCycle): string {
+  const count = typeof r.signal_row_count === 'number' ? r.signal_row_count : 0;
+  const start = Math.floor(count / SIGNAL_BUCKET_SIZE) * SIGNAL_BUCKET_SIZE;
+  const end = start + SIGNAL_BUCKET_SIZE - 1;
+  return `${start}-${end}`;
+}
+
+function signalLabel(r: DreamCycle): string {
+  const count = typeof r.signal_row_count === 'number' ? r.signal_row_count : 0;
+  return `${formatNumber(count)} transcripts`;
+}
+
+function phaseSignature(r: DreamCycle): string {
+  return (r.phases ?? []).join('>');
+}
+
+function effectSignature(r: DreamCycle): string {
+  if (r.change_point?.signature) return r.change_point.signature;
+  return [
+    cycleMode(r),
+    (r.status ?? '').toLowerCase(),
+    r.reason ?? '',
+    signalBucket(r),
+    phaseSignature(r),
+  ].join('|');
 }
 
 export default function DreamsRoute(): JSX.Element {
@@ -184,17 +310,22 @@ export default function DreamsRoute(): JSX.Element {
     return undefined;
   };
 
-  type IdleGroup = {
-    kind: 'idle-group';
+  type EffectGroup = {
+    kind: 'effect-group';
     key: string;
     cycles: DreamCycle[];
     reason: string | undefined;
+    label: string;
+    mode: string;
+    signal: string;
+    latestRunId: string | undefined;
+    oldestRunId: string | undefined;
     firstTs: string | undefined;
     lastTs: string | undefined;
     totalMs: number;
   };
-  type CycleRow = { kind: 'cycle'; cycle: DreamCycle };
-  type Row = CycleRow | IdleGroup;
+  type CycleRow = { kind: 'cycle'; cycle: DreamCycle; change?: string };
+  type Row = CycleRow | EffectGroup;
 
   const groupedRows = (): Row[] => {
     const items = dreams();
@@ -204,39 +335,47 @@ export default function DreamsRoute(): JSX.Element {
     let i = 0;
     while (i < items.length) {
       const c = items[i]!;
-      const idle =
-        (c.status ?? '').toLowerCase() === 'skipped' && isIdleReason(c.reason);
-      if (!idle) {
-        out.push({ kind: 'cycle', cycle: c });
+      if (!isNoopCycle(c)) {
+        out.push({ kind: 'cycle', cycle: c, change: changePointLabel(c) });
         i += 1;
         continue;
       }
+      const signature = effectSignature(c);
       let j = i;
       while (j < items.length) {
         const n = items[j]!;
-        if (
-          (n.status ?? '').toLowerCase() !== 'skipped' ||
-          !isIdleReason(n.reason) ||
-          n.reason !== c.reason
-        ) break;
+        if (!isNoopCycle(n) || effectSignature(n) !== signature) break;
         j += 1;
       }
       const run = items.slice(i, j);
       const first = run[0]!;
       const last = run[run.length - 1]!;
-      const key = `idle:${c.reason ?? 'unknown'}:${first.run_id}:${last.run_id}`;
+      const key = `effect:${signature}:${first.run_id}:${last.run_id}`;
       if (run.length === 1 || expanded.has(key)) {
-        for (const x of run) out.push({ kind: 'cycle', cycle: x });
+        for (let offset = 0; offset < run.length; offset += 1) {
+          const x = run[offset]!;
+          const next = items[i + offset + 1];
+          const changed =
+            !x.change_point && next && isNoopCycle(x) && signalBucket(x) !== signalBucket(next)
+              ? `${signalLabel(next)} -> ${signalLabel(x)}`
+              : undefined;
+          out.push({ kind: 'cycle', cycle: x, change: changed });
+        }
       } else {
         const totalMs = run.reduce(
           (s, x) => s + (typeof x.duration_ms === 'number' ? x.duration_ms : 0),
           0,
         );
         out.push({
-          kind: 'idle-group',
+          kind: 'effect-group',
           key,
           cycles: run,
           reason: c.reason,
+          label: noopLabel(c),
+          mode: cycleMode(c),
+          signal: signalLabel(c),
+          latestRunId: first.run_id,
+          oldestRunId: last.run_id,
           firstTs: last.started_at,
           lastTs: first.started_at,
           totalMs,
@@ -249,10 +388,14 @@ export default function DreamsRoute(): JSX.Element {
 
   const collapsedCount = (): number => {
     return groupedRows().reduce(
-      (n, r) => n + (r.kind === 'idle-group' ? r.cycles.length - 1 : 0),
+      (n, r) => n + (r.kind === 'effect-group' ? r.cycles.length - 1 : 0),
       0,
     );
   };
+  const highSignalCycles = (): DreamCycle[] =>
+    dreams().filter((r) => (r.change_point?.score ?? 0) >= 45 && !r.change_point?.is_noop);
+  const topChangePoint = (): DreamCycle | undefined =>
+    highSignalCycles().slice().sort((a, b) => (b.change_point?.score ?? 0) - (a.change_point?.score ?? 0))[0];
 
   const columns: TableColumn<Row>[] = [
     {
@@ -260,7 +403,7 @@ export default function DreamsRoute(): JSX.Element {
       header: 'When',
       width: '150px',
       render: (row) => {
-        if (row.kind === 'idle-group') {
+        if (row.kind === 'effect-group') {
           return (
             <span class="text-xs text-text-muted" title={`${row.firstTs ?? ''} → ${row.lastTs ?? ''}`}>
               {row.firstTs ? formatDate(row.firstTs) : '—'}
@@ -284,29 +427,67 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Mode',
       width: '110px',
       render: (row) => {
-        if (row.kind === 'idle-group') return <span class="text-text-subtle">—</span>;
+        if (row.kind === 'effect-group') return <Chip variant="neutral">{row.mode}</Chip>;
         const r = row.cycle;
-        const mode = String(r.mode ?? r.type ?? 'dream');
-        return <Chip variant="neutral">{mode}</Chip>;
+        return <Chip variant="neutral">{cycleMode(r)}</Chip>;
       },
     },
     {
       key: 'status',
-      header: 'Status',
+      header: 'Change',
       width: '120px',
       render: (row) => {
-        if (row.kind === 'idle-group') {
-          return <Chip variant="neutral">{`× ${row.cycles.length} idle`}</Chip>;
+        if (row.kind === 'effect-group') {
+          return <Chip variant="neutral">{`collapsed × ${row.cycles.length}`}</Chip>;
         }
+        const kind = changePointKind(row.cycle);
+        if (kind && kind !== 'noop') return <Chip variant={changePointVariant(row.cycle)}>{kind.replace('_', ' ')}</Chip>;
+        if (hasMaterialEffect(row.cycle)) return <Chip variant="ok">material</Chip>;
+        if (isFailureCycle(row.cycle)) return <Chip variant="danger">failure</Chip>;
+        if (row.change) return <Chip variant="accent">drift</Chip>;
         return <Chip variant={statusVariant(row.cycle.status)}>{row.cycle.status ?? '—'}</Chip>;
       },
     },
     {
-      key: 'reason',
-      header: 'Reason',
-      width: '160px',
+      key: 'score',
+      header: 'Score',
+      width: '78px',
+      align: 'right',
+      numeric: true,
       render: (row) => {
-        const reason = row.kind === 'idle-group' ? row.reason : row.cycle.reason;
+        if (row.kind === 'effect-group') {
+          return <span class="font-mono text-[11px] text-text-subtle">0</span>;
+        }
+        return (
+          <span class="font-mono text-[11px] text-text-muted" title={scoreExplainer(row.cycle)}>
+            {scoreText(row.cycle)}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'reason',
+      header: 'Rationale',
+      width: '260px',
+      render: (row) => {
+        if (row.kind === 'effect-group') {
+          return (
+            <div class="flex flex-col gap-0.5 text-[11px] text-text-muted">
+              <span class="text-text">No change detected across {row.cycles.length} equivalent cycles.</span>
+              <span class="line-clamp-1">
+                {row.label} Same signature: {row.mode}, {row.signal}, same phases.
+              </span>
+            </div>
+          );
+        }
+        if (row.cycle.change_point && !row.cycle.change_point.is_noop) {
+          return (
+            <span class="line-clamp-2 text-[11px] text-text" title={scoreExplainer(row.cycle)}>
+              {row.cycle.change_point.label}
+            </span>
+          );
+        }
+        const reason = row.cycle.reason;
         if (!reason) return <span class="text-text-subtle">—</span>;
         return (
           <Chip variant={reasonVariant(reason)}>
@@ -319,11 +500,14 @@ export default function DreamsRoute(): JSX.Element {
       key: 'phases',
       header: 'Phases',
       render: (row) => {
-        if (row.kind === 'idle-group') {
+        if (row.kind === 'effect-group') {
           return (
-            <span class="text-[11px] text-text-muted">
-              No new signal across {row.cycles.length} consecutive cycles
-            </span>
+            <div class="flex flex-col gap-0.5 text-[11px] text-text-muted">
+              <span>{row.signal} steady across {row.cycles.length} no-op cycles</span>
+              <span class="font-mono text-[10.5px] text-text-subtle">
+                {(row.cycles[0]?.phases ?? []).join(' -> ') || '—'}
+              </span>
+            </div>
           );
         }
         const r = row.cycle;
@@ -334,6 +518,9 @@ export default function DreamsRoute(): JSX.Element {
             <div class="mt-1 truncate font-mono text-[10.5px] text-text-muted">
               {phases.length > 0 ? phases.join(' -> ') : '—'}
             </div>
+            <Show when={row.change}>
+              <div class="mt-0.5 text-[10.5px] text-accent">{row.change}</div>
+            </Show>
           </div>
         );
       },
@@ -346,7 +533,7 @@ export default function DreamsRoute(): JSX.Element {
       numeric: true,
       render: (row) => {
         const txt =
-          row.kind === 'idle-group'
+          row.kind === 'effect-group'
             ? row.totalMs > 0
               ? formatDuration(row.totalMs)
               : '—'
@@ -359,7 +546,7 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Agent',
       width: '120px',
       render: (row) => {
-        if (row.kind === 'idle-group') return <span class="text-text-subtle">—</span>;
+        if (row.kind === 'effect-group') return <span class="text-text-subtle">—</span>;
         const r = row.cycle;
         const ag = r.reporting_agent_label ?? (r as { agent_id?: string }).agent_id ?? '—';
         return <span class="font-mono text-[11px] text-text-muted">{ag}</span>;
@@ -370,7 +557,7 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Model',
       width: '120px',
       render: (row) => {
-        if (row.kind === 'idle-group') return <span class="text-text-subtle">—</span>;
+        if (row.kind === 'effect-group') return <span class="text-text-subtle">—</span>;
         return <span class="font-mono text-[11px] text-text-muted">{row.cycle.model_id || '—'}</span>;
       },
     },
@@ -379,18 +566,23 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Run',
       width: '170px',
       render: (row) => {
-        if (row.kind === 'idle-group') {
+        if (row.kind === 'effect-group') {
           return (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleGroup(row.key);
-              }}
-              class="text-[11px] text-accent hover:underline"
-            >
-              Expand {row.cycles.length} cycles
-            </button>
+            <div class="flex flex-col gap-0.5">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleGroup(row.key);
+                }}
+                class="self-start text-[11px] text-accent hover:underline"
+              >
+                Expand {row.cycles.length} cycles
+              </button>
+              <span class="font-mono text-[10px] text-text-muted" title={`${row.latestRunId ?? ''} → ${row.oldestRunId ?? ''}`}>
+                {shortId(row.latestRunId)} → {shortId(row.oldestRunId)}
+              </span>
+            </div>
           );
         }
         const r = row.cycle;
@@ -619,13 +811,42 @@ export default function DreamsRoute(): JSX.Element {
         </section>
       </Show>
 
+      <Show when={highSignalCycles().length > 0}>
+        <section class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-accent/40 bg-[color-mix(in_oklab,rgb(var(--c-accent))_7%,rgb(var(--c-surface)))] px-4 py-3">
+          <div class="flex flex-col gap-0.5">
+            <div class="text-[10px] uppercase tracking-[0.08em] text-accent">Change points</div>
+            <div class="text-[12.5px] text-text">
+              {highSignalCycles().length} high-signal cycle{highSignalCycles().length === 1 ? '' : 's'} in this window
+            </div>
+            <Show when={topChangePoint()}>
+              {(r) => (
+                <div class="text-[11px] text-text-muted">
+                  Top: <span class="font-mono">{r().run_id}</span> · {r().change_point?.label}
+                </div>
+              )}
+            </Show>
+          </div>
+          <Show when={topChangePoint()}>
+            {(r) => (
+              <button
+                type="button"
+                onClick={() => openCycle(r())}
+                class="rounded-md hairline px-3 py-1.5 text-[11.5px] text-text hover:bg-surface-elevated"
+              >
+                Inspect top change
+              </button>
+            )}
+          </Show>
+        </section>
+      </Show>
+
       <section class="flex flex-col gap-2">
         <div class="flex items-center justify-between">
           <div class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">
             Recent dream cycles · {dreams().length}
             <Show when={collapseIdle() && collapsedCount() > 0}>
               <span class="ml-1 normal-case tracking-normal text-text-muted">
-                ({collapsedCount()} idle collapsed)
+                ({collapsedCount()} no-op collapsed)
               </span>
             </Show>
           </div>
@@ -635,9 +856,32 @@ export default function DreamsRoute(): JSX.Element {
               checked={collapseIdle()}
               onChange={(e) => setCollapseIdle(e.currentTarget.checked)}
             />
-            Collapse idle runs
+            Collapse no-op runs
           </label>
         </div>
+        <details class="rounded-md hairline bg-surface px-3 py-2 text-[11.5px] text-text-muted">
+          <summary class="cursor-pointer text-[11.5px] font-medium text-text">
+            Scoring rubric and collapsed groups
+          </summary>
+          <div class="mt-2 grid gap-2 sm:grid-cols-2">
+            <p>
+              <span class="font-medium text-text">Collapsed groups</span> appear as table rows labeled <span class="font-mono">collapsed × N</span>.
+              They are adjacent score-0 cycles with the same effect signature and expand from the Run column.
+            </p>
+            <p>
+              <span class="font-medium text-text">Scores</span> are deterministic review priority from 0 to 100. Zero means no observable dream effect.
+              Medium/high rows are candidates for inspection, not proof of a causal regime change.
+            </p>
+            <p>
+              <span class="font-medium text-text">Material</span> means memory actually changed: proposals generated or approved,
+              learned context created, superseded, or rejected. Query-family selection alone is not material.
+            </p>
+            <p>
+              <span class="font-medium text-text">Drift/anomaly</span> means transcript volume, mode/status/model/phases, funnel counts,
+              or phase duration changed versus recent cycles.
+            </p>
+          </div>
+        </details>
         <Show when={!cycles.loading} fallback={<SkeletonRows rows={6} />}>
           <Show
             when={!cycles.error}
@@ -652,6 +896,13 @@ export default function DreamsRoute(): JSX.Element {
               items={groupedRows()}
               columns={columns}
               rowKey={(r) => (r.kind === 'cycle' ? r.cycle.run_id : r.key)}
+              rowClass={(r) => {
+                if (r.kind === 'effect-group') return 'bg-[color-mix(in_oklab,rgb(var(--c-text-muted))_4%,transparent)]';
+                const accent = rowAccentClass(r.cycle);
+                if (accent) return accent;
+                if (r.change) return 'border-l-2 border-l-accent bg-[color-mix(in_oklab,rgb(var(--c-accent))_5%,transparent)]';
+                return undefined;
+              }}
               onRowClick={(r) => {
                 if (r.kind === 'cycle') openCycle(r.cycle);
                 else toggleGroup(r.key);
@@ -838,6 +1089,31 @@ function DreamDetail(props: { run: DreamCycle; onOpenRun: (id: string) => void }
       <section class="rounded-md hairline bg-surface p-3 text-[12.5px] leading-5 text-text">
         {props.run.narrative}
       </section>
+
+      <Show when={props.run.change_point && !props.run.change_point.is_noop ? props.run.change_point : null}>
+        {(cp) => (
+          <section class="flex flex-col gap-2 rounded-md border border-accent/40 bg-[color-mix(in_oklab,rgb(var(--c-accent))_7%,rgb(var(--c-surface)))] p-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <Chip variant={changePointVariant(props.run)}>{cp().kind.replace('_', ' ')}</Chip>
+              <span class="font-mono text-[11px] text-text-muted">score {cp().score}</span>
+              <span class="text-[11px] text-text-muted">{cp().severity}</span>
+            </div>
+            <p class="text-[12px] leading-5 text-text">{cp().label}</p>
+            <p class="text-[11px] leading-5 text-text-muted">
+              Score rationale: material memory changes and non-idle failures rank highest; drift and slow phases are medium-priority inspection candidates.
+            </p>
+            <div class="flex flex-wrap gap-1">
+              <For each={cp().contributors.slice(0, 4)}>
+                {(item) => (
+                  <span class="rounded-sm bg-surface-elevated px-1.5 py-0.5 font-mono text-[10px] text-text-muted" title={JSON.stringify(item)}>
+                    {item.key}
+                  </span>
+                )}
+              </For>
+            </div>
+          </section>
+        )}
+      </Show>
 
       <Show when={Object.keys(props.run.phase_durations ?? {}).length > 0}>
         <section class="flex flex-col gap-1.5">

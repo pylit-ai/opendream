@@ -15,6 +15,8 @@ import { IdLink } from '~/components/IdLink';
 import { MemoryInspector } from '~/components/MemoryInspector';
 import { RawFormattedView } from '~/components/RawFormattedView';
 import { cachedFetch, peek } from '~/lib/cache';
+import { MemoryTypeChip } from '~/components/MemoryTypeChip';
+import { stripMemoryPrefix } from '~/lib/memoryPresentation';
 
 function asPreview(v: unknown): string | undefined {
   if (v == null) return undefined;
@@ -331,6 +333,10 @@ export default function RetrievalsRoute(): JSX.Element {
                             });
                             const meta = (): { title?: string; summary?: string; type?: string } =>
                               cached ?? hydrated() ?? {};
+                            const titleText = (): string | undefined =>
+                              stripMemoryPrefix(asPreview(meta().title), meta().type);
+                            const summaryText = (): string | undefined =>
+                              stripMemoryPrefix(asPreview(meta().summary), meta().type);
                             return (
                               <div class="rounded-md hairline bg-surface-elevated px-3 py-2 text-[12px]">
                                 <div class="flex items-start justify-between gap-2">
@@ -341,24 +347,22 @@ export default function RetrievalsRoute(): JSX.Element {
                                         onClick={() => ex.memory_id && setMemFocus(ex.memory_id)}
                                       />
                                       <Show when={meta().type}>
-                                        <span class="rounded-full bg-surface px-1.5 py-px font-mono text-[10px] text-text-subtle">
-                                          {meta().type}
-                                        </span>
+                                        <MemoryTypeChip type={meta().type} />
                                       </Show>
                                     </div>
-                                    <Show when={asPreview(meta().title)}>
+                                    <Show when={titleText()}>
                                       <span class="line-clamp-1 text-[12px] font-medium text-text">
-                                        {asPreview(meta().title)}
+                                        {titleText()}
                                       </span>
                                     </Show>
                                     <Show
                                       when={
-                                        asPreview(meta().summary) &&
-                                        asPreview(meta().summary) !== asPreview(meta().title)
+                                        summaryText() &&
+                                        summaryText() !== titleText()
                                       }
                                     >
                                       <span class="line-clamp-1 text-[11.5px] text-text-muted">
-                                        {asPreview(meta().summary)}
+                                        {summaryText()}
                                       </span>
                                     </Show>
                                   </div>

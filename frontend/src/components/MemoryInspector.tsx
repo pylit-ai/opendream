@@ -7,6 +7,8 @@ import { CopyButton } from './CopyButton';
 import { SkeletonStats } from './Skeleton';
 import { formatDateLong } from '~/lib/format';
 import { RawFormattedView } from './RawFormattedView';
+import { MemoryTypeChip } from './MemoryTypeChip';
+import { stripMemoryPrefix } from '~/lib/memoryPresentation';
 
 export interface MemoryInspectorProps {
   memoryId: string;
@@ -123,7 +125,7 @@ export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
                 <div class="flex flex-wrap items-center gap-1.5">
                   <Chip variant={statusVariant(m.status)}>{m.status ?? 'unknown'}</Chip>
                   <Show when={m.type}>
-                    <Chip variant="neutral">{m.type}</Chip>
+                    <MemoryTypeChip type={m.type} />
                   </Show>
                   <Show when={typeof m.confidence === 'number'}>
                     <Chip variant="accent">conf {(m.confidence ?? 0).toFixed(2)}</Chip>
@@ -135,12 +137,14 @@ export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
 
                 <Show when={asText(m.title)}>
                   <h3 class="text-[15px] font-medium tracking-tight text-text">
-                    {asText(m.title)}
+                    {stripMemoryPrefix(asText(m.title), m.type)}
                   </h3>
                 </Show>
 
                 <Show when={asText(m.summary)}>
-                  <p class="text-[13px] leading-relaxed text-text">{asText(m.summary)}</p>
+                  <p class="text-[13px] leading-relaxed text-text">
+                    {stripMemoryPrefix(asText(m.summary), m.type)}
+                  </p>
                 </Show>
 
                 <Show when={asText(m.body)}>
