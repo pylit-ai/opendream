@@ -58,6 +58,12 @@ export interface ShowcaseReport {
   report_path?: string;
   selected_memory_ids?: string[];
   agent_snippet?: string;
+  agent_answers?: {
+    stateless?: ShowcaseAgentAnswer;
+    memory_assisted?: ShowcaseAgentAnswer;
+    comparison?: ShowcaseAnswerComparison;
+    [key: string]: unknown;
+  };
   objective?: {
     title?: string;
     description?: string;
@@ -97,6 +103,45 @@ export interface ShowcaseReport {
   };
   checks?: Record<string, { passed?: boolean; detail?: string; [key: string]: unknown }>;
   [key: string]: unknown;
+}
+
+export interface ShowcaseAnswerSignal {
+  key?: string;
+  label?: string;
+  passed?: boolean;
+  required_terms?: string[];
+  missing_terms?: string[];
+  forbidden_terms?: string[];
+  forbidden_matches?: string[];
+  requires_source_refs?: boolean;
+}
+
+export interface ShowcaseAnswerMeasurement {
+  score?: number;
+  passed?: boolean;
+  passed_count?: number;
+  total_count?: number;
+  signals?: ShowcaseAnswerSignal[];
+  selected_memory_count?: number;
+  source_ref_count?: number;
+}
+
+export interface ShowcaseAgentAnswer {
+  label?: string;
+  mode?: string;
+  input?: string;
+  selected_memory_ids?: string[];
+  answer?: string;
+  measurement?: ShowcaseAnswerMeasurement;
+}
+
+export interface ShowcaseAnswerComparison {
+  score_delta?: number;
+  stateless_passed?: boolean;
+  memory_assisted_passed?: boolean;
+  passed?: boolean;
+  stateless_missing_or_failed?: string[];
+  memory_assisted_passed_signals?: string[];
 }
 
 export interface ShowcaseResponse {

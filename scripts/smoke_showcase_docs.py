@@ -67,10 +67,29 @@ def validate_demo(payload: dict[str, Any]) -> None:
     passed_checks = [item.get("passed") for item in checks.values() if isinstance(item, dict)]
     if not isinstance(checks, dict) or not passed_checks or not all(passed_checks):
         raise AssertionError("demo checks did not all pass")
+    for check_name in ("negative_controls", "abstention", "memory_hurt"):
+        if not checks.get(check_name, {}).get("passed"):
+            raise AssertionError(f"demo check did not pass: {check_name}")
     if not payload.get("selected_memory_ids"):
         raise AssertionError("demo did not report selected memory ids")
+    if not all(case.get("passed") for case in payload.get("negative_controls", [])):
+        raise AssertionError("demo negative controls did not all pass")
+    if not all(case.get("abstained") for case in payload.get("abstention_cases", [])):
+        raise AssertionError("demo abstention cases did not all abstain")
+    if not all(case.get("harm_prevented_by_default") for case in payload.get("memory_hurt_cases", [])):
+        raise AssertionError("demo memory-hurt cases did not show default suppression")
     if "OpenDream found prior memory:" not in str(payload.get("agent_snippet", "")):
         raise AssertionError("demo did not emit agent-facing memory snippet")
+    agent_answers = payload.get("agent_answers", {})
+    stateless = agent_answers.get("stateless", {}) if isinstance(agent_answers, dict) else {}
+    memory_assisted = agent_answers.get("memory_assisted", {}) if isinstance(agent_answers, dict) else {}
+    comparison = agent_answers.get("comparison", {}) if isinstance(agent_answers, dict) else {}
+    if stateless.get("measurement", {}).get("passed"):
+        raise AssertionError("stateless baseline answer unexpectedly passed")
+    if not memory_assisted.get("measurement", {}).get("passed"):
+        raise AssertionError("memory-assisted answer did not pass measured answer checks")
+    if not comparison.get("passed"):
+        raise AssertionError("memory-assisted answer did not improve over stateless baseline")
     report_path = payload.get("report_path")
     if not report_path or not (REPO_ROOT / str(report_path)).exists():
         raise AssertionError("demo report_path missing or not written")
@@ -84,6 +103,15 @@ def validate_eval(payload: dict[str, Any]) -> None:
     checks = payload.get("checks", {})
     if not isinstance(checks, dict) or not all(checks.values()):
         raise AssertionError("eval checks did not all pass")
+    for check_name in ("negative_controls", "abstention", "memory_hurt"):
+        if not checks.get(check_name, {}).get("passed"):
+            raise AssertionError(f"eval check did not pass: {check_name}")
+    if not all(case.get("passed") for case in payload.get("negative_controls", [])):
+        raise AssertionError("eval negative controls did not all pass")
+    if not all(case.get("abstained") for case in payload.get("abstention_cases", [])):
+        raise AssertionError("eval abstention cases did not all abstain")
+    if not all(case.get("harm_prevented_by_default") for case in payload.get("memory_hurt_cases", [])):
+        raise AssertionError("eval memory-hurt cases did not show default suppression")
 
 
 def build_report(*, timeout_seconds: int) -> dict[str, Any]:
@@ -132,6 +160,7 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
             },
             "generated_at": demo.get("generated_at"),
             "agent_snippet": demo.get("agent_snippet"),
+            "answer_score_delta": demo.get("agent_answers", {}).get("comparison", {}).get("score_delta"),
             "global_cli": global_cli_status(),
         }
 

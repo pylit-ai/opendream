@@ -42,6 +42,22 @@ STALE_DAYS_THRESHOLD = 30
 LOW_CONFIDENCE_THRESHOLD = 0.4
 
 
+SCORE_COMPONENT_DESCRIPTIONS = {
+    "lexical": "query terms matched memory text",
+    "embedding": "semantic tokens matched memory text",
+    "type_prior": "memory type priority for retrieval",
+    "recency_prior": "updated memories receive more weight",
+    "scope_prior": "workspace/project scope priority",
+    "confidence": "record confidence",
+    "salience": "record salience",
+    "relation_adjustment": "relationship graph boost or penalty",
+    "procedural_query_boost": "workflow memory matched a task-shaped query",
+    "query_family_bonus": "learned-context query family matched the request",
+    "freshness_penalty": "learned context is past fresh_until",
+    "conflict_penalty": "learned context has a detected or overridden conflict",
+}
+
+
 def should_retrieve(
     query: str,
     *,
@@ -55,6 +71,169 @@ def should_retrieve(
     if len(query_tokens) < min_content_tokens:
         return False, f"too few content tokens ({len(query_tokens)} < {min_content_tokens})"
     return True, ""
+
+
+def _score_component_list(contributions: dict[str, float]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": name,
+            "value": value,
+            "reason": SCORE_COMPONENT_DESCRIPTIONS.get(name, name.replace("_", " ")),
+        }
+        for name, value in contributions.items()
+    ]
+
+
+def _freshness_explanation(record: dict[str, Any], timestamp: str, recency_bonus: float) -> dict[str, Any]:
+    updated_at = str(record.get("updated_at", ""))
+    days_since_update: int | None = None
+    state = "unknown"
+    if updated_at:
+        try:
+            days_since_update = max((parse_timestamp(timestamp) - parse_timestamp(updated_at)).days, 0)
+            state = "stale" if days_since_update > STALE_DAYS_THRESHOLD else "fresh"
+        except (TypeError, ValueError):
+            state = "unparseable"
+    return {
+        "state": state,
+        "updated_at": updated_at,
+        "days_since_update": days_since_update,
+        "stale_after_days": STALE_DAYS_THRESHOLD,
+        "score_effect": round(recency_bonus, 4),
+    }
+
+
+def _conflict_explanation(
+    record: dict[str, Any],
+    record_edges: list[dict[str, Any]],
+    relation_notes: list[str],
+    *,
+    include_contested: bool,
+) -> dict[str, Any]:
+    conflict_ids = set(str(item) for item in record.get("conflicts_with", []))
+    for edge in record_edges:
+        if edge.get("kind") == "conflicts_with":
+            other_id = edge.get("to_id") if edge.get("from_id") == record.get("memory_id") else edge.get("from_id")
+            if other_id:
+                conflict_ids.add(str(other_id))
+
+    status = str(record.get("status", "unknown"))
+    if status == "contested":
+        state = "contested"
+        treatment = "included with caution" if include_contested else "excluded by default"
+    elif conflict_ids:
+        state = "conflicting"
+        treatment = "included with relation penalty"
+    else:
+        state = "none"
+        treatment = "no conflict signal"
+
+    return {
+        "state": state,
+        "status": status,
+        "conflicts_with": sorted(conflict_ids),
+        "relation_notes": relation_notes,
+        "treatment": treatment,
+    }
+
+
+def _excluded_record(
+    record: dict[str, Any],
+    *,
+    reason: str,
+    reason_code: str,
+    timestamp: str,
+    include_contested: bool,
+    lexical_overlap: list[str] | None = None,
+    semantic_overlap: list[str] | None = None,
+    record_edges: list[dict[str, Any]] | None = None,
+    relation_notes: list[str] | None = None,
+) -> dict[str, Any]:
+    edges = record_edges or []
+    notes = relation_notes or []
+    return {
+        "memory_id": record.get("memory_id"),
+        "title": record.get("title"),
+        "type": record.get("type"),
+        "status": record.get("status"),
+        "reason": reason,
+        "reason_code": reason_code,
+        "why_excluded": reason,
+        "matched_evidence": {
+            "lexical_terms": lexical_overlap or [],
+            "semantic_terms": semantic_overlap or [],
+        },
+        "freshness": _freshness_explanation(record, timestamp, 0.0),
+        "conflict": _conflict_explanation(
+            record,
+            edges,
+            notes,
+            include_contested=include_contested,
+        ),
+    }
+
+
+def _rerank_explanation(
+    prefilter_results: list[tuple[float, dict[str, Any]]],
+    *,
+    needs_rerank: bool,
+    rerank_threshold: float,
+) -> dict[str, Any]:
+    top_scores = [round(score, 4) for score, _ in prefilter_results[:2]]
+    threshold_ratio = round(1.0 / rerank_threshold, 4) if rerank_threshold else None
+    top_score_ratio: float | None = None
+    if len(prefilter_results) >= 2 and prefilter_results[1][0] > 0:
+        top_score_ratio = round(prefilter_results[0][0] / prefilter_results[1][0], 4)
+
+    if not prefilter_results:
+        reason = "no prefilter candidates; rerank skipped"
+    elif len(prefilter_results) == 1:
+        reason = "single prefilter candidate; rerank skipped"
+    elif needs_rerank:
+        reason = "top prefilter scores are close enough to require full scoring"
+    else:
+        reason = "top prefilter candidate is separated enough to skip rerank"
+
+    return {
+        "applied": needs_rerank,
+        "reason": reason,
+        "rerank_ambiguity_threshold": round(rerank_threshold, 4),
+        "skip_ratio_threshold": threshold_ratio,
+        "top_prefilter_scores": top_scores,
+        "top_score_ratio": top_score_ratio,
+    }
+
+
+def _learned_context_freshness_explanation(record: dict[str, Any], timestamp: str) -> dict[str, Any]:
+    fresh_until = str(record.get("fresh_until", ""))
+    state = "unknown"
+    days_expired: int | None = None
+    score_effect = 0.0
+    if fresh_until:
+        try:
+            expired = parse_timestamp(fresh_until) < parse_timestamp(timestamp)
+            state = "expired" if expired else "fresh"
+            if expired:
+                days_expired = max((parse_timestamp(timestamp) - parse_timestamp(fresh_until)).days, 0)
+                score_effect = -LEARNED_CONTEXT_FRESHNESS_PENALTY
+        except (TypeError, ValueError):
+            state = "unparseable"
+    return {
+        "state": state,
+        "fresh_until": fresh_until,
+        "days_expired": days_expired,
+        "score_effect": round(score_effect, 4),
+    }
+
+
+def _learned_context_conflict_explanation(record: dict[str, Any]) -> dict[str, Any]:
+    state = str(record.get("conflict_state", "none") or "none")
+    score_effect = -LEARNED_CONTEXT_CONFLICT_PENALTY if state in ("detected", "overridden") else 0.0
+    return {
+        "state": state,
+        "score_effect": round(score_effect, 4),
+        "treatment": "penalized" if score_effect else "no conflict penalty",
+    }
 
 
 def retrieve(
@@ -80,6 +259,14 @@ def retrieve(
     )
     if not should_run:
         run_id = stable_id("retrieve", timestamp, query, limit, "gated")
+        rerank = {
+            "applied": False,
+            "reason": f"retrieval gated: {gate_reason}",
+            "rerank_ambiguity_threshold": None,
+            "skip_ratio_threshold": None,
+            "top_prefilter_scores": [],
+            "top_score_ratio": None,
+        }
         return {
             "run_id": run_id,
             "gated": True,
@@ -89,6 +276,8 @@ def retrieve(
             "why": [],
             "explanations": [],
             "excluded": [],
+            "reranked": False,
+            "rerank": rerank,
             "reporting_agent": normalized_agent,
             "cli_output_version": CLI_JSON_VERSION,
         }
@@ -116,9 +305,34 @@ def retrieve(
 
     for record in records:
         if record["status"] not in {"active", "contested"}:
+            record_edges = edges_by_id.get(record["memory_id"], [])
+            relation_notes = build_relation_explanations(record["memory_id"], record_edges, records_by_id)
+            excluded.append(
+                _excluded_record(
+                    record,
+                    reason=f"status {record['status']} excluded from retrieval",
+                    reason_code="status_not_retrievable",
+                    timestamp=timestamp,
+                    include_contested=include_contested,
+                    record_edges=record_edges,
+                    relation_notes=relation_notes,
+                )
+            )
             continue
         if record["status"] == "contested" and not include_contested:
-            excluded.append({"memory_id": record["memory_id"], "reason": "contested excluded by default"})
+            record_edges = edges_by_id.get(record["memory_id"], [])
+            relation_notes = build_relation_explanations(record["memory_id"], record_edges, records_by_id)
+            excluded.append(
+                _excluded_record(
+                    record,
+                    reason="contested excluded by default",
+                    reason_code="contested_default_exclusion",
+                    timestamp=timestamp,
+                    include_contested=include_contested,
+                    record_edges=record_edges,
+                    relation_notes=relation_notes,
+                )
+            )
             continue
 
         record_text = " ".join([record["title"], record["summary"], record["body"]])
@@ -133,10 +347,38 @@ def retrieve(
                 embedding_overlap = sorted(query_semantic & record_semantic)
                 embedding_score = len(embedding_overlap) / max(1, len(query_semantic | record_semantic))
                 if embedding_score == 0:
-                    excluded.append({"memory_id": record["memory_id"], "reason": "no lexical or semantic match"})
+                    record_edges = edges_by_id.get(record["memory_id"], [])
+                    relation_notes = build_relation_explanations(record["memory_id"], record_edges, records_by_id)
+                    excluded.append(
+                        _excluded_record(
+                            record,
+                            reason="no lexical or semantic match",
+                            reason_code="no_match",
+                            timestamp=timestamp,
+                            include_contested=include_contested,
+                            lexical_overlap=lexical_overlap,
+                            semantic_overlap=embedding_overlap,
+                            record_edges=record_edges,
+                            relation_notes=relation_notes,
+                        )
+                    )
                     continue
             else:
-                excluded.append({"memory_id": record["memory_id"], "reason": "no lexical or semantic match"})
+                record_edges = edges_by_id.get(record["memory_id"], [])
+                relation_notes = build_relation_explanations(record["memory_id"], record_edges, records_by_id)
+                excluded.append(
+                    _excluded_record(
+                        record,
+                        reason="no lexical or semantic match",
+                        reason_code="no_match",
+                        timestamp=timestamp,
+                        include_contested=include_contested,
+                        lexical_overlap=lexical_overlap,
+                        semantic_overlap=[],
+                        record_edges=record_edges,
+                        relation_notes=relation_notes,
+                    )
+                )
                 continue
 
         prefilter_results.append((lexical_score, record))
@@ -146,16 +388,18 @@ def retrieve(
 
     # Stage 2: Determine if rerank is needed
     prefilter_results.sort(key=lambda item: -item[0])
-    needs_rerank = True
+    needs_rerank = len(prefilter_results) >= 2
     if len(prefilter_results) >= 2:
         top1 = prefilter_results[0][0]
         top2 = prefilter_results[1][0]
         if top2 > 0 and (top1 / top2) > (1.0 / rerank_threshold):
             needs_rerank = False
-    elif len(prefilter_results) == 1:
-        needs_rerank = False
 
-    reranked = not needs_rerank  # Track whether we skipped rerank
+    rerank = _rerank_explanation(
+        prefilter_results,
+        needs_rerank=needs_rerank,
+        rerank_threshold=rerank_threshold,
+    )
 
     for lexical_score, record in prefilter_results:
         record_text = " ".join([record["title"], record["summary"], record["body"]])
@@ -197,12 +441,25 @@ def retrieve(
         total_score += relation_adj
 
         # Procedural-aware boost for task-shaped queries.
+        procedural_query_boost = 0.0
         if is_workflow_memory_type(record["type"]) and _is_task_shaped_query(query):
-            total_score += 1.5
+            procedural_query_boost = 1.5
+            total_score += procedural_query_boost
 
         total_score = round(total_score, 4)
 
         relation_notes = build_relation_explanations(record["memory_id"], record_edges, records_by_id)
+        score_contributions = {
+            "lexical": round(lexical_score * 4, 4),
+            "embedding": round(embedding_score * 3, 4) if use_embeddings else 0.0,
+            "type_prior": round(type_prior, 4),
+            "recency_prior": round(recency_bonus, 4),
+            "scope_prior": round(scope_prior, 4) if use_embeddings else 0.0,
+            "confidence": round(float(record["confidence"]), 4),
+            "salience": round(float(record["salience"]), 4),
+            "relation_adjustment": round(relation_adj, 4),
+            "procedural_query_boost": round(procedural_query_boost, 4),
+        }
 
         explanation = {
             "memory_id": record["memory_id"],
@@ -210,16 +467,15 @@ def retrieve(
                 "lexical_terms": lexical_overlap,
                 "semantic_terms": embedding_overlap,
             },
-            "score_contributions": {
-                "lexical": round(lexical_score * 4, 4),
-                "embedding": round(embedding_score * 3, 4) if use_embeddings else 0.0,
-                "type_prior": round(type_prior, 4),
-                "recency_prior": round(recency_bonus, 4),
-                "scope_prior": round(scope_prior, 4) if use_embeddings else 0.0,
-                "confidence": round(float(record["confidence"]), 4),
-                "salience": round(float(record["salience"]), 4),
-                "relation_adjustment": round(relation_adj, 4),
-            },
+            "score_contributions": score_contributions,
+            "score_components": _score_component_list(score_contributions),
+            "freshness": _freshness_explanation(record, timestamp, recency_bonus),
+            "conflict": _conflict_explanation(
+                record,
+                record_edges,
+                relation_notes,
+                include_contested=include_contested,
+            ),
             "why_included": _why_included(record, lexical_overlap, embedding_overlap),
             "relation_notes": relation_notes,
             "why_excluded": None,
@@ -260,7 +516,8 @@ def retrieve(
         ],
         "explanations": [explanation for _, _, explanation in selected],
         "excluded": excluded[: max(limit, 3)],
-        "reranked": not reranked,
+        "reranked": needs_rerank,
+        "rerank": rerank,
         "memory_hurt": hurt_payload,
         "reporting_agent": normalized_agent,
     }
@@ -273,6 +530,7 @@ def retrieve(
         "why": response["why"],
         "explanations": response["explanations"],
         "excluded": response["excluded"],
+        "rerank": response["rerank"],
         "summary": summarize(query, 80),
         "reporting_agent": normalized_agent,
     }
@@ -379,13 +637,14 @@ def retrieve_with_fusion(
         base_result["selected_learned_context_ids"] = []
         base_result["selected_automation_record_ids"] = []
         base_result["source_attribution"] = {}
+        base_result["learned_context_explanations"] = []
         return base_result
 
     query_tokens = tokenize(query) - LEXICAL_NOISE_TOKENS
     query_semantic = semantic_tokens(query)
 
     # Collect learned context matches
-    learned_context_results: list[tuple[float, dict[str, Any]]] = []
+    learned_context_results: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
     if include_learned_context:
         learned_records = store.load_learned_context_records()
         for record in learned_records:
@@ -397,6 +656,8 @@ def retrieve_with_fusion(
             record_text = f"{record.get('summary', '')} {record.get('details', '')}"
             record_tokens = tokenize(record_text) - LEXICAL_NOISE_TOKENS
             record_semantic = semantic_tokens(record_text)
+            lexical_terms = sorted(query_tokens & record_tokens)
+            semantic_terms = sorted(query_semantic & record_semantic)
 
             lexical_score = len(query_tokens & record_tokens) / max(1, len(query_tokens))
             semantic_score = len(query_semantic & record_semantic) / max(1, len(query_semantic | record_semantic))
@@ -405,15 +666,19 @@ def retrieve_with_fusion(
                 continue
 
             # Base score
-            score = lexical_score * 3 + semantic_score * 2 + float(record.get("confidence", 0.5))
+            confidence = float(record.get("confidence", 0.5))
+            score = lexical_score * 3 + semantic_score * 2 + confidence
 
             # Query family bonus
             family_tags = set(record.get("query_family_tags", []))
             family_match = bool(family_tags & query_semantic)
+            query_family_bonus = 0.0
             if family_match:
-                score += 1.0
+                query_family_bonus = 1.0
+                score += query_family_bonus
 
             # Freshness penalty
+            freshness = _learned_context_freshness_explanation(record, timestamp)
             fresh_until = record.get("fresh_until", "")
             if fresh_until:
                 try:
@@ -423,10 +688,33 @@ def retrieve_with_fusion(
                     pass
 
             # Conflict penalty
+            conflict = _learned_context_conflict_explanation(record)
             if record.get("conflict_state") in ("detected", "overridden"):
                 score -= LEARNED_CONTEXT_CONFLICT_PENALTY
 
-            learned_context_results.append((round(score, 4), record))
+            score_contributions = {
+                "lexical": round(lexical_score * 3, 4),
+                "embedding": round(semantic_score * 2, 4),
+                "confidence": round(confidence, 4),
+                "query_family_bonus": round(query_family_bonus, 4),
+                "freshness_penalty": freshness["score_effect"],
+                "conflict_penalty": conflict["score_effect"],
+            }
+            rounded_score = round(score, 4)
+            explanation = {
+                "record_id": record.get("record_id", ""),
+                "matched_evidence": {
+                    "lexical_terms": lexical_terms,
+                    "semantic_terms": semantic_terms,
+                },
+                "score_contributions": score_contributions,
+                "score_components": _score_component_list(score_contributions),
+                "freshness": freshness,
+                "conflict": conflict,
+                "score": rounded_score,
+                "verifier_status": record.get("verifier_status"),
+            }
+            learned_context_results.append((rounded_score, record, explanation))
 
     learned_context_results.sort(key=lambda x: -x[0])
 
@@ -448,8 +736,9 @@ def retrieve_with_fusion(
 
     # Build fused result with attribution
     selected_durable_ids = base_result.get("selected_memory_ids", [])[:limit]
+    selected_learned_context = learned_context_results[:max(1, limit // 3)]
     selected_learned_ids = [
-        r.get("record_id", "") for _, r in learned_context_results[:max(1, limit // 3)]
+        r.get("record_id", "") for _, r, _ in selected_learned_context
     ]
     selected_automation_ids = [
         r.get("record_id", "") for _, r in automation_results[:max(1, limit // 4)]
@@ -467,11 +756,14 @@ def retrieve_with_fusion(
     fused["selected_learned_context_ids"] = selected_learned_ids
     fused["selected_automation_record_ids"] = selected_automation_ids
     fused["source_attribution"] = source_attribution
+    fused["learned_context_explanations"] = [
+        explanation for _, _, explanation in selected_learned_context
+    ]
     fused["fusion_enabled"] = True
 
     # Add harm signals for stale learned context
     harm_signals: list[str] = []
-    for _, record in learned_context_results[:len(selected_learned_ids)]:
+    for _, record, _ in selected_learned_context:
         fresh_until = record.get("fresh_until", "")
         if fresh_until:
             try:

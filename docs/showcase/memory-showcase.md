@@ -21,6 +21,7 @@ Expected signal:
 - `before.selected_memory_ids` is empty
 - `after.selected_memory_ids` is non-empty
 - `agent_snippet` starts with `OpenDream found prior memory:`
+- `agent_answers` compares measured stateless and memory-assisted answers
 - `retrieval_rationale` explains why each memory was selected
 - `dream_effectiveness` shows extraction, consolidation, stale-memory handling, decoy rejection, and prompt-context assembly
 - `report_path` points at `.tmp/opendream-showcase/.opendream/memory/state/showcase_report.json`
@@ -45,6 +46,7 @@ Expected checks:
 - `decoy_rejection`: unrelated GraphQL billing sandbox memory is not selected
 - `provenance`: selected memories include source event refs
 - `snippet`: the agent-facing recall phrase is generated
+- `answer_improvement`: the memory-assisted answer passes measured answer checks and improves over the stateless baseline
 
 ## What the proof is proving
 
@@ -57,6 +59,7 @@ A correct memory system should surface the current pnpm decision, Redis prerequi
 The report makes that inspectable:
 
 - `evaluation_case`: task prompt, expected answer shape, and likely stateless failure
+- `agent_answers`: stateless and memory-assisted answers scored against expected signals, forbidden stale guidance, and source grounding
 - `context.prompt_context`: exact prompt context that would be sent to the agent
 - `context.visibility`: selected, excluded, diagnostic-only, and startup-index-only classifications for assembled context
 - `context.links`: selected prompt memories linked to source event IDs

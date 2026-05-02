@@ -944,6 +944,10 @@ def command_eval_showcase(args: argparse.Namespace) -> dict[str, Any]:
         "checks": report["checks"],
         "selected_memory_ids": report["selected_memory_ids"],
         "agent_snippet": report["agent_snippet"],
+        "agent_answers": report.get("agent_answers", {}),
+        "negative_controls": report["negative_controls"],
+        "abstention_cases": report["abstention_cases"],
+        "memory_hurt_cases": report["memory_hurt_cases"],
         "proof": report["proof"],
         "source_report": {
             "workspace": report["workspace"],

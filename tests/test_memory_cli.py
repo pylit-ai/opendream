@@ -168,7 +168,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
     def test_showcase_fixture_validates_coding_agent_story(self) -> None:
         fixture = REPO_ROOT / "opendream" / "fixtures" / "showcase_coding_agent_memory.jsonl"
         events = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines() if line]
-        self.assertGreaterEqual(len(events), 7)
+        self.assertGreaterEqual(len(events), 8)
         for event in events:
             validate_document("memory-event.schema.json", event)
         contents = "\n".join(event["content"] for event in events)
@@ -197,6 +197,22 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn("OpenDream found prior memory:", result["agent_snippet"])
         self.assertEqual(result["selected_memory_ids"], result["after"]["selected_memory_ids"])
         self.assertEqual(len(result["context"]["links"]), len(result["selected_memory_ids"]))
+        agent_answers = result["agent_answers"]
+        stateless = agent_answers["stateless"]
+        memory_assisted = agent_answers["memory_assisted"]
+        self.assertEqual(stateless["selected_memory_ids"], [])
+        self.assertEqual(memory_assisted["selected_memory_ids"], result["selected_memory_ids"])
+        self.assertFalse(stateless["measurement"]["passed"])
+        self.assertTrue(memory_assisted["measurement"]["passed"])
+        self.assertGreater(
+            memory_assisted["measurement"]["score"],
+            stateless["measurement"]["score"],
+        )
+        self.assertTrue(agent_answers["comparison"]["passed"])
+        self.assertIn("pnpm", memory_assisted["answer"])
+        self.assertIn("Redis", memory_assisted["answer"])
+        self.assertIn("opendream/static/dist", memory_assisted["answer"])
+        self.assertIn("memory-showcase", memory_assisted["answer"])
         self.assertTrue(result["retrieval_rationale"])
         prompt_context = result["context"]["prompt_context"]
         self.assertNotIn("GraphQL billing API", prompt_context)
@@ -209,8 +225,25 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertTrue(result["dream_effectiveness"]["effective"]["baseline_to_after"])
         self.assertTrue(result["dream_effectiveness"]["effective"]["stale_guidance_contested"])
         self.assertTrue(result["dream_effectiveness"]["effective"]["decoy_excluded"])
+        self.assertTrue(result["dream_effectiveness"]["effective"]["negative_controls_passed"])
+        self.assertTrue(result["dream_effectiveness"]["effective"]["abstention_cases_passed"])
+        self.assertTrue(result["dream_effectiveness"]["effective"]["memory_hurt_case_passed"])
         self.assertTrue(result["dream_effectiveness"]["effective"]["curated_actionable_prompt_context_built"])
+        self.assertTrue(result["dream_effectiveness"]["effective"]["memory_assisted_answer_improved"])
+        self.assertGreater(result["dream_effectiveness"]["metrics"]["answer_score_delta"], 0)
         self.assertNotIn("compact_context_built", result["dream_effectiveness"]["effective"])
+        self.assertTrue(result["checks"]["answer_improvement"]["passed"])
+        self.assertTrue(result["checks"]["negative_controls"]["passed"])
+        self.assertTrue(result["checks"]["abstention"]["passed"])
+        self.assertTrue(result["checks"]["memory_hurt"]["passed"])
+        self.assertGreaterEqual(len(result["negative_controls"]), 3)
+        self.assertTrue(all(case["passed"] for case in result["negative_controls"]))
+        self.assertEqual(len(result["abstention_cases"]), 2)
+        self.assertTrue(all(case["abstained"] for case in result["abstention_cases"]))
+        self.assertTrue(any(case["gated"] for case in result["abstention_cases"]))
+        self.assertEqual(len(result["memory_hurt_cases"]), 1)
+        self.assertTrue(result["memory_hurt_cases"][0]["harm_prevented_by_default"])
+        self.assertTrue(result["memory_hurt_cases"][0]["forced_memory_hurt"]["contradicted_recalled"])
         self.assertTrue(result["proof"]["source_refs"])
         summaries = "\n".join(ref["summary"] for ref in result["proof"]["source_refs"])
         self.assertIn("pnpm", summaries)
@@ -223,6 +256,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertTrue(report_path.exists())
         report = json.loads(report_path.read_text(encoding="utf-8"))
         self.assertEqual(report["agent_snippet"], result["agent_snippet"])
+        self.assertEqual(report["agent_answers"], result["agent_answers"])
 
     def test_no_subcommand_error_includes_next_step_hint(self) -> None:
         completed = run_cli_raw(check=False)
@@ -2276,8 +2310,16 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertTrue(result["checks"]["recall"]["passed"])
         self.assertTrue(result["checks"]["stale_update"]["passed"])
         self.assertTrue(result["checks"]["decoy_rejection"]["passed"])
+        self.assertTrue(result["checks"]["negative_controls"]["passed"])
+        self.assertTrue(result["checks"]["abstention"]["passed"])
+        self.assertTrue(result["checks"]["memory_hurt"]["passed"])
         self.assertTrue(result["checks"]["provenance"]["passed"])
         self.assertTrue(result["checks"]["snippet"]["passed"])
+        self.assertTrue(result["checks"]["answer_improvement"]["passed"])
+        self.assertTrue(result["agent_answers"]["comparison"]["passed"])
+        self.assertTrue(all(case["passed"] for case in result["negative_controls"]))
+        self.assertTrue(all(case["abstained"] for case in result["abstention_cases"]))
+        self.assertTrue(result["memory_hurt_cases"][0]["forced_memory_hurt"]["contradicted_recalled"])
         self.assertTrue(Path(result["report_path"]).exists())
 
     def test_init_file_workspace_errors_without_traceback(self) -> None:

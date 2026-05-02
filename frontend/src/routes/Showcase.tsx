@@ -10,7 +10,14 @@ import {
 } from 'lucide-solid';
 import { For, Show, createMemo, createResource, type JSX } from 'solid-js';
 import { getShowcase } from '~/api/client';
-import type { ShowcasePromptLink, ShowcaseReport, ShowcaseRetrievalReason, ShowcaseSourceRef } from '~/api/types';
+import type {
+  ShowcaseAgentAnswer,
+  ShowcaseAnswerSignal,
+  ShowcasePromptLink,
+  ShowcaseReport,
+  ShowcaseRetrievalReason,
+  ShowcaseSourceRef,
+} from '~/api/types';
 import { EmptyState } from '~/components/EmptyState';
 import { ErrorState } from '~/components/ErrorState';
 import { IdLink } from '~/components/IdLink';
@@ -42,6 +49,41 @@ function promptLinks(report: ShowcaseReport | undefined): ShowcasePromptLink[] {
 
 function retrievalReasons(report: ShowcaseReport | undefined): ShowcaseRetrievalReason[] {
   return report?.retrieval_rationale ?? [];
+}
+
+function agentAnswerEntries(
+  report: ShowcaseReport | undefined,
+): Array<{ key: 'stateless' | 'memory_assisted'; answer: ShowcaseAgentAnswer }> {
+  const answers = report?.agent_answers;
+  const entries: Array<{ key: 'stateless' | 'memory_assisted'; answer?: ShowcaseAgentAnswer }> = [
+    { key: 'stateless', answer: answers?.stateless },
+    { key: 'memory_assisted', answer: answers?.memory_assisted },
+  ];
+  return entries.filter(
+    (entry): entry is { key: 'stateless' | 'memory_assisted'; answer: ShowcaseAgentAnswer } =>
+      Boolean(entry.answer),
+  );
+}
+
+function failedSignals(answer: ShowcaseAgentAnswer): ShowcaseAnswerSignal[] {
+  return answer.measurement?.signals?.filter((signal) => !signal.passed) ?? [];
+}
+
+function answerScore(answer: ShowcaseAgentAnswer): string {
+  const score = answer.measurement?.score;
+  return typeof score === 'number' ? `${Math.round(score * 100)}%` : 'n/a';
+}
+
+function answerStatusVariant(answer: ShowcaseAgentAnswer): 'ok' | 'danger' | 'neutral' {
+  if (answer.measurement?.passed === true) return 'ok';
+  if (answer.measurement?.passed === false) return 'danger';
+  return 'neutral';
+}
+
+function answerScoreDelta(report: ShowcaseReport | undefined): string {
+  const delta = report?.agent_answers?.comparison?.score_delta;
+  if (typeof delta !== 'number') return '';
+  return `delta +${Math.round(delta * 100)} pts`;
 }
 
 function asText(value: unknown): string {
@@ -176,6 +218,67 @@ export default function ShowcaseRoute(): JSX.Element {
                   <pre class="whitespace-pre-wrap rounded-md bg-surface-muted p-4 text-sm leading-6 text-text">
                     {r().agent_snippet}
                   </pre>
+                </section>
+
+                <section class="rounded-md border border-border bg-surface p-5">
+                  <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-2 text-sm font-medium text-text">
+                      <Sparkles size={16} />
+                      Measured agent answers
+                    </div>
+                    <Show when={answerScoreDelta(r())}>
+                      {(delta) => <Chip variant="accent">{delta()}</Chip>}
+                    </Show>
+                  </div>
+                  <div class="grid gap-4 xl:grid-cols-[1fr_1fr]">
+                    <For each={agentAnswerEntries(r())}>
+                      {(entry) => (
+                        <div class="rounded-md border border-border bg-surface-muted p-4">
+                          <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div class="text-sm font-medium text-text">
+                                {entry.answer.label ?? entry.key.replaceAll('_', ' ')}
+                              </div>
+                              <div class="mt-1 text-xs leading-5 text-text-muted">{entry.answer.input}</div>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                              <Chip variant={answerStatusVariant(entry.answer)}>
+                                {entry.answer.measurement?.passed ? 'passed' : 'gap'}
+                              </Chip>
+                              <Chip variant="neutral">{answerScore(entry.answer)}</Chip>
+                              <Chip variant="neutral">
+                                {entry.answer.measurement?.passed_count ?? 0}/
+                                {entry.answer.measurement?.total_count ?? 0} signals
+                              </Chip>
+                            </div>
+                          </div>
+                          <pre class="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-surface p-3 text-sm leading-6 text-text">
+                            {entry.answer.answer}
+                          </pre>
+                          <Show when={failedSignals(entry.answer).length}>
+                            <div class="mt-3 grid gap-2">
+                              <For each={failedSignals(entry.answer)}>
+                                {(signal) => (
+                                  <div class="rounded-md border border-border bg-surface p-3 text-xs leading-5 text-text-muted">
+                                    <div class="mb-1 font-medium text-text">{signal.label ?? signal.key}</div>
+                                    <Show when={signal.missing_terms?.length}>
+                                      {(terms) => <div>Missing: {terms().join(', ')}</div>}
+                                    </Show>
+                                    <Show when={signal.forbidden_matches?.length}>
+                                      {(terms) => <div>Matched forbidden: {terms().join(', ')}</div>}
+                                    </Show>
+                                    <Show when={signal.requires_source_refs}>
+                                      <div>Missing selected source refs.</div>
+                                    </Show>
+                                  </div>
+                                )}
+                              </For>
+                            </div>
+                          </Show>
+                        </div>
+                      )}
+                    </For>
+                  </div>
                 </section>
 
                 <section class="grid gap-4 xl:grid-cols-[1fr_1fr]">
