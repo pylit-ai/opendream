@@ -609,10 +609,10 @@ export default function ShowcaseRoute(): JSX.Element {
                                   <div class="rounded-md border border-border bg-surface p-3 text-xs leading-5 text-text-muted">
                                     <div class="mb-1 font-medium text-text">{signal.label ?? signal.key}</div>
                                     <Show when={signal.missing_terms?.length}>
-                                      {(terms) => <div>Missing: {terms().join(', ')}</div>}
+                                      <div>Missing: {signal.missing_terms?.join(', ')}</div>
                                     </Show>
                                     <Show when={signal.forbidden_matches?.length}>
-                                      {(terms) => <div>Matched forbidden: {terms().join(', ')}</div>}
+                                      <div>Matched forbidden: {signal.forbidden_matches?.join(', ')}</div>
                                     </Show>
                                     <Show when={signal.requires_source_refs}>
                                       <div>Missing selected source refs.</div>
