@@ -57,3 +57,10 @@ class StaticHandlerTests(unittest.TestCase):
     def test_static_sets_long_cache_header(self) -> None:
         with urllib.request.urlopen(f"{self.base_url}/static/vendor/_test.js") as resp:
             self.assertEqual(resp.headers["Cache-Control"], "public, max-age=86400")
+
+    def test_showcase_route_serves_spa_shell(self) -> None:
+        with urllib.request.urlopen(f"{self.base_url}/showcase") as resp:
+            html = resp.read().decode("utf-8")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn("OpenDream Observe", html)

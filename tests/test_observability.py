@@ -123,6 +123,31 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertTrue(payload["live_check"]["supported"])
         self.assertIsNone(payload["live_check"]["last_probe_at"])
 
+    def test_showcase_api_returns_persisted_report(self) -> None:
+        report_path = self.store.memory_root / "state" / "showcase_report.json"
+        write_json(
+            report_path,
+            {
+                "scenario": "coding-agent-showcase",
+                "status": "passed",
+                "objective": {
+                    "title": "Show that OpenDream turns prior coding-agent history into useful prompt context."
+                },
+                "evaluation_case": {"user_prompt": "Update Observe UI and recover repo-specific context."},
+                "agent_snippet": "OpenDream found prior memory: Use pnpm.",
+                "selected_memory_ids": ["mem_showcase"],
+                "context": {"links": [{"memory_id": "mem_showcase", "why_included": "lexical match on pnpm"}]},
+                "dream_effectiveness": {"effective": {"baseline_to_after": True}},
+                "proof": {"source_refs": [{"memory_id": "mem_showcase", "summary": "Use pnpm."}]},
+            },
+        )
+        payload = self.get_json("/api/showcase")
+        self.assertEqual(payload["available"], True)
+        self.assertEqual(payload["report"]["scenario"], "coding-agent-showcase")
+        self.assertIn("useful prompt context", payload["report"]["objective"]["title"])
+        self.assertTrue(payload["report"]["dream_effectiveness"]["effective"]["baseline_to_after"])
+        self.assertIn("OpenDream found prior memory:", payload["report"]["agent_snippet"])
+
     def test_overview_uses_latest_context_pruning_evidence(self) -> None:
         payload = self.get_json("/api/overview")
         pruning = payload["context_pruning"]

@@ -9,6 +9,8 @@ tmp/
 .gemini/
 build/
 dist/
+!opendream/static/dist/
+!opendream/static/dist/**
 *.egg-info/
 memory/
 notepads/

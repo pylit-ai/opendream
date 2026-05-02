@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -172,10 +173,8 @@ def append_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
-    try:
+    with contextlib.suppress(OSError):
         os.utime(path.parent, None)
-    except OSError:
-        pass
 
 
 def prune_recent_failures(

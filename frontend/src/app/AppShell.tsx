@@ -28,6 +28,7 @@ import {
   getReviews,
   getRuns,
   getSessions,
+  getShowcase,
   getWorkspaces,
 } from '~/api/client';
 
@@ -35,6 +36,7 @@ import {
 // the panel renders from cache when the user clicks.
 const ROUTE_PREFETCH: Record<string, () => void> = {
   '/overview': () => prefetch('overview', getOverview, 15_000),
+  '/showcase': () => prefetch('showcase', getShowcase, 15_000),
   '/runs': () => prefetch('runs', () => getRuns(), 15_000),
   '/memories': () =>
     prefetch('memories:{"limit":20}', () => getMemories({ limit: 20 }), 15_000),

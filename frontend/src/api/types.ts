@@ -19,6 +19,91 @@ export interface HealthPayload {
   [key: string]: unknown;
 }
 
+export interface ShowcaseSourceRef {
+  memory_id?: string;
+  title?: string;
+  type?: string;
+  summary?: string;
+  status?: string;
+  source_event_ids?: string[];
+  source_events?: Array<Record<string, unknown>>;
+}
+
+export interface ShowcasePromptLink {
+  memory_id?: string;
+  memory_href?: string;
+  title?: string;
+  summary?: string;
+  source_event_ids?: string[];
+  source_refs?: Array<Record<string, unknown>>;
+  why_included?: string;
+  score?: number;
+}
+
+export interface ShowcaseRetrievalReason {
+  memory_id?: string;
+  score?: number;
+  why_included?: string;
+  why_excluded?: string | null;
+  matched_evidence?: Record<string, unknown>;
+  score_contributions?: Record<string, unknown>;
+  provenance_tier?: string;
+  status?: string;
+}
+
+export interface ShowcaseReport {
+  scenario?: string;
+  status?: string;
+  generated_at?: string;
+  report_path?: string;
+  selected_memory_ids?: string[];
+  agent_snippet?: string;
+  objective?: {
+    title?: string;
+    description?: string;
+    success_criteria?: string[];
+    research_pattern?: string;
+  };
+  evaluation_case?: {
+    user_prompt?: string;
+    retrieval_query?: string;
+    expected_response?: string;
+    why_this_tests_memory?: string;
+    failure_without_memory?: string;
+  };
+  before?: { selected_memory_ids?: string[]; [key: string]: unknown };
+  after?: { selected_memory_ids?: string[]; [key: string]: unknown };
+  context?: {
+    context_id?: string;
+    selected_memory_ids?: string[];
+    prompt_context?: string;
+    links?: ShowcasePromptLink[];
+  };
+  proof?: {
+    query?: string;
+    source_refs?: ShowcaseSourceRef[];
+    expected_signals?: string[];
+  };
+  retrieval_rationale?: ShowcaseRetrievalReason[];
+  dream_effectiveness?: {
+    summary?: string;
+    pipeline?: Array<Record<string, unknown>>;
+    metrics?: Record<string, unknown>;
+    why_it_matters?: string[];
+    effective?: Record<string, boolean>;
+  };
+  checks?: Record<string, { passed?: boolean; detail?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+export interface ShowcaseResponse {
+  available: boolean;
+  report?: ShowcaseReport | null;
+  report_path?: string;
+  command?: string;
+  [key: string]: unknown;
+}
+
 export interface OverviewPayload {
   // TODO: shape from index["overview"] in observability.index_observability().
   generated_at?: string;

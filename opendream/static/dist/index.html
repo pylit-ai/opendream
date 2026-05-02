@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenDream Observe</title>
+    <script>
+      (function () {
+        try {
+          var qs = new URLSearchParams(window.location.search);
+          var override = qs.get('theme');
+          var stored = localStorage.getItem('opendream:theme');
+          var mode = override || stored || 'system';
+          var resolved = mode;
+          if (mode === 'system') {
+            resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', resolved);
+        } catch (_) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/static/dist/assets/index-UObqFoxd.js"></script>
+    <link rel="stylesheet" crossorigin href="/static/dist/assets/index-C2uyi4CI.css">
+  </head>
+  <body class="bg-bg text-text antialiased">
+    <div id="root"></div>
+  </body>
+</html>

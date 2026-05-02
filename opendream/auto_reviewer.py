@@ -653,7 +653,7 @@ def apply_recommendations(
             )
             decisions.append(decision)
             by_rule[proposal.rule_id] = by_rule.get(proposal.rule_id, 0) + 1
-            try:
+            with contextlib.suppress(Exception):
                 observability.create_annotation(
                     store,
                     object_type=str(item.get("object_type", "memory")),
@@ -663,8 +663,6 @@ def apply_recommendations(
                     note=rationale,
                     now=decision_now,
                 )
-            except Exception:
-                pass
         except Exception:
             continue
     if decisions:

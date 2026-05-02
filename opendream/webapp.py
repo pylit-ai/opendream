@@ -36,6 +36,7 @@ from .observability import (
 from .semantic_verifier import restore_record as restore_learned_context_record
 from .semantic_dreamer import dream_status_semantic
 from .service import disable_background_runtime, enable_background_runtime, restart_service, service_status, start_service, stop_service
+from .showcase import load_showcase_report
 from .storage import MemoryStore
 from .util import CLI_JSON_VERSION, to_iso, utc_now
 from . import auto_reviewer as _auto_reviewer
@@ -692,6 +693,9 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/memories/"):
             memory_id = parsed.path.split("/")[-1]
             self._write_json(_find_by_id(entities["memories"], "memory_id", memory_id) or {})
+            return
+        if parsed.path == "/api/showcase":
+            self._write_json(load_showcase_report(self.store))
             return
         if parsed.path == "/api/sessions/diagnostics":
             self._write_json(_session_diagnostics(self.store))

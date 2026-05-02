@@ -79,6 +79,12 @@ from .service import (
     update_service,
 )
 from .sessions import cleanup_orphans
+from .showcase import (
+    DEFAULT_DEMO_SCENARIO,
+    SHOWCASE_SCENARIO,
+    run_showcase_demo,
+    showcase_report_path,
+)
 from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, store_sort_key
 from .util import FIXTURE_ROOT, json_dumps, read_json, stable_id, to_iso, utc_now, write_json
 from .validation import validate_document
@@ -865,6 +871,9 @@ def command_demo(args: argparse.Namespace) -> dict[str, Any]:
         memory_dir=args.memory_dir,
         compat_mode=args.compat_mode,
     )
+    if getattr(args, "scenario", DEFAULT_DEMO_SCENARIO) == SHOWCASE_SCENARIO:
+        return run_showcase_demo(store, now=args.now)
+
     store.ensure_layout()
     fixture = FIXTURE_ROOT / "golden_events.jsonl"
     events = load_event_payloads(fixture)
@@ -910,6 +919,40 @@ def command_demo(args: argparse.Namespace) -> dict[str, Any]:
         "consolidate": consolidation,
         "retrieve": retrieval,
     }
+
+
+def command_eval_showcase(args: argparse.Namespace) -> dict[str, Any]:
+    base_store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    base_store.ensure_layout()
+    with tempfile.TemporaryDirectory(prefix="opendream-showcase-eval-") as tmp:
+        isolated_workspace = Path(tmp) / "workspace"
+        isolated_store = build_store(
+            str(isolated_workspace),
+            store_kind_hint="project",
+            memory_dir=args.memory_dir,
+            compat_mode=args.compat_mode,
+        )
+        report = run_showcase_demo(isolated_store, now=args.now)
+
+    result = {
+        "status": report["status"],
+        "scenario": report["scenario"],
+        "workspace": str(base_store.workspace),
+        "memory_root": str(base_store.memory_root),
+        "isolated": True,
+        "checks": report["checks"],
+        "selected_memory_ids": report["selected_memory_ids"],
+        "agent_snippet": report["agent_snippet"],
+        "proof": report["proof"],
+        "source_report": {
+            "workspace": report["workspace"],
+            "memory_root": report["memory_root"],
+        },
+    }
+    report_path = showcase_report_path(base_store).with_name("showcase_eval_report.json")
+    result["report_path"] = str(report_path)
+    write_json(report_path, result)
+    return result
 
 
 def command_dream_run(args: argparse.Namespace) -> dict[str, Any]:
@@ -1989,6 +2032,12 @@ def build_parser() -> argparse.ArgumentParser:
     demo_parser = subparsers.add_parser("demo", help="Seed a deterministic demo workspace")
     demo_parser.add_argument("--workspace", required=True)
     demo_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    demo_parser.add_argument(
+        "--scenario",
+        choices=[DEFAULT_DEMO_SCENARIO, SHOWCASE_SCENARIO],
+        default=DEFAULT_DEMO_SCENARIO,
+        help="Demo scenario to seed; default preserves the historical golden-events demo",
+    )
     add_layout_arguments(demo_parser)
     demo_parser.set_defaults(func=command_demo)
 
@@ -2141,6 +2190,21 @@ def build_parser() -> argparse.ArgumentParser:
     eval_performance_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(eval_performance_parser)
     eval_performance_parser.set_defaults(func=command_eval_performance, result_failure_statuses=("failed",))
+
+    eval_showcase_parser = eval_subparsers.add_parser(
+        "showcase",
+        help="Run the coding-agent memory showcase evaluation",
+    )
+    eval_showcase_parser.add_argument("--workspace", required=True)
+    eval_showcase_parser.add_argument(
+        "--scenario",
+        choices=[SHOWCASE_SCENARIO],
+        default=SHOWCASE_SCENARIO,
+        help="Showcase scenario to evaluate",
+    )
+    eval_showcase_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_showcase_parser)
+    eval_showcase_parser.set_defaults(func=command_eval_showcase, result_failure_statuses=("failed",))
 
     eval_semantic_parser = eval_subparsers.add_parser(
         "semantic-benchmark",

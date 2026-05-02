@@ -165,6 +165,51 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertGreater(result["extract"]["created_candidates"], 0)
         self.assertGreater(len(result["retrieve"]["selected_memory_ids"]), 0)
 
+    def test_showcase_fixture_validates_coding_agent_story(self) -> None:
+        fixture = REPO_ROOT / "opendream" / "fixtures" / "showcase_coding_agent_memory.jsonl"
+        events = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines() if line]
+        self.assertGreaterEqual(len(events), 7)
+        for event in events:
+            validate_document("memory-event.schema.json", event)
+        contents = "\n".join(event["content"] for event in events)
+        self.assertIn("pnpm", contents)
+        self.assertIn("Redis", contents)
+        self.assertIn("anti-pattern", contents)
+        self.assertIn("correction", contents.lower())
+        self.assertIn("GraphQL", contents)
+
+    def test_showcase_demo_creates_before_after_proof_report(self) -> None:
+        result = run_cli(
+            "demo",
+            "--scenario",
+            "coding-agent-showcase",
+            "--workspace",
+            str(self.workspace),
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(result["scenario"], "coding-agent-showcase")
+        self.assertIn("useful prompt context", result["objective"]["title"])
+        self.assertIn("OpenDream Memory Context", result["context"]["prompt_context"] or "")
+        self.assertIn("OpenDream Observe UI", result["evaluation_case"]["user_prompt"])
+        self.assertEqual(result["before"]["selected_memory_ids"], [])
+        self.assertTrue(result["after"]["selected_memory_ids"])
+        self.assertIn("OpenDream found prior memory:", result["agent_snippet"])
+        self.assertEqual(result["selected_memory_ids"], result["after"]["selected_memory_ids"])
+        self.assertEqual(len(result["context"]["links"]), len(result["selected_memory_ids"]))
+        self.assertTrue(result["retrieval_rationale"])
+        self.assertTrue(result["dream_effectiveness"]["effective"]["baseline_to_after"])
+        self.assertTrue(result["dream_effectiveness"]["effective"]["stale_guidance_contested"])
+        self.assertTrue(result["dream_effectiveness"]["effective"]["decoy_excluded"])
+        self.assertTrue(result["proof"]["source_refs"])
+        summaries = "\n".join(ref["summary"] for ref in result["proof"]["source_refs"])
+        self.assertIn("pnpm", summaries)
+        self.assertNotIn("GraphQL billing API", summaries)
+        report_path = Path(result["report_path"])
+        self.assertTrue(report_path.exists())
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(report["agent_snippet"], result["agent_snippet"])
+
     def test_no_subcommand_error_includes_next_step_hint(self) -> None:
         completed = run_cli_raw(check=False)
         self.assertEqual(completed.returncode, 2)
@@ -1119,23 +1164,26 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             message_ref="semantic-setup-2",
         )
 
-        out = run_cli(
-            "semantic",
-            "setup",
-            "--workspace",
-            str(self.workspace),
-            "--prefer",
-            "direct-provider",
-            "--apply",
-            "--now",
-            FIXED_NOW,
-        )
+        try:
+            out = run_cli(
+                "semantic",
+                "setup",
+                "--workspace",
+                str(self.workspace),
+                "--prefer",
+                "direct-provider",
+                "--apply",
+                "--now",
+                FIXED_NOW,
+            )
 
-        self.assertEqual(out["status"], "applied")
-        self.assertIn("initial_cycle", out)
-        self.assertTrue(out["initial_cycle"]["backlog_results"])
-        self.assertEqual(out["initial_cycle"]["backlog_results"][0]["status"], "completed")
-        self.assertEqual(out["readiness"]["semantic_capability_state"], "ready")
+            self.assertEqual(out["status"], "applied")
+            self.assertIn("initial_cycle", out)
+            self.assertTrue(out["initial_cycle"]["backlog_results"])
+            self.assertEqual(out["initial_cycle"]["backlog_results"][0]["status"], "completed")
+            self.assertEqual(out["readiness"]["semantic_capability_state"], "ready")
+        finally:
+            run_cli_raw("service", "disable", "--workspace", str(self.workspace), check=False)
 
     def test_workspace_upgrade_refreshes_managed_service_manifest(self) -> None:
         run_cli("init", "--workspace", str(self.workspace))
@@ -2183,6 +2231,26 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             weighted_baseline,
             delta=0.5,
         )
+
+    def test_eval_showcase_is_hermetic_after_demo(self) -> None:
+        run_cli("demo", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        result = run_cli(
+            "eval",
+            "showcase",
+            "--scenario",
+            "coding-agent-showcase",
+            "--workspace",
+            str(self.workspace),
+            "--now",
+            FIXED_NOW,
+        )
+        self.assertEqual(result["status"], "passed")
+        self.assertTrue(result["checks"]["recall"]["passed"])
+        self.assertTrue(result["checks"]["stale_update"]["passed"])
+        self.assertTrue(result["checks"]["decoy_rejection"]["passed"])
+        self.assertTrue(result["checks"]["provenance"]["passed"])
+        self.assertTrue(result["checks"]["snippet"]["passed"])
+        self.assertTrue(Path(result["report_path"]).exists())
 
     def test_init_file_workspace_errors_without_traceback(self) -> None:
         blocker = self.workspace / "not_a_directory"

@@ -32,6 +32,7 @@ import type {
   SemanticChangeReview,
   SemanticDreamModeRequest,
   ServiceControlRequest,
+  ShowcaseResponse,
   SessionDiagnostics,
   SessionRecord,
   SessionTimeline,
@@ -169,6 +170,7 @@ export const getGraph = (params?: GraphParams) =>
 export const getReviews = () => api<ReviewsResponse>('/api/reviews');
 export const getEvals = () => api<EvalsResponse>('/api/evals');
 export const getExports = () => api<ExportsResponse>('/api/exports');
+export const getShowcase = () => api<ShowcaseResponse>('/api/showcase');
 
 // ----- POST endpoints -----
 

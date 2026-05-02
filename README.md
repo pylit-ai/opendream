@@ -10,6 +10,7 @@
 | If you want to… | Start here |
 |-----------------|------------|
 | Try it in a few commands | [Quick start](#quick-start) |
+| See memory value immediately | [90-second memory showcase](./docs/showcase/memory-showcase.md) |
 | Wire it into an agent runtime | [Integration at a glance](#integration-at-a-glance) |
 | Browse memory in a browser | [Observability UI](#observability-ui) |
 | Hack on the repo | [Contributing](#contributing) (expandable) |

@@ -101,6 +101,7 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
             ),
             ("adapters-check", [sys.executable, "scripts/check_adapters.py"]),
             ("packaging-smoke", [sys.executable, "-m", "unittest", "tests.test_release_artifact", "-v"]),
+            ("showcase-doc-smoke", [sys.executable, "scripts/smoke_showcase_docs.py"]),
             (
                 "semantic-benchmark",
                 [

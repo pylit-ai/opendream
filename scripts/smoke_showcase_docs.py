@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def run_command(command: list[str], *, timeout_seconds: int) -> dict[str, Any]:
+    completed = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    return {
+        "command": command,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+
+
+def parse_cli_json(result: dict[str, Any]) -> dict[str, Any]:
+    if result["returncode"] != 0:
+        raise AssertionError(
+            f"command failed: {' '.join(result['command'])}\n{result['stderr'] or result['stdout']}"
+        )
+    try:
+        payload = json.loads(result["stdout"])
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"command did not emit JSON: {' '.join(result['command'])}") from exc
+    if not isinstance(payload, dict):
+        raise AssertionError(f"command emitted non-object JSON: {' '.join(result['command'])}")
+    return payload
+
+
+def global_cli_status() -> dict[str, Any]:
+    executable = shutil.which("opendream")
+    if not executable:
+        return {"status": "missing", "path": None, "supports_showcase_scenario": False}
+
+    help_result = run_command([executable, "demo", "--help"], timeout_seconds=30)
+    supports = "--scenario" in help_result["stdout"] and "coding-agent-showcase" in help_result["stdout"]
+    return {
+        "status": "fresh" if supports else "stale",
+        "path": executable,
+        "supports_showcase_scenario": supports,
+        "returncode": help_result["returncode"],
+    }
+
+
+def validate_demo(payload: dict[str, Any]) -> None:
+    if payload.get("scenario") != "coding-agent-showcase":
+        raise AssertionError("demo scenario mismatch")
+    if payload.get("status") != "passed":
+        raise AssertionError("demo did not pass")
+    checks = payload.get("checks", {})
+    passed_checks = [item.get("passed") for item in checks.values() if isinstance(item, dict)]
+    if not isinstance(checks, dict) or not passed_checks or not all(passed_checks):
+        raise AssertionError("demo checks did not all pass")
+    if not payload.get("selected_memory_ids"):
+        raise AssertionError("demo did not report selected memory ids")
+    if "OpenDream found prior memory:" not in str(payload.get("agent_snippet", "")):
+        raise AssertionError("demo did not emit agent-facing memory snippet")
+    report_path = payload.get("report_path")
+    if not report_path or not (REPO_ROOT / str(report_path)).exists():
+        raise AssertionError("demo report_path missing or not written")
+
+
+def validate_eval(payload: dict[str, Any]) -> None:
+    if payload.get("scenario") != "coding-agent-showcase":
+        raise AssertionError("eval scenario mismatch")
+    if payload.get("status") != "passed":
+        raise AssertionError("eval did not pass")
+    checks = payload.get("checks", {})
+    if not isinstance(checks, dict) or not all(checks.values()):
+        raise AssertionError("eval checks did not all pass")
+
+
+def build_report(*, timeout_seconds: int) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="opendream-showcase-docs-") as temp_dir:
+        workspace = Path(temp_dir) / "workspace"
+        demo = parse_cli_json(
+            run_command(
+                [
+                    sys.executable,
+                    "-m",
+                    "opendream.cli",
+                    "demo",
+                    "--scenario",
+                    "coding-agent-showcase",
+                    "--workspace",
+                    str(workspace),
+                ],
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        validate_demo(demo)
+
+        eval_payload = parse_cli_json(
+            run_command(
+                [
+                    sys.executable,
+                    "-m",
+                    "opendream.cli",
+                    "eval",
+                    "showcase",
+                    "--scenario",
+                    "coding-agent-showcase",
+                    "--workspace",
+                    str(workspace),
+                ],
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        validate_eval(eval_payload)
+
+        return {
+            "status": "PASS",
+            "commands": {
+                "demo": demo.get("scenario"),
+                "eval": eval_payload.get("scenario"),
+            },
+            "generated_at": demo.get("generated_at"),
+            "agent_snippet": demo.get("agent_snippet"),
+            "global_cli": global_cli_status(),
+        }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--timeout-seconds", type=int, default=120)
+    args = parser.parse_args()
+    report = build_report(timeout_seconds=args.timeout_seconds)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
