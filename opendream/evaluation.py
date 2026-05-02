@@ -177,6 +177,19 @@ def _records_answer_tokens(records: list[dict[str, Any]]) -> set[str]:
     return semantic_tokens(" ".join(parts))
 
 
+def _records_source_answer_tokens(
+    records: list[dict[str, Any]],
+    events_by_id: dict[str, dict[str, Any]],
+) -> set[str]:
+    parts: list[str] = []
+    for record in records:
+        for event_id in record.get("source_event_ids", []):
+            event = events_by_id.get(str(event_id))
+            if event and event.get("content"):
+                parts.append(str(event["content"]))
+    return semantic_tokens(" ".join(parts))
+
+
 def _coverage_ratio(expected_tokens: set[str], available_tokens: set[str]) -> float:
     if not expected_tokens:
         return 0.0
@@ -275,8 +288,15 @@ def run_performance_eval(
     expected_answer_cases = 0
     expected_answer_hits = 0
     missing_expected_answer_queries: list[str] = []
+    missing_expected_answer_source_evidence_queries: list[str] = []
+    selected_memory_source_evidence_failures: list[dict[str, Any]] = []
     retrieval_timings: list[float] = []
     retrieval_results: list[dict[str, Any]] = []
+    source_events_by_id = {
+        str(event.get("event_id", "")): event
+        for event in store.load_events()
+        if event.get("event_id")
+    }
 
     for query_case in should_match_queries:
         r_start = time.monotonic()
@@ -311,9 +331,38 @@ def run_performance_eval(
         if require_expected_answers and not answer_tokens:
             missing_expected_answer_queries.append(str(query_case["query"]))
         selected_answer_tokens = _records_answer_tokens(selected_records)
+        selected_source_answer_tokens = _records_source_answer_tokens(selected_records, source_events_by_id)
         answer_coverage = _coverage_ratio(answer_tokens, selected_answer_tokens)
+        source_answer_coverage = _coverage_ratio(answer_tokens, selected_source_answer_tokens)
         answer_covered = bool(answer_tokens) and answer_coverage >= min_expected_answer_coverage
-        if answer_required and answer_covered:
+        source_answer_covered = (
+            bool(answer_tokens) and source_answer_coverage >= min_expected_answer_coverage
+        )
+        if answer_required and answer_tokens and not source_answer_covered:
+            missing_expected_answer_source_evidence_queries.append(str(query_case["query"]))
+        selected_source_evidence: list[dict[str, Any]] = []
+        for record in selected_records:
+            source_event_ids = [str(event_id) for event_id in record.get("source_event_ids", [])]
+            absent_source_event_ids = [
+                event_id for event_id in source_event_ids if event_id not in source_events_by_id
+            ]
+            source_present = bool(source_event_ids) and not absent_source_event_ids
+            item = {
+                "memory_id": record.get("memory_id"),
+                "title": record.get("title"),
+                "source_event_ids": source_event_ids,
+                "source_present": source_present,
+                "absent_source_event_ids": absent_source_event_ids,
+            }
+            selected_source_evidence.append(item)
+            if not source_present:
+                selected_memory_source_evidence_failures.append(
+                    {
+                        "query": str(query_case["query"]),
+                        **item,
+                    }
+                )
+        if answer_required and answer_covered and source_answer_covered:
             expected_answer_hits += 1
         retrieval_results.append({
             "query": query_case["query"],
@@ -324,6 +373,10 @@ def run_performance_eval(
             "answer_coverage": round(answer_coverage, 4),
             "answer_covered": answer_covered,
             "missing_answer_terms": sorted(answer_tokens - selected_answer_tokens),
+            "source_answer_coverage": round(source_answer_coverage, 4),
+            "source_answer_covered": source_answer_covered,
+            "missing_source_answer_terms": sorted(answer_tokens - selected_source_answer_tokens),
+            "selected_memory_source_evidence": selected_source_evidence,
             "latency_ms": r_ms,
         })
 
@@ -405,6 +458,11 @@ def run_performance_eval(
     contradiction_score = 100.0 if contradiction_resolved else 0.0
     procedural_score = round(workflow_memory_raw * 100, 1)
     gating_score = round(gating_accuracy * 100, 1)
+    hallucination_risk_passed = (
+        not selected_memory_source_evidence_failures
+        and not missing_expected_answer_source_evidence_queries
+    )
+    hallucination_risk_score = 100.0 if hallucination_risk_passed else 0.0
 
     weighted_total = round(
         write_score * 0.15
@@ -423,6 +481,7 @@ def run_performance_eval(
         or (
             expected_answer_coverage >= min_expected_answer_coverage
             and not missing_expected_answer_queries
+            and not missing_expected_answer_source_evidence_queries
         )
     )
     passed = (
@@ -431,6 +490,7 @@ def run_performance_eval(
         and retrieval_score >= 60.0
         and expected_answer_passed
         and workflow_memory_passed
+        and hallucination_risk_passed
     )
 
     return {
@@ -446,6 +506,7 @@ def run_performance_eval(
             "procedural_reuse": procedural_score,
             "workflow_memory": procedural_score,
             "gating_accuracy": gating_score,
+            "hallucination_risk": hallucination_risk_score,
             "weighted_total": weighted_total,
         },
         "details": {
@@ -463,6 +524,9 @@ def run_performance_eval(
             "expected_answer_coverage_raw": round(expected_answer_coverage, 4),
             "expected_answer_cases": expected_answer_cases,
             "missing_expected_answer_queries": missing_expected_answer_queries,
+            "missing_expected_answer_source_evidence_queries": (
+                missing_expected_answer_source_evidence_queries
+            ),
             "required_workflow_titles": required_workflow_titles,
             "missing_required_workflows": missing_required_workflows,
             "workflow_memory_raw": round(workflow_memory_raw, 4),
@@ -477,6 +541,24 @@ def run_performance_eval(
         },
         "retrieval_results": retrieval_results,
         "gating_results": gating_results,
+        "hallucination_risk": {
+            "passed": hallucination_risk_passed,
+            "risk_level": "low" if hallucination_risk_passed else "high",
+            "selected_memories_without_source_evidence": selected_memory_source_evidence_failures,
+            "selected_expected_answer_elements_without_source_evidence": (
+                missing_expected_answer_source_evidence_queries
+            ),
+            "gates": {
+                "selected_memory_source_evidence": {
+                    "passed": not selected_memory_source_evidence_failures,
+                    "failures": selected_memory_source_evidence_failures,
+                },
+                "expected_answer_source_evidence": {
+                    "passed": not missing_expected_answer_source_evidence_queries,
+                    "failed_queries": missing_expected_answer_source_evidence_queries,
+                },
+            },
+        },
     }
 
 

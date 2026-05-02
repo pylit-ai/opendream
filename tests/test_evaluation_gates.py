@@ -57,6 +57,22 @@ class PerformanceEvaluationGateTests(unittest.TestCase):
         self.assertFalse(result["retrieval_results"][0]["answer_covered"])
         self.assertIn("mongodb", result["retrieval_results"][0]["missing_answer_terms"])
 
+    def test_expected_answer_terms_must_have_source_event_evidence(self) -> None:
+        fixture = self._fixture()
+        fixture["queries"]["should_match"][0]["expected_answer_terms"] = ["Decision"]
+
+        result = self._run(fixture)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(result["retrieval_results"][0]["answer_covered"])
+        self.assertFalse(result["retrieval_results"][0]["source_answer_covered"])
+        self.assertIn("decision", result["retrieval_results"][0]["missing_source_answer_terms"])
+        self.assertEqual(result["scorecard"]["hallucination_risk"], 0.0)
+        self.assertEqual(
+            result["details"]["missing_expected_answer_source_evidence_queries"],
+            ["What database should we use for this project?"],
+        )
+
     def test_required_workflow_memory_must_be_active_and_task_shaped(self) -> None:
         fixture = self._fixture()
         fixture["events"]["high_signal"] = [

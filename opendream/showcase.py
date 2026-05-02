@@ -14,6 +14,7 @@ SHOWCASE_SCENARIO = "coding-agent-showcase"
 DEFAULT_DEMO_SCENARIO = "default"
 SHOWCASE_FIXTURE = FIXTURE_ROOT / "showcase_coding_agent_memory.jsonl"
 SHOWCASE_QUERY = "pnpm Redis build memory-showcase workflow"
+SHOWCASE_RETRIEVAL_LIMIT = 6
 SHOWCASE_TASK_PROMPT = (
     "You are about to update the OpenDream Observe UI for the memory showcase. "
     "Before editing, identify the repo-specific package manager, local service prerequisites, "
@@ -43,6 +44,7 @@ SHOWCASE_ANSWER_SIGNALS: tuple[dict[str, Any], ...] = (
         "key": "npm_lockfile_drift_avoided",
         "label": "Avoids npm because of lockfile drift",
         "required_terms": ("avoid npm", "lockfile drift"),
+        "source_terms": ("avoid npm", "lockfile", "drift"),
     },
     {
         "key": "observe_dist_rebuild",
@@ -53,6 +55,7 @@ SHOWCASE_ANSWER_SIGNALS: tuple[dict[str, Any], ...] = (
         "key": "memory_showcase_workflow",
         "label": "Runs the memory-showcase verification path",
         "required_terms": ("memory-showcase", "verification"),
+        "source_terms": ("memory-showcase", "focused unittest", "make verify"),
     },
     {
         "key": "no_current_npm_guidance",
@@ -134,7 +137,7 @@ def run_showcase_demo(store: MemoryStore, *, now: str | None = None) -> dict[str
     before = retrieve(
         store,
         query=SHOWCASE_QUERY,
-        limit=5,
+        limit=SHOWCASE_RETRIEVAL_LIMIT,
         now=timestamp,
         query_source="showcase-before",
         caller_detail="coding-agent-showcase baseline",
@@ -149,12 +152,12 @@ def run_showcase_demo(store: MemoryStore, *, now: str | None = None) -> dict[str
     after = retrieve(
         store,
         query=SHOWCASE_QUERY,
-        limit=5,
+        limit=SHOWCASE_RETRIEVAL_LIMIT,
         now=timestamp,
         query_source="showcase-after",
         caller_detail="coding-agent-showcase seeded recall",
     )
-    context = prepare_context(store, query=SHOWCASE_QUERY, limit=5, now=timestamp)
+    context = prepare_context(store, query=SHOWCASE_QUERY, limit=SHOWCASE_RETRIEVAL_LIMIT, now=timestamp)
     report = build_showcase_report(
         store,
         events=events,
@@ -182,6 +185,7 @@ def build_showcase_report(
 ) -> dict[str, Any]:
     records = {record["memory_id"]: record for record in store.load_durable_records()}
     events_by_id = {event["event_id"]: event for event in events}
+    candidates = _load_all_candidates(store)
     source_refs = [
         _source_ref(memory_id, records.get(memory_id), events_by_id)
         for memory_id in after.get("selected_memory_ids", [])
@@ -199,6 +203,26 @@ def build_showcase_report(
         source_refs=source_refs,
         timestamp=timestamp,
     )
+    dream_transition_diff = _dream_transition_diff(
+        events=events,
+        candidates=candidates,
+        records=records,
+        maintenance=maintenance,
+        after=after,
+        context=context,
+    )
+    evidence_density = _evidence_density(source_refs)
+    hallucination_risk = _hallucination_risk(
+        source_refs=source_refs,
+        evidence_density=evidence_density,
+    )
+    why_this_dream_helped = _why_this_dream_helped(
+        dream_transition_diff=dream_transition_diff,
+        evidence_density=evidence_density,
+        hallucination_risk=hallucination_risk,
+        case_results=case_results,
+        agent_answers=agent_answers,
+    )
     checks = score_showcase(
         before=before,
         after=after,
@@ -206,6 +230,7 @@ def build_showcase_report(
         agent_snippet=agent_snippet,
         agent_answers=agent_answers,
         case_results=case_results,
+        hallucination_risk=hallucination_risk,
     )
     status = "passed" if all(item["passed"] for item in checks.values()) else "failed"
     objective = _showcase_objective()
@@ -255,6 +280,10 @@ def build_showcase_report(
             "expected_signals": ["pnpm", "Redis", "frontend build", "memory-showcase workflow"],
         },
         "retrieval_rationale": retrieval_reasons,
+        "dream_transition_diff": dream_transition_diff,
+        "evidence_density": evidence_density,
+        "hallucination_risk": hallucination_risk,
+        "why_this_dream_helped": why_this_dream_helped,
         "dream_effectiveness": _dream_effectiveness(
             events=events,
             records=records,
@@ -279,6 +308,7 @@ def score_showcase(
     agent_snippet: str,
     agent_answers: dict[str, Any],
     case_results: dict[str, list[dict[str, Any]]],
+    hallucination_risk: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     joined = "\n".join(
         " ".join(
@@ -324,6 +354,10 @@ def score_showcase(
             "passed": bool(source_refs)
             and all(ref.get("source_event_ids") and ref.get("source_events") for ref in source_refs),
             "detail": "each selected memory should expose source event evidence",
+        },
+        "hallucination_risk": {
+            "passed": bool(hallucination_risk.get("passed")),
+            "detail": "selected memories and expected answer elements must be backed by source events",
         },
         "snippet": {
             "passed": "OpenDream found prior memory:" in agent_snippet,
@@ -517,6 +551,24 @@ def _source_ref(
     if record is None:
         return {"memory_id": memory_id, "missing": True, "source_event_ids": [], "source_events": []}
     source_event_ids = list(record.get("source_event_ids", []))
+    source_events: list[dict[str, Any]] = []
+    absent_source_event_ids: list[str] = []
+    for event_id in source_event_ids:
+        event = events_by_id.get(event_id)
+        if event is None:
+            absent_source_event_ids.append(event_id)
+            continue
+        content = event.get("content")
+        source_event = {
+            "event_id": event_id,
+            "kind": event.get("kind"),
+            "message_ref": event.get("source", {}).get("message_ref"),
+            "timestamp": event.get("timestamp"),
+            "content": content,
+        }
+        if isinstance(content, str):
+            source_event["source_char_span"] = {"start": 0, "end": len(content)}
+        source_events.append(source_event)
     return {
         "memory_id": memory_id,
         "title": record.get("title", ""),
@@ -524,17 +576,8 @@ def _source_ref(
         "summary": record.get("summary", ""),
         "status": record.get("status", ""),
         "source_event_ids": source_event_ids,
-        "source_events": [
-            {
-                "event_id": event_id,
-                "kind": events_by_id.get(event_id, {}).get("kind"),
-                "message_ref": events_by_id.get(event_id, {}).get("source", {}).get("message_ref"),
-                "timestamp": events_by_id.get(event_id, {}).get("timestamp"),
-                "content": events_by_id.get(event_id, {}).get("content"),
-            }
-            for event_id in source_event_ids
-            if event_id in events_by_id
-        ],
+        "absent_source_event_ids": absent_source_event_ids,
+        "source_events": source_events,
     }
 
 
@@ -635,7 +678,7 @@ def _measure_agent_answer(
         source_ref_ok = not signal.get("requires_source_refs") or (
             bool(selected_memory_ids)
             and bool(source_refs)
-            and all(ref.get("source_event_ids") for ref in source_refs)
+            and all(ref.get("source_event_ids") and ref.get("source_events") for ref in source_refs)
         )
         signals.append(
             {
@@ -743,6 +786,351 @@ def _prompt_context_links(
             }
         )
     return links
+
+
+def _load_all_candidates(store: MemoryStore) -> list[dict[str, Any]]:
+    if not store.candidates_dir.exists():
+        return []
+    candidates: list[dict[str, Any]] = []
+    for path in sorted(store.candidates_dir.glob("*.jsonl")):
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            continue
+        for line in text.splitlines():
+            if line.strip():
+                candidates.append(read_json_line(line))
+    return candidates
+
+
+def _count_by_key(items: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        value = str(item.get(key, "unknown") or "unknown")
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _memory_summary(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "memory_id": record.get("memory_id"),
+        "title": record.get("title"),
+        "type": record.get("type"),
+        "status": record.get("status"),
+        "source_event_ids": list(record.get("source_event_ids", [])),
+        "supersedes": list(record.get("supersedes", [])),
+        "conflicts_with": list(record.get("conflicts_with", [])),
+    }
+
+
+def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "candidate_id": candidate.get("candidate_id"),
+        "title": candidate.get("title"),
+        "type": candidate.get("type"),
+        "status": candidate.get("status"),
+        "derived_from_event_ids": list(candidate.get("derived_from_event_ids", [])),
+    }
+
+
+def _dream_transition_diff(
+    *,
+    events: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    records: dict[str, dict[str, Any]],
+    maintenance: dict[str, Any],
+    after: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    consolidate = maintenance.get("consolidate", {}) if isinstance(maintenance, dict) else {}
+    extract = maintenance.get("extract", {}) if isinstance(maintenance, dict) else {}
+    record_values = list(records.values())
+    selected_ids = [memory_id for memory_id in after.get("selected_memory_ids", []) if memory_id in records]
+    context_ids = [memory_id for memory_id in context.get("selected_memory_ids", []) if memory_id in records]
+    excluded_ids = [
+        item.get("memory_id")
+        for item in after.get("excluded", [])
+        if isinstance(item, dict) and item.get("memory_id")
+    ]
+    non_active = [
+        record
+        for record in record_values
+        if record.get("status") in {"contested", "quarantined", "superseded"}
+    ]
+    candidate_source_ids = sorted(
+        {
+            str(event_id)
+            for candidate in candidates
+            for event_id in candidate.get("derived_from_event_ids", [])
+            if str(event_id)
+        }
+    )
+    selected_source_ids = sorted(
+        {
+            str(event_id)
+            for memory_id in selected_ids
+            for event_id in records[memory_id].get("source_event_ids", [])
+            if str(event_id)
+        }
+    )
+    stages = [
+        {
+            "key": "raw_events",
+            "label": "raw events",
+            "input_count": 0,
+            "output_count": len(events),
+            "event_ids": [str(event.get("event_id")) for event in events],
+            "kind_counts": _count_by_key(events, "kind"),
+        },
+        {
+            "key": "candidate_memories",
+            "label": "candidate memories",
+            "input_count": int(extract.get("processed_events", len(events))),
+            "output_count": len(candidates),
+            "candidate_ids": [str(candidate.get("candidate_id")) for candidate in candidates],
+            "derived_from_event_ids": candidate_source_ids,
+            "items": [_candidate_summary(candidate) for candidate in candidates],
+        },
+        {
+            "key": "durable_memories",
+            "label": "durable memories",
+            "input_count": len(candidates),
+            "output_count": len(record_values),
+            "created": consolidate.get("created", 0),
+            "updated": consolidate.get("updated", 0),
+            "status_counts": _count_by_key(record_values, "status"),
+            "items": [_memory_summary(record) for record in record_values],
+        },
+        {
+            "key": "contested_quarantined_superseded_memories",
+            "label": "contested/quarantined/superseded memories",
+            "input_count": len(record_values),
+            "output_count": len(non_active),
+            "contested": consolidate.get("contested", 0),
+            "quarantined": consolidate.get("quarantined", 0),
+            "superseded": consolidate.get("superseded", 0),
+            "items": [_memory_summary(record) for record in non_active],
+        },
+        {
+            "key": "prompt_context",
+            "label": "prompt context",
+            "input_count": len([record for record in record_values if record.get("status") == "active"]),
+            "output_count": len(context_ids),
+            "selected_memory_ids": context_ids,
+            "retrieval_selected_memory_ids": selected_ids,
+            "excluded_memory_ids": excluded_ids,
+            "selected_source_event_ids": selected_source_ids,
+            "prompt_context_chars": len(str(context.get("prompt_context", ""))),
+        },
+    ]
+    return {
+        "stages": stages,
+        "status_counts": _count_by_key(record_values, "status"),
+        "transition_counts": {
+            "raw_events_to_candidates": len(candidates),
+            "candidates_to_durable": len(record_values),
+            "durable_to_non_active": len(non_active),
+            "durable_to_prompt_context": len(context_ids),
+        },
+    }
+
+
+def _evidence_density(source_refs: list[dict[str, Any]]) -> dict[str, Any]:
+    selected: list[dict[str, Any]] = []
+    unique_source_event_ids: set[str] = set()
+    for ref in source_refs:
+        source_event_ids = [str(event_id) for event_id in ref.get("source_event_ids", []) if str(event_id)]
+        source_events = ref.get("source_events", []) if isinstance(ref.get("source_events"), list) else []
+        absent_ids = [str(event_id) for event_id in ref.get("absent_source_event_ids", []) if str(event_id)]
+        present_ids = [
+            str(event.get("event_id"))
+            for event in source_events
+            if isinstance(event, dict) and event.get("event_id")
+        ]
+        unique_source_event_ids.update(present_ids)
+        source_refs_present = bool(source_event_ids) and not absent_ids and len(present_ids) == len(source_event_ids)
+        selected.append(
+            {
+                "memory_id": ref.get("memory_id"),
+                "title": ref.get("title"),
+                "type": ref.get("type"),
+                "source_event_ids": source_event_ids,
+                "source_event_count": len(source_event_ids),
+                "source_refs_present": source_refs_present,
+                "present_source_event_ids": present_ids,
+                "absent_source_event_ids": absent_ids,
+                "source_char_spans": [
+                    {
+                        "event_id": event.get("event_id"),
+                        "source_char_span": event.get("source_char_span"),
+                    }
+                    for event in source_events
+                    if isinstance(event, dict) and event.get("source_char_span")
+                ],
+            }
+        )
+    selected_count = len(selected)
+    total_source_refs = sum(item["source_event_count"] for item in selected)
+    return {
+        "selected_memory_count": selected_count,
+        "selected_source_event_count": len(unique_source_event_ids),
+        "source_events_per_selected_memory": round(total_source_refs / selected_count, 3)
+        if selected_count
+        else 0.0,
+        "source_refs_present_count": sum(1 for item in selected if item["source_refs_present"]),
+        "source_refs_absent_count": sum(1 for item in selected if not item["source_refs_present"]),
+        "selected_memories": selected,
+    }
+
+
+def _source_evidence_text(source_refs: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for ref in source_refs:
+        for event in ref.get("source_events", []):
+            if isinstance(event, dict) and event.get("content"):
+                parts.append(str(event["content"]))
+    return "\n".join(parts)
+
+
+def _expected_answer_evidence_gaps(source_refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    source_text = _source_evidence_text(source_refs).lower()
+    gaps: list[dict[str, Any]] = []
+    for signal in SHOWCASE_ANSWER_SIGNALS:
+        required_terms = [
+            str(term)
+            for term in signal.get("source_terms", signal.get("required_terms", ()))
+            if str(term)
+        ]
+        if not required_terms:
+            continue
+        missing_terms = [term for term in required_terms if term.lower() not in source_text]
+        if missing_terms:
+            gaps.append(
+                {
+                    "key": signal["key"],
+                    "label": signal["label"],
+                    "required_terms": required_terms,
+                    "missing_terms": missing_terms,
+                }
+            )
+    return gaps
+
+
+def _hallucination_risk(
+    *,
+    source_refs: list[dict[str, Any]],
+    evidence_density: dict[str, Any],
+) -> dict[str, Any]:
+    selected_without_source = [
+        item
+        for item in evidence_density.get("selected_memories", [])
+        if isinstance(item, dict) and not item.get("source_refs_present")
+    ]
+    expected_answer_gaps = _expected_answer_evidence_gaps(source_refs)
+    selected_memory_gate = {
+        "passed": not selected_without_source,
+        "failed_memory_ids": [item.get("memory_id") for item in selected_without_source],
+    }
+    expected_answer_gate = {
+        "passed": not expected_answer_gaps,
+        "failed_elements": expected_answer_gaps,
+    }
+    passed = selected_memory_gate["passed"] and expected_answer_gate["passed"]
+    return {
+        "passed": passed,
+        "risk_level": "low" if passed else "high",
+        "selected_memories_without_source_evidence": selected_without_source,
+        "selected_expected_answer_elements_without_source_evidence": expected_answer_gaps,
+        "gates": {
+            "selected_memory_source_evidence": selected_memory_gate,
+            "expected_answer_source_evidence": expected_answer_gate,
+        },
+    }
+
+
+def _find_case(cases: list[dict[str, Any]], case_id: str) -> dict[str, Any]:
+    for case in cases:
+        if case.get("case_id") == case_id:
+            return case
+    return {}
+
+
+def _stage_by_key(dream_transition_diff: dict[str, Any], key: str) -> dict[str, Any]:
+    for stage in dream_transition_diff.get("stages", []):
+        if isinstance(stage, dict) and stage.get("key") == key:
+            return stage
+    return {}
+
+
+def _why_this_dream_helped(
+    *,
+    dream_transition_diff: dict[str, Any],
+    evidence_density: dict[str, Any],
+    hallucination_risk: dict[str, Any],
+    case_results: dict[str, list[dict[str, Any]]],
+    agent_answers: dict[str, Any],
+) -> dict[str, Any]:
+    non_active_stage = _stage_by_key(dream_transition_diff, "contested_quarantined_superseded_memories")
+    prompt_stage = _stage_by_key(dream_transition_diff, "prompt_context")
+    decoy_case = _find_case(
+        case_results.get("negative_controls", []),
+        "unrelated_graphql_billing_decoy",
+    )
+    stale_case = _find_case(
+        case_results.get("negative_controls", []),
+        "stale_npm_prototype_not_current_guidance",
+    )
+    workflow_selected = any(
+        str(item.get("title", "")).startswith("Workflow:")
+        for item in _stage_by_key(dream_transition_diff, "durable_memories").get("items", [])
+        if item.get("memory_id") in set(prompt_stage.get("selected_memory_ids", []))
+    )
+    source_gate = hallucination_risk.get("gates", {}).get("selected_memory_source_evidence", {})
+    claims = [
+        {
+            "key": "stale_contested",
+            "passed": bool(stale_case.get("passed")) and int(non_active_stage.get("contested", 0)) > 0,
+            "metrics": {
+                "contested_count": non_active_stage.get("contested", 0),
+                "stale_negative_control_passed": bool(stale_case.get("passed")),
+            },
+        },
+        {
+            "key": "decoy_excluded",
+            "passed": bool(decoy_case.get("passed")),
+            "metrics": {
+                "selected_decoy_ids": decoy_case.get("evidence", {}).get("selected", []),
+                "excluded_decoy_ids": decoy_case.get("evidence", {}).get("excluded", []),
+            },
+        },
+        {
+            "key": "workflow_preserved",
+            "passed": workflow_selected,
+            "metrics": {
+                "prompt_context_selected_memory_ids": prompt_stage.get("selected_memory_ids", []),
+            },
+        },
+        {
+            "key": "source_refs_retained",
+            "passed": bool(source_gate.get("passed")),
+            "metrics": {
+                "source_refs_present_count": evidence_density.get("source_refs_present_count", 0),
+                "source_refs_absent_count": evidence_density.get("source_refs_absent_count", 0),
+                "selected_source_event_count": evidence_density.get("selected_source_event_count", 0),
+            },
+        },
+        {
+            "key": "answer_improved",
+            "passed": bool(agent_answers.get("comparison", {}).get("passed")),
+            "metrics": {
+                "score_delta": agent_answers.get("comparison", {}).get("score_delta"),
+            },
+        },
+    ]
+    return {
+        "computed_from": ["dream_transition_diff", "evidence_density", "hallucination_risk", "agent_answers"],
+        "passed": all(claim["passed"] for claim in claims),
+        "claims": claims,
+    }
 
 
 def _dream_effectiveness(

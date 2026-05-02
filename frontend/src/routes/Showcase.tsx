@@ -23,7 +23,18 @@ import { ErrorState } from '~/components/ErrorState';
 import { IdLink } from '~/components/IdLink';
 import { LoadingPage } from '~/components/Loading';
 import { Page } from '~/components/Page';
-import { Chip } from '~/components/Chip';
+import { Chip, type ChipVariant } from '~/components/Chip';
+
+type SummaryTone = 'success' | 'warn' | 'danger' | 'neutral';
+
+interface SummaryCardProps {
+  label: string;
+  value: string;
+  detail: string;
+  tone: SummaryTone;
+  icon: JSX.Element;
+  children?: JSX.Element;
+}
 
 function statusVariant(status: string | undefined): 'success' | 'danger' | 'neutral' {
   if (status === 'passed' || status === 'completed') return 'success';
@@ -86,6 +97,142 @@ function answerScoreDelta(report: ShowcaseReport | undefined): string {
   return `delta +${Math.round(delta * 100)} pts`;
 }
 
+function memoryAssistedAnswer(report: ShowcaseReport | undefined): ShowcaseAgentAnswer | undefined {
+  return report?.agent_answers?.memory_assisted;
+}
+
+function checkSummary(report: ShowcaseReport | undefined): { passed: number; total: number } {
+  const entries = checks(report);
+  return {
+    passed: entries.filter(([, check]) => check.passed === true).length,
+    total: entries.length,
+  };
+}
+
+function chipVariant(tone: SummaryTone): ChipVariant {
+  if (tone === 'success') return 'ok';
+  if (tone === 'warn') return 'warn';
+  if (tone === 'danger') return 'danger';
+  return 'neutral';
+}
+
+function toneTextClass(tone: SummaryTone): string {
+  if (tone === 'success') return 'text-success';
+  if (tone === 'warn') return 'text-warn';
+  if (tone === 'danger') return 'text-danger';
+  return 'text-text';
+}
+
+function verdictSummary(report: ShowcaseReport | undefined): {
+  label: string;
+  detail: string;
+  tone: SummaryTone;
+} {
+  const comparison = report?.agent_answers?.comparison;
+  const memoryPassed = comparison?.memory_assisted_passed ?? memoryAssistedAnswer(report)?.measurement?.passed;
+  const statelessPassed = comparison?.stateless_passed;
+  const status = report?.status;
+
+  if (status === 'failed' || comparison?.passed === false || memoryPassed === false) {
+    return {
+      label: 'Needs evidence',
+      detail: 'Memory-assisted answer still misses required signals or report checks.',
+      tone: 'danger',
+    };
+  }
+
+  if (comparison?.passed === true || memoryPassed === true) {
+    return {
+      label: 'Memory earns the answer',
+      detail: statelessPassed
+        ? 'Scored answer passes; trust comes from source-linked auditability.'
+        : 'Memory-assisted answer passes where stateless context does not.',
+      tone: 'success',
+    };
+  }
+
+  if (status === 'passed' || status === 'completed') {
+    return {
+      label: 'Report complete',
+      detail: 'Showcase generated, but scored answer comparison is unavailable.',
+      tone: 'warn',
+    };
+  }
+
+  return {
+    label: 'No verdict yet',
+    detail: 'Run the showcase demo to generate scored memory evidence.',
+    tone: 'neutral',
+  };
+}
+
+function coverageSummary(report: ShowcaseReport | undefined): {
+  label: string;
+  detail: string;
+  tone: SummaryTone;
+  selected: number;
+  sourceRefs: number;
+  promptLinks: number;
+} {
+  const measurement = memoryAssistedAnswer(report)?.measurement;
+  const passed = measurement?.passed_count ?? 0;
+  const total = measurement?.total_count ?? 0;
+  const sourceRefCount = measurement?.source_ref_count ?? sourceRefs(report).length;
+  const selected = measurement?.selected_memory_count ?? selectedCount(report);
+  const promptLinkCount = promptLinks(report).length;
+  const ratio = total > 0 ? passed / total : 0;
+  const tone: SummaryTone =
+    total === 0 ? 'neutral' : ratio === 1 && sourceRefCount > 0 ? 'success' : ratio >= 0.5 ? 'warn' : 'danger';
+
+  return {
+    label: total > 0 ? `${passed}/${total} signals` : `${sourceRefCount} source refs`,
+    detail: `${selected} selected memories, ${sourceRefCount} source refs, ${promptLinkCount} prompt links`,
+    tone,
+    selected,
+    sourceRefs: sourceRefCount,
+    promptLinks: promptLinkCount,
+  };
+}
+
+function trustSummary(report: ShowcaseReport | undefined): {
+  label: string;
+  detail: string;
+  tone: SummaryTone;
+  checksLabel: string;
+} {
+  const verdict = verdictSummary(report);
+  const coverage = coverageSummary(report);
+  const check = checkSummary(report);
+  const checksLabel = check.total > 0 ? `${check.passed}/${check.total} checks` : 'no checks';
+  const allChecksPassed = check.total > 0 && check.passed === check.total;
+  const hasSources = coverage.sourceRefs > 0 && coverage.selected > 0;
+
+  if (verdict.tone === 'success' && allChecksPassed && hasSources) {
+    return {
+      label: 'High trust',
+      detail: `${checksLabel} resolved with selected memories and source refs visible.`,
+      tone: 'success',
+      checksLabel,
+    };
+  }
+
+  if (verdict.tone !== 'danger' && (hasSources || check.passed > 0)) {
+    return {
+      label: 'Medium trust',
+      detail: `${checksLabel}; review coverage gaps before relying on this answer.`,
+      tone: 'warn',
+      checksLabel,
+    };
+  }
+
+  return {
+    label: 'Low trust',
+    detail: `${checksLabel}; evidence chain is incomplete or failing.`,
+    tone: verdict.tone === 'neutral' ? 'neutral' : 'danger',
+    checksLabel,
+  };
+}
+
 function asText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -105,17 +252,21 @@ function eventPreview(ref: ShowcaseSourceRef): string {
   return [messageRef, content].filter(Boolean).join(' · ');
 }
 
-function Stat(props: { label: string; value: string | number; tone?: 'success' | 'danger' | 'neutral' }): JSX.Element {
-  const tone = () =>
-    props.tone === 'success'
-      ? 'text-success'
-      : props.tone === 'danger'
-        ? 'text-danger'
-        : 'text-text';
+function SummaryCard(props: SummaryCardProps): JSX.Element {
   return (
-    <div class="rounded-md border border-border bg-surface px-4 py-3">
-      <div class="text-[11px] uppercase text-text-subtle">{props.label}</div>
-      <div class={`mt-1 text-lg font-semibold ${tone()}`}>{props.value}</div>
+    <div class="rounded-md border border-border bg-surface p-5">
+      <div class="mb-4 flex items-center justify-between gap-3">
+        <div class="flex min-w-0 items-center gap-2 text-sm font-medium text-text">
+          <span class={toneTextClass(props.tone)}>{props.icon}</span>
+          <span>{props.label}</span>
+        </div>
+        <Chip variant={chipVariant(props.tone)}>{props.value}</Chip>
+      </div>
+      <p class={`text-xl font-semibold leading-7 ${toneTextClass(props.tone)}`}>{props.value}</p>
+      <p class="mt-2 text-sm leading-6 text-text-muted">{props.detail}</p>
+      <Show when={props.children}>
+        <div class="mt-4 flex flex-wrap gap-2">{props.children}</div>
+      </Show>
     </div>
   );
 }
@@ -150,14 +301,54 @@ export default function ShowcaseRoute(): JSX.Element {
               />
             }
           >
-            {(r) => (
-              <>
-                <div class="grid gap-3 md:grid-cols-4">
-                  <Stat label="Status" value={r().status ?? 'unknown'} tone={statusVariant(r().status)} />
-                  <Stat label="Selected" value={selectedCount(r())} />
-                  <Stat label="Before" value={r().before?.selected_memory_ids?.length ?? 0} />
-                  <Stat label="After" value={r().after?.selected_memory_ids?.length ?? 0} />
-                </div>
+            {(r) => {
+              const verdict = () => verdictSummary(r());
+              const coverage = () => coverageSummary(r());
+              const trust = () => trustSummary(r());
+
+              return (
+                <>
+                  <section class="grid gap-4 xl:grid-cols-[1.2fr_0.9fr_0.9fr]">
+                    <SummaryCard
+                      label="Verdict"
+                      value={verdict().label}
+                      detail={verdict().detail}
+                      tone={verdict().tone}
+                      icon={verdict().tone === 'danger' ? <CircleAlert size={16} /> : <CheckCircle2 size={16} />}
+                    >
+                      <Chip variant={chipVariant(statusVariant(r().status))}>report {r().status ?? 'unknown'}</Chip>
+                      <Show when={answerScoreDelta(r())}>
+                        {(delta) => <Chip variant="accent">{delta()}</Chip>}
+                      </Show>
+                    </SummaryCard>
+
+                    <SummaryCard
+                      label="Coverage"
+                      value={coverage().label}
+                      detail={coverage().detail}
+                      tone={coverage().tone}
+                      icon={<FileSearch size={16} />}
+                    >
+                      <Chip variant="neutral">{coverage().selected} selected</Chip>
+                      <Chip variant={coverage().sourceRefs > 0 ? 'ok' : 'warn'}>
+                        {coverage().sourceRefs} source refs
+                      </Chip>
+                      <Chip variant="neutral">{coverage().promptLinks} prompt links</Chip>
+                    </SummaryCard>
+
+                    <SummaryCard
+                      label="Trust level"
+                      value={trust().label}
+                      detail={trust().detail}
+                      tone={trust().tone}
+                      icon={<BrainCircuit size={16} />}
+                    >
+                      <Chip variant={chipVariant(trust().tone)}>{trust().checksLabel}</Chip>
+                      <Chip variant={selectedCount(r()) > 0 ? 'ok' : 'warn'}>
+                        {selectedCount(r())} durable memories
+                      </Chip>
+                    </SummaryCard>
+                  </section>
 
                 <section class="rounded-md border border-border bg-surface p-5">
                   <div class="mb-4 flex items-center gap-2 text-sm font-medium text-text">
@@ -482,8 +673,9 @@ export default function ShowcaseRoute(): JSX.Element {
                     </div>
                   </dl>
                 </section>
-              </>
-            )}
+                </>
+              );
+            }}
           </Show>
         </Show>
       </Show>
