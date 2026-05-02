@@ -182,7 +182,7 @@ export interface DreamChangePointContributor {
 export interface DreamChangePoint {
   score: number;
   severity: 'low' | 'medium' | 'high';
-  kind: 'material' | 'failure' | 'drift' | 'duration_anomaly' | 'noop';
+  kind: 'material' | 'failure' | 'drift' | 'duration_anomaly' | 'boundary' | 'cumulative' | 'noop';
   label: string;
   contributors: DreamChangePointContributor[];
   signature: string;

@@ -207,7 +207,7 @@ export default function DreamsRoute(): JSX.Element {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [cycles, { refetch }] = createResource<DreamCycleListResponse>(() =>
-    cachedFetch('dream-cycles', () => getDreamCycles({ limit: 200 }), 15_000),
+    cachedFetch('dream-cycles', () => getDreamCycles({ limit: 1000 }), 15_000),
   );
   const [coverage] = createResource<DreamCoverageResponse>(() =>
     cachedFetch('dream-coverage', () => getDreamCoverage({ window: '7d' }), 15_000),
@@ -223,6 +223,8 @@ export default function DreamsRoute(): JSX.Element {
   const [selected, setSelected] = createSignal<DreamCycle | null>(null);
   const [expandedGroups, setExpandedGroups] = createSignal<Set<string>>(new Set());
   const [collapseIdle, setCollapseIdle] = createSignal(true);
+  type ViewFilter = 'all' | 'changes' | 'material' | 'failures';
+  const [viewFilter, setViewFilter] = createSignal<ViewFilter>('all');
 
   const toggleGroup = (key: string): void => {
     const next = new Set(expandedGroups());
@@ -325,10 +327,28 @@ export default function DreamsRoute(): JSX.Element {
     totalMs: number;
   };
   type CycleRow = { kind: 'cycle'; cycle: DreamCycle; change?: string };
-  type Row = CycleRow | EffectGroup;
+  type ExpandedHeader = {
+    kind: 'expanded-header';
+    key: string;
+    count: number;
+    label: string;
+  };
+  type Row = CycleRow | EffectGroup | ExpandedHeader;
+
+  const filteredDreams = (): DreamCycle[] => {
+    const f = viewFilter();
+    const items = dreams();
+    if (f === 'all') return items;
+    if (f === 'changes') return items.filter((c) => !isNoopCycle(c));
+    if (f === 'material') return items.filter((c) => hasMaterialEffect(c));
+    if (f === 'failures') return items.filter((c) => isFailureCycle(c));
+    return items;
+  };
 
   const groupedRows = (): Row[] => {
-    const items = dreams();
+    const items = filteredDreams();
+    // When filter strips noop cycles, grouping has nothing to collapse — render plain rows.
+    if (viewFilter() !== 'all') return items.map((c) => ({ kind: 'cycle', cycle: c }));
     if (!collapseIdle()) return items.map((c) => ({ kind: 'cycle', cycle: c }));
     const expanded = expandedGroups();
     const out: Row[] = [];
@@ -352,6 +372,14 @@ export default function DreamsRoute(): JSX.Element {
       const last = run[run.length - 1]!;
       const key = `effect:${signature}:${first.run_id}:${last.run_id}`;
       if (run.length === 1 || expanded.has(key)) {
+        if (run.length > 1 && expanded.has(key)) {
+          out.push({
+            kind: 'expanded-header',
+            key,
+            count: run.length,
+            label: noopLabel(c),
+          });
+        }
         for (let offset = 0; offset < run.length; offset += 1) {
           const x = run[offset]!;
           const next = items[i + offset + 1];
@@ -403,6 +431,21 @@ export default function DreamsRoute(): JSX.Element {
       header: 'When',
       width: '150px',
       render: (row) => {
+        if (row.kind === 'expanded-header') {
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleGroup(row.key);
+              }}
+              class="text-[11px] text-accent hover:underline"
+              title={row.label}
+            >
+              ▾ Collapse {row.count}
+            </button>
+          );
+        }
         if (row.kind === 'effect-group') {
           return (
             <span class="text-xs text-text-muted" title={`${row.firstTs ?? ''} → ${row.lastTs ?? ''}`}>
@@ -427,6 +470,7 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Mode',
       width: '110px',
       render: (row) => {
+        if (row.kind === 'expanded-header') return <span class="text-text-subtle">—</span>;
         if (row.kind === 'effect-group') return <Chip variant="neutral">{row.mode}</Chip>;
         const r = row.cycle;
         return <Chip variant="neutral">{cycleMode(r)}</Chip>;
@@ -437,6 +481,9 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Change',
       width: '120px',
       render: (row) => {
+        if (row.kind === 'expanded-header') {
+          return <Chip variant="neutral">{`expanded × ${row.count}`}</Chip>;
+        }
         if (row.kind === 'effect-group') {
           return <Chip variant="neutral">{`collapsed × ${row.cycles.length}`}</Chip>;
         }
@@ -455,6 +502,7 @@ export default function DreamsRoute(): JSX.Element {
       align: 'right',
       numeric: true,
       render: (row) => {
+        if (row.kind === 'expanded-header') return <span class="text-text-subtle">—</span>;
         if (row.kind === 'effect-group') {
           return <span class="font-mono text-[11px] text-text-subtle">0</span>;
         }
@@ -470,6 +518,13 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Rationale',
       width: '260px',
       render: (row) => {
+        if (row.kind === 'expanded-header') {
+          return (
+            <span class="text-[11px] text-text-muted line-clamp-1" title={row.label}>
+              Showing {row.count} expanded no-op cycles. Click ▾ to re-collapse.
+            </span>
+          );
+        }
         if (row.kind === 'effect-group') {
           return (
             <div class="flex flex-col gap-0.5 text-[11px] text-text-muted">
@@ -500,6 +555,7 @@ export default function DreamsRoute(): JSX.Element {
       key: 'phases',
       header: 'Phases',
       render: (row) => {
+        if (row.kind === 'expanded-header') return <span class="text-text-subtle">—</span>;
         if (row.kind === 'effect-group') {
           return (
             <div class="flex flex-col gap-0.5 text-[11px] text-text-muted">
@@ -532,6 +588,7 @@ export default function DreamsRoute(): JSX.Element {
       align: 'right',
       numeric: true,
       render: (row) => {
+        if (row.kind === 'expanded-header') return <span class="text-text-subtle">—</span>;
         const txt =
           row.kind === 'effect-group'
             ? row.totalMs > 0
@@ -546,7 +603,7 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Agent',
       width: '120px',
       render: (row) => {
-        if (row.kind === 'effect-group') return <span class="text-text-subtle">—</span>;
+        if (row.kind !== 'cycle') return <span class="text-text-subtle">—</span>;
         const r = row.cycle;
         const ag = r.reporting_agent_label ?? (r as { agent_id?: string }).agent_id ?? '—';
         return <span class="font-mono text-[11px] text-text-muted">{ag}</span>;
@@ -557,7 +614,7 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Model',
       width: '120px',
       render: (row) => {
-        if (row.kind === 'effect-group') return <span class="text-text-subtle">—</span>;
+        if (row.kind !== 'cycle') return <span class="text-text-subtle">—</span>;
         return <span class="font-mono text-[11px] text-text-muted">{row.cycle.model_id || '—'}</span>;
       },
     },
@@ -566,6 +623,20 @@ export default function DreamsRoute(): JSX.Element {
       header: 'Run',
       width: '170px',
       render: (row) => {
+        if (row.kind === 'expanded-header') {
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleGroup(row.key);
+              }}
+              class="text-[11px] text-accent hover:underline"
+            >
+              Re-collapse
+            </button>
+          );
+        }
         if (row.kind === 'effect-group') {
           return (
             <div class="flex flex-col gap-0.5">
@@ -841,23 +912,67 @@ export default function DreamsRoute(): JSX.Element {
       </Show>
 
       <section class="flex flex-col gap-2">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">
-            Recent dream cycles · {dreams().length}
-            <Show when={collapseIdle() && collapsedCount() > 0}>
+            Recent dream cycles · {filteredDreams().length}
+            <Show when={viewFilter() !== 'all'}>
+              <span class="ml-1 normal-case tracking-normal text-text-muted">
+                of {dreams().length}
+              </span>
+            </Show>
+            <Show when={viewFilter() === 'all' && collapseIdle() && collapsedCount() > 0}>
               <span class="ml-1 normal-case tracking-normal text-text-muted">
                 ({collapsedCount()} no-op collapsed)
               </span>
             </Show>
           </div>
-          <label class="flex items-center gap-1.5 text-[11px] text-text-muted">
-            <input
-              type="checkbox"
-              checked={collapseIdle()}
-              onChange={(e) => setCollapseIdle(e.currentTarget.checked)}
-            />
-            Collapse no-op runs
-          </label>
+          <div class="flex flex-wrap items-center gap-2">
+            <div role="tablist" class="flex items-center rounded-md hairline bg-surface text-[11px]">
+              {(
+                [
+                  ['all', `All · ${dreams().length}`],
+                  [
+                    'changes',
+                    `Change points · ${dreams().filter((c) => !isNoopCycle(c)).length}`,
+                  ],
+                  [
+                    'material',
+                    `Material · ${dreams().filter((c) => hasMaterialEffect(c)).length}`,
+                  ],
+                  [
+                    'failures',
+                    `Failures · ${dreams().filter((c) => isFailureCycle(c)).length}`,
+                  ],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewFilter() === value}
+                  onClick={() => setViewFilter(value)}
+                  class={
+                    viewFilter() === value
+                      ? 'rounded-md bg-accent px-2.5 py-1 text-accent-fg'
+                      : 'px-2.5 py-1 text-text-muted hover:text-text'
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label
+              class="flex items-center gap-1.5 text-[11px] text-text-muted"
+              title="When viewing All, group adjacent score-0 cycles into a single collapsed row."
+            >
+              <input
+                type="checkbox"
+                checked={collapseIdle()}
+                disabled={viewFilter() !== 'all'}
+                onChange={(e) => setCollapseIdle(e.currentTarget.checked)}
+              />
+              Collapse no-op runs
+            </label>
+          </div>
         </div>
         <details class="rounded-md hairline bg-surface px-3 py-2 text-[11.5px] text-text-muted">
           <summary class="cursor-pointer text-[11.5px] font-medium text-text">
@@ -895,8 +1010,13 @@ export default function DreamsRoute(): JSX.Element {
             <Table
               items={groupedRows()}
               columns={columns}
-              rowKey={(r) => (r.kind === 'cycle' ? r.cycle.run_id : r.key)}
+              rowKey={(r) =>
+                r.kind === 'cycle' ? r.cycle.run_id : r.kind === 'expanded-header' ? `header:${r.key}` : r.key
+              }
               rowClass={(r) => {
+                if (r.kind === 'expanded-header') {
+                  return 'bg-[color-mix(in_oklab,rgb(var(--c-accent))_6%,transparent)] text-[11px]';
+                }
                 if (r.kind === 'effect-group') return 'bg-[color-mix(in_oklab,rgb(var(--c-text-muted))_4%,transparent)]';
                 const accent = rowAccentClass(r.cycle);
                 if (accent) return accent;

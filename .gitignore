@@ -27,3 +27,14 @@ htmlcov/
 # Git worktrees (isolated feature workspaces)
 .worktrees/
 .omc/
+.opendream/
+
+# Private overlay / local agent artifacts
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+CLAUDE.local.md
+GEMINI.local.md
+metactl.yaml
+metactl.lock.json
+Modelfile.*

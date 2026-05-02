@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from statistics import median
+from statistics import median, pstdev
 from typing import Any, cast
 
 IDLE_REASONS = frozenset({"no-episodes", "insufficient-signal"})
 SIGNAL_BUCKET_SIZE = 10
 MIN_DURATION_BASELINE = 3
+MIN_REGIME_LENGTH = 3
+CUMULATIVE_DRIFT_WINDOW = 20
+CUMULATIVE_DRIFT_THRESHOLD = SIGNAL_BUCKET_SIZE * 2
 
 
 def score_dream_change_points(
@@ -64,6 +67,18 @@ def _score_cycle(cycle: dict[str, Any], previous: list[dict[str, Any]]) -> dict[
             is_noop=False,
         )
 
+    boundary = _boundary_contributor(cycle, previous, signature)
+    if boundary:
+        return _change_point(
+            score=55,
+            severity="medium",
+            kind="boundary",
+            label=_boundary_label(boundary),
+            contributors=[boundary],
+            signature=signature,
+            is_noop=False,
+        )
+
     drift = _drift_contributors(cycle, previous)
     if drift:
         return _change_point(
@@ -84,6 +99,18 @@ def _score_cycle(cycle: dict[str, Any], previous: list[dict[str, Any]]) -> dict[
             kind="duration_anomaly",
             label=f"{anomaly['phase']} {anomaly['ratio']}x baseline.",
             contributors=[anomaly],
+            signature=signature,
+            is_noop=False,
+        )
+
+    cumulative = _cumulative_drift_contributor(cycle, previous)
+    if cumulative:
+        return _change_point(
+            score=40,
+            severity="medium",
+            kind="cumulative",
+            label=_cumulative_label(cumulative),
+            contributors=[cumulative],
             signature=signature,
             is_noop=False,
         )
@@ -218,7 +245,10 @@ def _drift_contributors(cycle: dict[str, Any], previous: list[dict[str, Any]]) -
 
     before_funnel = _dict(prior.get("funnel"))
     after_funnel = _dict(cycle.get("funnel"))
-    for key in ("selected", "generated", "approved", "created"):
+    # NOTE: ``selected`` deliberately excluded — query-family selection alone
+    # has no operational effect, so a change in selected count must not flip a
+    # cycle into ``drift`` and erode operator trust.
+    for key in ("generated", "approved", "created"):
         before_value = _int(before_funnel.get(key))
         after_value = _int(after_funnel.get(key))
         if before_value != after_value:
@@ -252,6 +282,11 @@ def _duration_anomaly_contributor(cycle: dict[str, Any], previous: list[dict[str
         baseline = median(baseline_values)
         if baseline <= 0:
             continue
+        # Skip phases with naturally high variance — a 3x spike on a chaotic
+        # baseline is noise, not a real anomaly. CV > 0.5 means the phase is
+        # already swinging widely on its own.
+        if len(baseline_values) >= 2 and pstdev(baseline_values) / baseline > 0.5:
+            continue
         ratio = duration / baseline
         if ratio < 3 or duration - baseline < 500:
             continue
@@ -266,6 +301,90 @@ def _duration_anomaly_contributor(cycle: dict[str, Any], previous: list[dict[str
         if best is None or float(contributor["ratio"]) > float(best["ratio"]):
             best = contributor
     return best
+
+
+def _boundary_contributor(
+    cycle: dict[str, Any], previous: list[dict[str, Any]], signature: str
+) -> dict[str, Any] | None:
+    """Detect end of a sustained same-signature regime.
+
+    A boundary cycle is one whose signature differs from a streak of at least
+    ``MIN_REGIME_LENGTH`` immediately-preceding cycles that all shared a single
+    signature. This surfaces "first cycle after a long idle stretch" or
+    "first cycle in a new mode" — events that pure adjacent-delta drift hides
+    when the prior regime is uninteresting on its own.
+    """
+    if len(previous) < MIN_REGIME_LENGTH:
+        return None
+    prior_signature = effect_signature(previous[-1])
+    if prior_signature == signature:
+        return None
+    streak = 0
+    for row in reversed(previous):
+        if effect_signature(row) != prior_signature:
+            break
+        streak += 1
+    if streak < MIN_REGIME_LENGTH:
+        return None
+    return {
+        "key": "regime_boundary",
+        "from": prior_signature,
+        "to": signature,
+        "streak": streak,
+        "weight": 55,
+    }
+
+
+def _boundary_label(contributor: dict[str, Any]) -> str:
+    streak = _int(contributor.get("streak"))
+    return (
+        f"Regime boundary: ended a {streak}-cycle stretch with the same effect signature."
+    )
+
+
+def _cumulative_drift_contributor(
+    cycle: dict[str, Any], previous: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Detect slow signal trend that never crossed adjacent-delta drift.
+
+    Walks back at most ``CUMULATIVE_DRIFT_WINDOW`` cycles or until a non-noop
+    predecessor, whichever comes first, and reports cumulative signal change
+    when the absolute total exceeds ``CUMULATIVE_DRIFT_THRESHOLD``. This
+    catches operator-relevant drift that per-step thresholds hide.
+    """
+    if not previous:
+        return None
+    current_signal = _int(cycle.get("signal_row_count"))
+    window: list[dict[str, Any]] = []
+    for row in reversed(previous):
+        cp = _dict(row.get("change_point"))
+        if cp and not bool(cp.get("is_noop", True)):
+            break
+        window.append(row)
+        if len(window) >= CUMULATIVE_DRIFT_WINDOW:
+            break
+    if len(window) < MIN_REGIME_LENGTH:
+        return None
+    oldest = window[-1]
+    oldest_signal = _int(oldest.get("signal_row_count"))
+    delta = current_signal - oldest_signal
+    if abs(delta) < CUMULATIVE_DRIFT_THRESHOLD:
+        return None
+    return {
+        "key": "cumulative_signal",
+        "from": oldest_signal,
+        "to": current_signal,
+        "delta": delta,
+        "cycles": len(window),
+        "weight": 40,
+    }
+
+
+def _cumulative_label(contributor: dict[str, Any]) -> str:
+    return (
+        f"Slow signal drift: {contributor.get('from')} -> {contributor.get('to')} "
+        f"transcripts over {contributor.get('cycles')} cycles."
+    )
 
 
 def _signal_bucket(value: int) -> str:

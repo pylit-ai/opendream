@@ -169,3 +169,69 @@ class DreamChangePointTests(unittest.TestCase):
                 "is_noop": True,
             },
         )
+
+    def test_funnel_selected_change_alone_is_not_drift(self) -> None:
+        """Two cycles differing only in funnel.selected must stay noop.
+
+        Selection volume is operationally meaningless without downstream
+        proposals/approvals/created records, so it must not produce drift
+        rows that erode operator trust.
+        """
+        scored = score_dream_change_points(
+            [
+                {
+                    "run_id": "selected-9",
+                    "mode": "semantic",
+                    "status": "completed",
+                    "signal_row_count": 120,
+                    "phases": ["orient", "gather_recent_signal", "synthesize", "promote"],
+                    "funnel": {"considered": 120, "selected": 9, "generated": 0, "approved": 0, "created": 0},
+                },
+                {
+                    "run_id": "selected-0",
+                    "mode": "semantic",
+                    "status": "completed",
+                    "signal_row_count": 120,
+                    "phases": ["orient", "gather_recent_signal", "synthesize", "promote"],
+                    "funnel": {"considered": 120, "selected": 0, "generated": 0, "approved": 0, "created": 0},
+                },
+            ],
+            newest_first=False,
+        )
+
+        change_point = scored[1]["change_point"]
+        self.assertIsInstance(change_point, dict)
+        assert isinstance(change_point, dict)
+        self.assertEqual(change_point["kind"], "noop")
+        self.assertEqual(change_point["score"], 0)
+        self.assertFalse(
+            any(c.get("key") == "funnel.selected" for c in change_point["contributors"]),
+        )
+
+    def test_duration_anomaly_skipped_when_baseline_variance_is_high(self) -> None:
+        """A 3x spike on a chaotic baseline is noise, not an anomaly."""
+        history = [
+            {
+                "run_id": f"hist-{i}",
+                "mode": "dream",
+                "status": "completed",
+                "signal_row_count": 88,
+                "phases": ["orient", "synthesize"],
+                "phase_durations": {"orient": 100, "synthesize": dur},
+                "funnel": {"considered": 88, "selected": 0, "generated": 0, "approved": 0, "created": 0},
+            }
+            for i, dur in enumerate([400, 800, 1600])
+        ]
+        current = {
+            "run_id": "current",
+            "mode": "dream",
+            "status": "completed",
+            "signal_row_count": 88,
+            "phases": ["orient", "synthesize"],
+            "phase_durations": {"orient": 100, "synthesize": 3200},
+            "funnel": {"considered": 88, "selected": 0, "generated": 0, "approved": 0, "created": 0},
+        }
+        scored = score_dream_change_points([*history, current], newest_first=False)
+        change_point = scored[-1]["change_point"]
+        assert isinstance(change_point, dict)
+        self.assertNotEqual(change_point["kind"], "duration_anomaly")
