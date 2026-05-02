@@ -6,11 +6,12 @@ from typing import Any
 
 from .dream import dream_run
 from .integration import emit_event, maintain
+from .memory_types import is_workflow_memory_type
 from .models import MemoryExcellenceScorecard
 from .reconciliation import run_reconciliation_sweep
 from .retriever import retrieve
 from .storage import MemoryStore
-from .util import FIXTURE_ROOT, read_json, stable_id, to_iso, utc_now
+from .util import FIXTURE_ROOT, read_json, semantic_tokens, stable_id, to_iso, utc_now
 from .validation import validate_document
 
 
@@ -152,6 +153,36 @@ def run_dream_fidelity_eval(
     }
 
 
+def _expected_answer_tokens(query_case: dict[str, Any]) -> set[str]:
+    explicit_terms = query_case.get("expected_answer_terms")
+    if isinstance(explicit_terms, list):
+        return semantic_tokens(" ".join(str(term) for term in explicit_terms))
+    expected_answer = str(query_case.get("expected_answer", "")).strip()
+    if not expected_answer:
+        return set()
+    return semantic_tokens(expected_answer)
+
+
+def _records_answer_tokens(records: list[dict[str, Any]]) -> set[str]:
+    parts: list[str] = []
+    for record in records:
+        for key in ("title", "summary", "body"):
+            value = record.get(key)
+            if value:
+                parts.append(str(value))
+        for key in ("workflow_steps", "preconditions", "recovery_steps", "anti_patterns", "success_markers"):
+            values = record.get(key)
+            if isinstance(values, list):
+                parts.extend(str(value) for value in values)
+    return semantic_tokens(" ".join(parts))
+
+
+def _coverage_ratio(expected_tokens: set[str], available_tokens: set[str]) -> float:
+    if not expected_tokens:
+        return 0.0
+    return len(expected_tokens & available_tokens) / len(expected_tokens)
+
+
 def run_performance_eval(
     store: MemoryStore,
     *,
@@ -160,6 +191,13 @@ def run_performance_eval(
 ) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
     fixture = read_json(fixture_path or (FIXTURE_ROOT / "performance_eval.json"), {})
+    coverage_gate = fixture.get("coverage_gate", {})
+    min_expected_answer_coverage = max(
+        0.0,
+        min(1.0, float(coverage_gate.get("expected_answer_min_coverage", 1.0))),
+    )
+    require_expected_answers = bool(coverage_gate.get("require_expected_answers", True))
+    require_workflow_memory = bool(coverage_gate.get("require_workflow_memory", True))
     events_data = fixture.get("events", {})
     queries_data = fixture.get("queries", {})
 
@@ -207,14 +245,15 @@ def run_performance_eval(
     if contradiction_events:
         maintain(store, now=timestamp)
 
+    should_match_queries = queries_data.get("should_match", [])
+
     # --- Write precision ---
     durable_records = store.load_durable_records()
     active_records = [r for r in durable_records if r["status"] == "active"]
     high_signal_titles = {
-        "Decision: database-choice",
-        "Environment: node-version",
-        "Workflow: deploy",
-        "Preference: logging-preference",
+        str(query_case["expected_title"])
+        for query_case in should_match_queries
+        if query_case.get("expected_title")
     }
     active_titles = {r["title"] for r in active_records}
     high_signal_in_durable = len(high_signal_titles & active_titles)
@@ -232,8 +271,10 @@ def run_performance_eval(
     contradiction_resolved = len(contested_records) + len(superseded_records) > 0
 
     # --- Retrieval precision ---
-    should_match_queries = queries_data.get("should_match", [])
     retrieval_hits = 0
+    expected_answer_cases = 0
+    expected_answer_hits = 0
+    missing_expected_answer_queries: list[str] = []
     retrieval_timings: list[float] = []
     retrieval_results: list[dict[str, Any]] = []
 
@@ -249,24 +290,45 @@ def run_performance_eval(
         r_ms = round((time.monotonic() - r_start) * 1000, 1)
         retrieval_timings.append(r_ms)
         records_map = {r["memory_id"]: r for r in durable_records}
-        selected_titles = [
-            records_map[mid]["title"]
+        selected_records = [
+            records_map[mid]
             for mid in retrieval.get("selected_memory_ids", [])
             if mid in records_map
+        ]
+        selected_titles = [
+            record["title"]
+            for record in selected_records
         ]
         expected = str(query_case["expected_title"])
         hit = expected in selected_titles
         if hit:
             retrieval_hits += 1
+        expected_answer = str(query_case.get("expected_answer", "")).strip()
+        answer_tokens = _expected_answer_tokens(query_case)
+        answer_required = require_expected_answers or bool(answer_tokens)
+        if answer_required:
+            expected_answer_cases += 1
+        if require_expected_answers and not answer_tokens:
+            missing_expected_answer_queries.append(str(query_case["query"]))
+        selected_answer_tokens = _records_answer_tokens(selected_records)
+        answer_coverage = _coverage_ratio(answer_tokens, selected_answer_tokens)
+        answer_covered = bool(answer_tokens) and answer_coverage >= min_expected_answer_coverage
+        if answer_required and answer_covered:
+            expected_answer_hits += 1
         retrieval_results.append({
             "query": query_case["query"],
             "expected": expected,
+            "expected_answer": expected_answer,
             "selected_titles": selected_titles,
             "hit": hit,
+            "answer_coverage": round(answer_coverage, 4),
+            "answer_covered": answer_covered,
+            "missing_answer_terms": sorted(answer_tokens - selected_answer_tokens),
             "latency_ms": r_ms,
         })
 
     retrieval_precision = retrieval_hits / max(1, len(should_match_queries))
+    expected_answer_coverage = expected_answer_hits / max(1, expected_answer_cases)
 
     # --- Retrieval gating accuracy ---
     should_gate_queries = queries_data.get("should_gate", [])
@@ -306,19 +368,49 @@ def run_performance_eval(
     p50_idx = len(sorted_timings) // 2
     p95_idx = min(int(len(sorted_timings) * 0.95), len(sorted_timings) - 1)
 
+    configured_workflow_titles = coverage_gate.get("required_workflow_titles", [])
+    required_workflow_titles = [
+        str(title)
+        for title in configured_workflow_titles
+        if str(title).strip()
+    ]
+    if not required_workflow_titles:
+        required_workflow_titles = [
+            str(query_case["expected_title"])
+            for query_case in should_match_queries
+            if str(query_case.get("expected_title", "")).startswith("Workflow:")
+        ]
+    active_workflow_titles = {
+        record["title"]
+        for record in active_records
+        if is_workflow_memory_type(record["type"]) and record.get("workflow_steps")
+    }
+    missing_required_workflows = [
+        title for title in required_workflow_titles if title not in active_workflow_titles
+    ]
+    workflow_memory_raw = (
+        len(required_workflow_titles) - len(missing_required_workflows)
+    ) / max(1, len(required_workflow_titles))
+    workflow_memory_passed = (
+        not require_workflow_memory
+        or (bool(required_workflow_titles) and not missing_required_workflows)
+    )
+
     # --- Scorecard (maps to planning.md rubric) ---
     write_score = round(min(100, write_precision * 80 + (20 if noise_in_durable == 0 else 0)), 1)
     retrieval_score = round(retrieval_precision * 100, 1)
+    expected_answer_score = round(expected_answer_coverage * 100, 1)
     latency_score = round(min(100, max(0, 100 - maintain_ms / 10)), 1)  # penalize >1s
     concurrency_score = 100.0  # tested separately; structural guarantee
     contradiction_score = 100.0 if contradiction_resolved else 0.0
-    procedural_score = round(100.0 if any(r["type"] == "procedural_workflow" for r in active_records) else 0.0, 1)
+    procedural_score = round(workflow_memory_raw * 100, 1)
     gating_score = round(gating_accuracy * 100, 1)
 
     weighted_total = round(
-        write_score * 0.20
-        + retrieval_score * 0.20
-        + latency_score * 0.15
+        write_score * 0.15
+        + retrieval_score * 0.15
+        + expected_answer_score * 0.15
+        + latency_score * 0.10
         + concurrency_score * 0.15
         + contradiction_score * 0.10
         + procedural_score * 0.10
@@ -326,7 +418,20 @@ def run_performance_eval(
         1,
     )
 
-    passed = weighted_total >= 80.0 and write_score >= 60.0 and retrieval_score >= 60.0
+    expected_answer_passed = (
+        not expected_answer_cases
+        or (
+            expected_answer_coverage >= min_expected_answer_coverage
+            and not missing_expected_answer_queries
+        )
+    )
+    passed = (
+        weighted_total >= 80.0
+        and write_score >= 60.0
+        and retrieval_score >= 60.0
+        and expected_answer_passed
+        and workflow_memory_passed
+    )
 
     return {
         "status": "passed" if passed else "failed",
@@ -334,10 +439,12 @@ def run_performance_eval(
         "scorecard": {
             "write_precision": write_score,
             "retrieval_precision": retrieval_score,
+            "expected_answer_coverage": expected_answer_score,
             "latency": latency_score,
             "concurrency_safety": concurrency_score,
             "contradiction_handling": contradiction_score,
             "procedural_reuse": procedural_score,
+            "workflow_memory": procedural_score,
             "gating_accuracy": gating_score,
             "weighted_total": weighted_total,
         },
@@ -353,6 +460,12 @@ def run_performance_eval(
             "superseded_records": len(superseded_records),
             "write_precision_raw": round(write_precision, 4),
             "retrieval_precision_raw": round(retrieval_precision, 4),
+            "expected_answer_coverage_raw": round(expected_answer_coverage, 4),
+            "expected_answer_cases": expected_answer_cases,
+            "missing_expected_answer_queries": missing_expected_answer_queries,
+            "required_workflow_titles": required_workflow_titles,
+            "missing_required_workflows": missing_required_workflows,
+            "workflow_memory_raw": round(workflow_memory_raw, 4),
             "gating_accuracy_raw": round(gating_accuracy, 4),
             "token_efficiency": round(token_efficiency, 4),
         },

@@ -30,7 +30,7 @@ make verify  # from repo checkout — includes performance-eval stage
 | Audit trail | "Writing memory" with no diff ([GitHub #23176](https://github.com/anthropics/claude-code/issues/23176)) | Full diff + plan + verifier artifacts per consolidation run | OpenDream: fully auditable |
 | Contradiction handling | Unknown (inferred: newer overwrites older) | Temporal validity windows, superseded/contested status, quarantine | OpenDream: non-destructive, traceable |
 | Procedural memory | Scoped to memory file cleanup only | Dedicated extraction of workflow steps, typed procedural records | OpenDream: reusable workflows |
-| Performance measurement | None publicly available | Composite scorecard: write precision, retrieval precision, latency, gating, contradiction, procedural reuse | OpenDream: measurable |
+| Performance measurement | None publicly available | Composite scorecard: write precision, retrieval precision, expected-answer coverage, latency, gating, contradiction, workflow memory | OpenDream: measurable |
 
 ---
 

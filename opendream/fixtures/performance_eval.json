@@ -1,4 +1,12 @@
 {
+  "coverage_gate": {
+    "expected_answer_min_coverage": 1.0,
+    "require_expected_answers": true,
+    "require_workflow_memory": true,
+    "required_workflow_titles": [
+      "Workflow: deploy"
+    ]
+  },
   "events": {
     "high_signal": [
       {
@@ -83,19 +91,23 @@
     "should_match": [
       {
         "query": "What database should we use for this project?",
-        "expected_title": "Decision: database-choice"
+        "expected_title": "Decision: database-choice",
+        "expected_answer": "Use MySQL for all persistence in this service."
       },
       {
         "query": "What Node.js version is required and why?",
-        "expected_title": "Environment: node-version"
+        "expected_title": "Environment: node-version",
+        "expected_answer": "Node 22 is required. Node 20 has a known memory leak in the crypto module that affects our auth flow."
       },
       {
         "query": "How do we deploy this service to production?",
-        "expected_title": "Workflow: deploy"
+        "expected_title": "Workflow: deploy",
+        "expected_answer": "Run database migrations, build Docker image, push to registry, update Kubernetes deployment, and verify health checks pass."
       },
       {
         "query": "What are the logging requirements for this project?",
-        "expected_title": "Preference: logging-preference"
+        "expected_title": "Preference: logging-preference",
+        "expected_answer": "Use structured logging with JSON output. Never use console.log in production code."
       }
     ],
     "should_gate": [

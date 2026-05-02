@@ -7,7 +7,6 @@ import {
   Link2,
   Sparkles,
   Target,
-  XCircle,
 } from 'lucide-solid';
 import { For, Show, createMemo, createResource, type JSX } from 'solid-js';
 import { getShowcase } from '~/api/client';
@@ -49,6 +48,11 @@ function asText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return '';
+}
+
+function displayCheckName(name: string): string {
+  if (name === 'decoy_excluded') return 'decoy excluded from selected durable memory';
+  return name.replaceAll('_', ' ');
 }
 
 function eventPreview(ref: ShowcaseSourceRef): string {
@@ -279,16 +283,17 @@ export default function ShowcaseRoute(): JSX.Element {
                     <div class="mb-4 grid grid-cols-2 gap-2">
                       <For each={Object.entries(r().dream_effectiveness?.effective ?? {})}>
                         {([name, passed]) => {
-                          const CheckIcon = passed ? CheckCircle2 : XCircle;
+                          const CheckIcon = passed ? CheckCircle2 : CircleAlert;
                           return (
                             <div class="flex gap-3 rounded-md border border-border bg-surface-muted p-3">
                               <CheckIcon
                                 size={16}
-                                class={passed ? 'mt-0.5 text-success' : 'mt-0.5 text-danger'}
+                                class={passed ? 'mt-0.5 text-success' : 'mt-0.5 text-warn'}
                               />
                               <div class="min-w-0">
-                                <div class="text-sm font-medium text-text">
-                                  {name.replaceAll('_', ' ')}
+                                <div class="flex flex-wrap items-center gap-2 text-sm font-medium text-text">
+                                  <span>{displayCheckName(name)}</span>
+                                  <Chip variant={passed ? 'ok' : 'warn'}>{passed ? 'resolved' : 'gap'}</Chip>
                                 </div>
                               </div>
                             </div>
@@ -300,12 +305,15 @@ export default function ShowcaseRoute(): JSX.Element {
                       <For each={checks(r())}>
                         {([name, check]) => {
                           const passed = () => check.passed === true;
-                          const CheckIcon = passed() ? CheckCircle2 : XCircle;
+                          const CheckIcon = passed() ? CheckCircle2 : CircleAlert;
                           return (
                             <div class="flex gap-3 rounded-md border border-border bg-surface-muted p-3">
-                              <CheckIcon size={16} class={passed() ? 'mt-0.5 text-success' : 'mt-0.5 text-danger'} />
+                              <CheckIcon size={16} class={passed() ? 'mt-0.5 text-success' : 'mt-0.5 text-warn'} />
                               <div class="min-w-0">
-                                <div class="text-sm font-medium text-text">{name.replaceAll('_', ' ')}</div>
+                                <div class="flex flex-wrap items-center gap-2 text-sm font-medium text-text">
+                                  <span>{displayCheckName(name)}</span>
+                                  <Chip variant={passed() ? 'ok' : 'warn'}>{passed() ? 'resolved' : 'gap'}</Chip>
+                                </div>
                                 <div class="text-xs leading-5 text-text-muted">{check.detail}</div>
                               </div>
                             </div>

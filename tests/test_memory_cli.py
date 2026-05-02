@@ -198,13 +198,27 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(result["selected_memory_ids"], result["after"]["selected_memory_ids"])
         self.assertEqual(len(result["context"]["links"]), len(result["selected_memory_ids"]))
         self.assertTrue(result["retrieval_rationale"])
+        prompt_context = result["context"]["prompt_context"]
+        self.assertNotIn("GraphQL billing API", prompt_context)
+        visibility = result["context"]["visibility"]
+        self.assertEqual(
+            set(visibility),
+            {"selected", "excluded", "diagnostic-only", "startup-index-only"},
+        )
+        self.assertGreaterEqual(visibility["excluded"]["count"], 1)
         self.assertTrue(result["dream_effectiveness"]["effective"]["baseline_to_after"])
         self.assertTrue(result["dream_effectiveness"]["effective"]["stale_guidance_contested"])
         self.assertTrue(result["dream_effectiveness"]["effective"]["decoy_excluded"])
+        self.assertTrue(result["dream_effectiveness"]["effective"]["curated_actionable_prompt_context_built"])
+        self.assertNotIn("compact_context_built", result["dream_effectiveness"]["effective"])
         self.assertTrue(result["proof"]["source_refs"])
         summaries = "\n".join(ref["summary"] for ref in result["proof"]["source_refs"])
         self.assertIn("pnpm", summaries)
         self.assertNotIn("GraphQL billing API", summaries)
+        self.assertIn(
+            "excluded from selected durable memory",
+            "\n".join(result["dream_effectiveness"]["why_it_matters"]),
+        )
         report_path = Path(result["report_path"])
         self.assertTrue(report_path.exists())
         report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -367,6 +381,11 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         records = json.loads(durable_after)
         for record in records:
             validate_document("memory-topic.schema.json", record)
+        workflow = next(record for record in records if record["title"] == "Workflow: schema-migration")
+        self.assertEqual(workflow["type"], "workflow")
+        self.assertEqual(workflow["lifecycle"]["state"], "active")
+        self.assertEqual(workflow["lifecycle"]["source_event_count"], 4)
+        self.assertEqual(workflow["lifecycle"]["promotion_run_id"], first["run_id"])
         index = json.loads((self.workspace / DEFAULT_MEMORY_DIR / "state" / "index.json").read_text(encoding="utf-8"))
         validate_document("memory-index.schema.json", index)
         audit_file = next((self.workspace / DEFAULT_MEMORY_DIR / "audit" / "consolidation").glob("*.jsonl"))
@@ -633,6 +652,12 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn("## Startup Index", context["prompt_context"])
         self.assertIn("Selected Durable Memory", context["prompt_context"])
         self.assertTrue(context["selected_memory_ids"])
+        visibility = context["prompt_context_visibility"]
+        self.assertEqual(
+            set(visibility),
+            {"selected", "excluded", "diagnostic-only", "startup-index-only"},
+        )
+        self.assertEqual(visibility["selected"]["count"], len(context["selected_memory_ids"]))
         self.assertIsNone(context.get("empty_reason"))
         self.assertEqual(context.get("hints"), [])
 
@@ -685,6 +710,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn("selected_learned_context_records", full)
         self.assertIn("prompt_context", compact)
         self.assertIn("context_pruning", compact)
+        self.assertIn("prompt_context_visibility", compact)
         self.assertIn("audit", compact)
         self.assertNotIn("suppressed", compact)
         self.assertNotIn("omitted", compact)
@@ -1957,7 +1983,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
                     "memory_types_any": [
                         "project_decision",
                         "environment_requirement",
-                        "procedural_workflow",
+                        "workflow",
                         "user_preference",
                     ],
                     "text_terms_any": ["redis", "migration", "package"],
@@ -2061,7 +2087,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
                     "memory_types_any": [
                         "project_decision",
                         "environment_requirement",
-                        "procedural_workflow",
+                        "workflow",
                         "user_preference",
                     ],
                     "text_terms_any": ["redis"],
@@ -2102,7 +2128,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
                     "memory_types_any": [
                         "project_decision",
                         "environment_requirement",
-                        "procedural_workflow",
+                        "workflow",
                         "user_preference",
                     ],
                     "text_terms_any": ["nonexistent-term"],
@@ -2214,9 +2240,11 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         deterministic_keys = (
             "write_precision",
             "retrieval_precision",
+            "expected_answer_coverage",
             "concurrency_safety",
             "contradiction_handling",
             "procedural_reuse",
+            "workflow_memory",
             "gating_accuracy",
         )
         for key in deterministic_keys:

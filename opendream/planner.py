@@ -8,11 +8,12 @@ from collections import Counter, defaultdict
 from datetime import timedelta
 from typing import Any
 
+from .memory_types import canonical_memory_type, is_workflow_memory_type
 from .storage import MemoryStore
 from .util import parse_timestamp, stable_id
 from .validation import SchemaValidationError, validate_document
 
-SUPERSEDE_TYPES = {"project_decision", "environment_requirement", "user_preference"}
+SUPERSEDE_TYPES = {"project_decision", "environment_requirement", "user_preference", "workflow"}
 SUPPORTED_OPS = {
     "create",
     "update",
@@ -74,7 +75,9 @@ def _build_builtin_plan(
     existing_records: list[dict[str, Any]],
 ) -> dict[str, Any]:
     existing_lookup = {
-        (item["scope"], item["type"], item["title"]): item for item in existing_records if item["status"] == "active"
+        (item["scope"], canonical_memory_type(item["type"]), item["title"]): item
+        for item in existing_records
+        if item["status"] == "active"
     }
     workflow_evidence: Counter[tuple[str, str]] = Counter()
     workflow_events: dict[tuple[str, str], set[str]] = defaultdict(set)
@@ -83,13 +86,13 @@ def _build_builtin_plan(
     now_dt = parse_timestamp(now)
 
     for record in existing_records:
-        if record["type"] == "procedural_workflow":
+        if is_workflow_memory_type(record["type"]):
             workflow_key = (record["scope"], record["title"])
             workflow_evidence[workflow_key] += len(set(record["source_event_ids"]))
             workflow_events[workflow_key].update(record["source_event_ids"])
 
     for candidate in pending_candidates:
-        if candidate["type"] == "procedural_workflow":
+        if is_workflow_memory_type(candidate["type"]):
             workflow_key = (candidate["scope"], candidate["title"])
             workflow_evidence[workflow_key] += len(set(candidate["derived_from_event_ids"]))
             workflow_events[workflow_key].update(candidate["derived_from_event_ids"])
@@ -187,10 +190,11 @@ def _plan_candidate(
             payload={"candidate": candidate},
         )
 
-    lookup_key = (candidate["scope"], candidate["type"], candidate["title"])
+    candidate_type = canonical_memory_type(candidate["type"])
+    lookup_key = (candidate["scope"], candidate_type, candidate["title"])
     existing = existing_lookup.get(lookup_key)
 
-    if candidate["type"] == "procedural_workflow":
+    if is_workflow_memory_type(candidate_type):
         workflow_key = (candidate["scope"], candidate["title"])
         if workflow_evidence[workflow_key] < workflow_threshold:
             return _action(
@@ -202,9 +206,10 @@ def _plan_candidate(
                 payload={"candidate": candidate},
             )
         candidate = dict(candidate)
+        candidate["type"] = candidate_type
         candidate["derived_from_event_ids"] = sorted(workflow_events[workflow_key])
 
-    if candidate["type"] == "contested_fact":
+    if candidate_type == "contested_fact":
         if existing:
             reason = "updated contested memory with new evidence"
         else:
@@ -228,7 +233,7 @@ def _plan_candidate(
             payload={"candidate": candidate, "existing": existing},
         )
 
-    if existing and candidate["type"] in SUPERSEDE_TYPES:
+    if existing and candidate_type in SUPERSEDE_TYPES:
         return _action(
             run_id,
             op="supersede",

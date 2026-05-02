@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .memory_types import canonical_memory_type, is_workflow_memory_type
 from .models import normalize_reporting_agent
 from .relation_graph import build_relation_explanations, relation_aware_score_adjustment
 from .storage import MemoryStore
@@ -21,6 +22,7 @@ from .util import (
 QUERY_TYPE_BOOSTS = {
     "project_decision": 2.5,
     "environment_requirement": 2.2,
+    "workflow": 2.0,
     "procedural_workflow": 2.0,
     "anti_pattern": 1.8,
     "user_preference": 1.5,
@@ -164,7 +166,7 @@ def retrieve(
         embedding_score = len(embedding_overlap) / max(1, len(query_semantic | record_semantic))
         recency_days = max((parse_timestamp(timestamp) - parse_timestamp(record["updated_at"])).days, 0)
         recency_bonus = 1 / (1 + recency_days)
-        type_prior = QUERY_TYPE_BOOSTS.get(record["type"], 0.5)
+        type_prior = QUERY_TYPE_BOOSTS.get(canonical_memory_type(record["type"]), 0.5)
         scope_prior = SCOPE_PRIORS.get(record["scope"], 0.5)
 
         if needs_rerank:
@@ -195,7 +197,7 @@ def retrieve(
         total_score += relation_adj
 
         # Procedural-aware boost for task-shaped queries.
-        if record["type"] == "procedural_workflow" and _is_task_shaped_query(query):
+        if is_workflow_memory_type(record["type"]) and _is_task_shaped_query(query):
             total_score += 1.5
 
         total_score = round(total_score, 4)

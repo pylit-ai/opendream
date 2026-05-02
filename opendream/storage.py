@@ -56,6 +56,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "pending_item": 0.3,
             "user_preference": 0.2,
             "project_decision": 0.2,
+            "workflow": 0.2,
             "procedural_workflow": 0.2,
             "anti_pattern": 0.3,
             "contested_fact": 0.1,
@@ -1143,6 +1144,35 @@ class MemoryStore:
         ]
         for event_id in record["source_event_ids"]:
             lines.append(f"- {event_id}")
+        if record.get("lifecycle"):
+            lifecycle = record["lifecycle"]
+            lines.extend(
+                [
+                    "",
+                    "## Lifecycle",
+                    f"- state: {lifecycle.get('state')}",
+                    f"- promoted_at: {lifecycle.get('promoted_at')}",
+                    f"- last_transition_at: {lifecycle.get('last_transition_at')}",
+                    f"- last_reinforced_at: {lifecycle.get('last_reinforced_at')}",
+                    f"- transition_count: {lifecycle.get('transition_count')}",
+                    f"- source_event_count: {lifecycle.get('source_event_count')}",
+                ]
+            )
+        if record.get("workflow_steps"):
+            lines.extend(["", "## Workflow Steps"])
+            lines.extend(f"- {item}" for item in record["workflow_steps"])
+        if record.get("preconditions"):
+            lines.extend(["", "## Preconditions"])
+            lines.extend(f"- {item}" for item in record["preconditions"])
+        if record.get("success_markers"):
+            lines.extend(["", "## Success Markers"])
+            lines.extend(f"- {item}" for item in record["success_markers"])
+        if record.get("recovery_steps"):
+            lines.extend(["", "## Recovery Steps"])
+            lines.extend(f"- {item}" for item in record["recovery_steps"])
+        if record.get("anti_patterns"):
+            lines.extend(["", "## Anti-Patterns"])
+            lines.extend(f"- {item}" for item in record["anti_patterns"])
         if record["supersedes"]:
             lines.extend(["", "## Supersedes"])
             lines.extend(f"- {item}" for item in record["supersedes"])

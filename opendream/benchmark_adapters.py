@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from .memory_types import is_workflow_memory_type
 from .models import BenchmarkRunReport
 from .retriever import retrieve
 from .storage import MemoryStore
@@ -370,7 +371,7 @@ def run_coding_task_eval(
     metrics["contradiction_recovery"] = 1.0 if not contested else round(1.0 - len(contested) / max(1, len(durable)), 4)
 
     # Procedural reuse: check workflow memories
-    procedural = [r for r in active_records if r.get("type") == "procedural_workflow"]
+    procedural = [r for r in active_records if is_workflow_memory_type(r.get("type"))]
     metrics["procedural_reuse"] = round(len(procedural) / max(1, len(active_records)), 4)
 
     # Memory-hurt: stale or contradicted learned context

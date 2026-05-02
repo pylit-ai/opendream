@@ -127,6 +127,17 @@ def worker_command(store: MemoryStore, *, interval_seconds: float) -> list[str]:
     return command
 
 
+def worker_environment() -> dict[str, str]:
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    package_root = Path(__file__).resolve().parents[1]
+    existing_path = env.get("PYTHONPATH")
+    python_path = str(package_root)
+    if existing_path:
+        python_path = python_path + os.pathsep + existing_path
+    env["PYTHONPATH"] = python_path
+    return env
+
+
 def render_manifest(
     supervisor_kind: str,
     service_mode: str,
@@ -431,7 +442,7 @@ def start_service(store: MemoryStore) -> dict[str, Any]:
             stdout=handle,
             stderr=subprocess.STDOUT,
             start_new_session=True,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            env=worker_environment(),
         )
     _MANAGED_PROCESS_HANDLES[str(store.workspace.resolve())] = process
     runtime["pid"] = process.pid

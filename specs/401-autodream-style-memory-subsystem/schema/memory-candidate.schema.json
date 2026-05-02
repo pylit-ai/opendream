@@ -26,6 +26,7 @@
       "type": "string",
       "enum": [
         "semantic_fact",
+        "workflow",
         "procedural_workflow",
         "user_preference",
         "project_decision",

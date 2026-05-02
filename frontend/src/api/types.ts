@@ -77,6 +77,9 @@ export interface ShowcaseReport {
     context_id?: string;
     selected_memory_ids?: string[];
     prompt_context?: string;
+    visibility?: Record<string, unknown>;
+    selection?: Record<string, unknown>;
+    context_pruning?: Record<string, unknown>;
     links?: ShowcasePromptLink[];
   };
   proof?: {

@@ -58,6 +58,7 @@ The report makes that inspectable:
 
 - `evaluation_case`: task prompt, expected answer shape, and likely stateless failure
 - `context.prompt_context`: exact prompt context that would be sent to the agent
+- `context.visibility`: selected, excluded, diagnostic-only, and startup-index-only classifications for assembled context
 - `context.links`: selected prompt memories linked to source event IDs
 - `retrieval_rationale`: score, matched evidence, inclusion reason, and status for each selected memory
 - `dream_effectiveness`: the maintenance pipeline from raw events to durable memory to prompt context
@@ -69,9 +70,9 @@ The showcase uses `opendream demo` to seed raw events and run the maintenance/dr
 - extracted candidates from raw coding-agent events
 - consolidated those candidates into durable memories
 - marked stale npm guidance as contested instead of treating it as current truth
-- kept unrelated decoy memory out of the task prompt
+- kept unrelated decoy memory out of selected durable memory and actionable prompt context
 - preserved source provenance for selected memory
-- assembled compact prompt context from durable memory instead of dumping raw history
+- assembled curated actionable prompt context from durable memory instead of dumping raw history
 
 This mirrors current memory research practice: evaluate not only retrieval, but also update handling, noise rejection, temporal/current-state behavior, and whether consolidated memory improves the prompt context available to the agent.
 

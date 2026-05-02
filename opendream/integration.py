@@ -612,6 +612,7 @@ def prepare_context(
         for entry in startup_index.get("entries", [])[: profile["startup_budget"]]:
             startup_entries.append(
                 {
+                    "memory_id": str(entry.get("memory_id") or ""),
                     "title": entry["title"],
                     "type": entry["type"],
                     "summary": entry["summary"],
@@ -728,6 +729,13 @@ def prepare_context(
         selected.append(candidate)
         if len(selected) >= limit:
             break
+    selected_ids = [item["memory_id"] for item in selected]
+    selected_id_set = set(selected_ids)
+    excluded_by_id = {
+        str(item.get("memory_id") or ""): item
+        for item in excluded
+        if item.get("memory_id")
+    }
 
     automation_candidates: list[dict[str, Any]] = []
     for store in store_list:
@@ -781,7 +789,26 @@ def prepare_context(
     )
     startup_seen_keys: set[str] = set()
     filtered_startup_entries: list[dict[str, Any]] = []
+    startup_excluded_entries: list[dict[str, Any]] = []
     for entry in startup_entries:
+        memory_id = str(entry.get("memory_id") or "")
+        if memory_id and memory_id in excluded_by_id and memory_id not in selected_id_set:
+            startup_excluded_entries.append(
+                {
+                    **entry,
+                    "reason": excluded_by_id[memory_id].get("reason") or "retrieval_excluded",
+                }
+            )
+            suppressed.append(
+                {
+                    "kind": "startup_index",
+                    "memory_id": memory_id,
+                    "reason": "excluded_from_selected_durable_memory",
+                    "store_kind": entry["store_kind"],
+                    "workspace": entry["workspace"],
+                }
+            )
+            continue
         if entry["key"] in startup_seen_keys:
             continue
         startup_seen_keys.add(entry["key"])
@@ -888,7 +915,6 @@ def prepare_context(
     ).strip()
 
     primary_store = store_list[0]
-    selected_ids = [item["memory_id"] for item in selected]
     selected_learned_ids = [str(item.get("record_id") or "") for item in selected_learned_context]
     omitted = [item for item in excluded if item.get("memory_id") not in selected_ids]
     candidate_count = (
@@ -991,6 +1017,45 @@ def prepare_context(
     suppression_counts: dict[str, int] = defaultdict(int)
     for item in [*omitted, *suppressed]:
         suppression_counts[str(item.get("reason") or "unspecified")] += 1
+    startup_index_only_ids = sorted(
+        {
+            str(item.get("memory_id") or "")
+            for item in filtered_startup_entries
+            if item.get("memory_id") and item.get("memory_id") not in selected_id_set
+        }
+    )
+    excluded_memory_ids = sorted(
+        {
+            str(item.get("memory_id") or "")
+            for item in [*omitted, *startup_excluded_entries]
+            if item.get("memory_id")
+        }
+    )
+    prompt_context_visibility = {
+        "selected": {
+            "description": "Selected durable memory injected as actionable prompt context.",
+            "prompt_visible": True,
+            "count": len(selected_ids),
+            "memory_ids": selected_ids,
+        },
+        "excluded": {
+            "description": "Excluded from selected durable memory and actionable prompt context.",
+            "prompt_visible": False,
+            "count": len(excluded_memory_ids),
+            "memory_ids": excluded_memory_ids,
+        },
+        "diagnostic-only": {
+            "description": "Available in full JSON/audit diagnostics only; not injected into prompt context.",
+            "prompt_visible": False,
+            "count": len(suppressed),
+        },
+        "startup-index-only": {
+            "description": "Prompt-visible startup pointers only; not selected durable memory.",
+            "prompt_visible": True,
+            "count": len(startup_index_only_ids),
+            "memory_ids": startup_index_only_ids,
+        },
+    }
 
     assembly = ContextAssembly(
         context_id=context_id,
@@ -1035,6 +1100,7 @@ def prepare_context(
             "injected_token_estimate": max(1, injected_character_count // 4) if injected_character_count else 0,
             "saved_token_estimate": max((raw_character_count - injected_character_count) // 4, 0),
         },
+        prompt_context_visibility=prompt_context_visibility,
         selected_learned_context_items=selected_learned_context_items,
         suppressed_learned_context_items=suppressed_learned_context_items,
     )
@@ -1086,6 +1152,7 @@ def prepare_context(
             "injected_token_estimate": max(1, injected_character_count // 4) if injected_character_count else 0,
             "saved_token_estimate": max((raw_character_count - injected_character_count) // 4, 0),
         },
+        "prompt_context_visibility": prompt_context_visibility,
         "selected_memory_ids": selected_ids,
         "selected_learned_context_ids": selected_learned_ids,
         "selected_automation_record_ids": [item["record_id"] for item in selected_automation],

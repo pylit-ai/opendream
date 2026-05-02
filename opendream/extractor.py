@@ -4,10 +4,12 @@ import re
 from typing import Any
 
 from .claim_verification import classify_claim
+from .memory_types import WORKFLOW_MEMORY_TYPE, is_workflow_memory_type
 from .models import MemoryCandidate
 from .util import STOPWORDS, first_tag, parse_tags, semantic_tokens, stable_id, summarize, to_iso, tokenize, utc_now
 
 TYPE_CONFIDENCE = {
+    "workflow": 0.7,
     "user_preference": 0.8,
     "project_decision": 0.9,
     "environment_requirement": 0.85,
@@ -37,7 +39,7 @@ def _infer_outcome_type(kind: str, content: str, tags: dict[str, list[str]]) -> 
     if kind not in {"debug_outcome", "task_outcome", "tool_failure"}:
         return None
     if "workflow" in tags or _WORKFLOW_SIGNAL_RE.search(content):
-        return "procedural_workflow"
+        return WORKFLOW_MEMORY_TYPE
     if _REQUIREMENT_SIGNAL_RE.search(content):
         return "environment_requirement"
     if kind == "task_outcome" and _DECISION_SIGNAL_RE.search(content):
@@ -65,7 +67,7 @@ def classify_event(event: dict[str, Any]) -> str | None:
     if kind == "pending_item":
         return "pending_item"
     if kind in {"workflow_step", "task_outcome"} and "workflow" in tags:
-        return "procedural_workflow"
+        return WORKFLOW_MEMORY_TYPE
     if kind in {"debug_outcome", "tool_failure"} and (
         "anti-pattern" in content_lower or "avoid" in content_lower or "anti-pattern" in tags
     ):
@@ -87,6 +89,7 @@ def build_title(event: dict[str, Any], candidate_type: str) -> str:
         "user_preference": "Preference",
         "project_decision": "Decision",
         "environment_requirement": "Environment",
+        "workflow": "Workflow",
         "procedural_workflow": "Workflow",
         "anti_pattern": "Anti-pattern",
         "pending_item": "Pending",
@@ -172,7 +175,7 @@ def extract_candidate(
         confidence = TYPE_CONFIDENCE[candidate_type]
 
     tags = parse_tags(event.get("tags"))
-    if candidate_type == "procedural_workflow" and "success" not in tags:
+    if is_workflow_memory_type(candidate_type) and "success" not in tags:
         confidence = min(confidence, 0.4)
 
     body = event["content"].strip()
@@ -183,7 +186,7 @@ def extract_candidate(
     conflicts_with = tags.get("conflict", [])
 
     workflow_steps: list[str] = []
-    if candidate_type == "procedural_workflow":
+    if is_workflow_memory_type(candidate_type):
         workflow_steps = parse_workflow_steps(body)
 
     claim_class = classify_claim(body, title=title)

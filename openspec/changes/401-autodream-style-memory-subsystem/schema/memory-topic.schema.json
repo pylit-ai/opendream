@@ -20,6 +20,7 @@
       "type": "string",
       "enum": [
         "semantic_fact",
+        "workflow",
         "procedural_workflow",
         "user_preference",
         "project_decision",
@@ -88,6 +89,32 @@
     "success_markers": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "lifecycle": {
+      "type": "object",
+      "required": [
+        "state",
+        "created_at",
+        "updated_at",
+        "last_transition_at",
+        "transition_count",
+        "source_event_count"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["active", "contested", "superseded", "quarantined", "deleted"]
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "last_transition_at": { "type": "string", "format": "date-time" },
+        "last_reinforced_at": { "type": ["string", "null"], "format": "date-time" },
+        "promoted_at": { "type": ["string", "null"], "format": "date-time" },
+        "promotion_run_id": { "type": ["string", "null"] },
+        "transition_count": { "type": "integer", "minimum": 0 },
+        "source_event_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

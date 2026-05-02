@@ -5,6 +5,7 @@ from typing import Any
 
 from .claim_verification import classify_claim, verify_claim
 from .extractor import build_title, classify_event, parse_workflow_steps
+from .memory_types import canonical_memory_type, is_workflow_memory_type
 from .models import ConsolidationOperation, MemoryRecord, RelationEdge, StartupIndexEntry
 from .planner import build_plan
 from .relation_graph import create_relation_store
@@ -16,6 +17,7 @@ SUPERSEDE_TYPES = {"project_decision", "environment_requirement", "user_preferen
 INDEX_TYPE_BOOSTS = {
     "project_decision": 5.0,
     "environment_requirement": 4.5,
+    "workflow": 4.0,
     "procedural_workflow": 4.0,
     "anti_pattern": 3.5,
     "user_preference": 3.0,
@@ -58,7 +60,7 @@ def _cluster_candidates(candidates: list[dict[str, Any]], threshold: float) -> l
             exemplar = cluster[0]
             if (
                 exemplar["scope"] == candidate["scope"]
-                and exemplar["type"] == candidate["type"]
+                and canonical_memory_type(exemplar["type"]) == canonical_memory_type(candidate["type"])
                 and _candidate_similarity(exemplar, candidate) >= threshold
             ):
                 cluster.append(candidate)
@@ -73,14 +75,16 @@ def _record_from_candidate(
     candidate: dict[str, Any],
     *,
     now: str,
+    run_id: str,
     status: str = "active",
     supersedes: list[str] | None = None,
     conflicts_with: list[str] | None = None,
 ) -> dict[str, Any]:
     candidate_created_at = candidate["created_at"]
+    source_event_ids = list(candidate["derived_from_event_ids"])
     record: dict[str, Any] = {
         "memory_id": stable_id("mem", candidate["candidate_id"], now),
-        "type": candidate["type"],
+        "type": canonical_memory_type(candidate["type"]),
         "scope": candidate["scope"],
         "title": candidate["title"],
         "summary": candidate["summary"],
@@ -88,7 +92,7 @@ def _record_from_candidate(
         "status": status,
         "confidence": candidate["confidence"],
         "salience": candidate["salience"],
-        "source_event_ids": list(candidate["derived_from_event_ids"]),
+        "source_event_ids": source_event_ids,
         "supersedes": supersedes or [],
         "conflicts_with": conflicts_with or list(candidate.get("conflicts_with", [])),
         "valid_from": candidate_created_at,
@@ -97,6 +101,12 @@ def _record_from_candidate(
         "last_accessed_at": None,
         "created_at": candidate_created_at,
         "updated_at": candidate_created_at,
+        "lifecycle": _initial_lifecycle(
+            status=status,
+            now=now,
+            source_event_ids=source_event_ids,
+            promotion_run_id=run_id,
+        ),
     }
     workflow_steps = candidate.get("workflow_steps", [])
     if workflow_steps:
@@ -110,6 +120,86 @@ def _record_from_candidate(
         if candidate.get(key):
             record[key] = candidate[key]
     return record
+
+
+def _initial_lifecycle(
+    *,
+    status: str,
+    now: str,
+    source_event_ids: list[str],
+    promotion_run_id: str | None,
+) -> dict[str, Any]:
+    state = _lifecycle_state(status)
+    return {
+        "state": state,
+        "created_at": now,
+        "updated_at": now,
+        "last_transition_at": now,
+        "last_reinforced_at": now if state == "active" else None,
+        "promoted_at": now if state == "active" else None,
+        "promotion_run_id": promotion_run_id,
+        "transition_count": 1,
+        "source_event_count": len(set(source_event_ids)),
+    }
+
+
+def _lifecycle_state(status: object) -> str:
+    value = str(status or "active")
+    if value in {"active", "contested", "superseded", "quarantined", "deleted"}:
+        return value
+    return "active"
+
+
+def _ensure_lifecycle(record: dict[str, Any], *, now: str) -> dict[str, Any]:
+    lifecycle = record.get("lifecycle")
+    source_event_count = len(set(record.get("source_event_ids", [])))
+    state = _lifecycle_state(record.get("status"))
+    if not isinstance(lifecycle, dict):
+        lifecycle = {
+            "state": state,
+            "created_at": str(record.get("created_at") or now),
+            "updated_at": str(record.get("updated_at") or now),
+            "last_transition_at": str(record.get("updated_at") or now),
+            "last_reinforced_at": str(record.get("updated_at") or now) if state == "active" else None,
+            "promoted_at": str(record.get("valid_from") or record.get("created_at") or now) if state == "active" else None,
+            "promotion_run_id": None,
+            "transition_count": 0,
+            "source_event_count": source_event_count,
+        }
+        record["lifecycle"] = lifecycle
+        return lifecycle
+
+    lifecycle.setdefault("state", state)
+    lifecycle.setdefault("created_at", str(record.get("created_at") or now))
+    lifecycle.setdefault("updated_at", str(record.get("updated_at") or now))
+    lifecycle.setdefault("last_transition_at", str(record.get("updated_at") or now))
+    lifecycle.setdefault("last_reinforced_at", None)
+    lifecycle.setdefault(
+        "promoted_at",
+        str(record.get("valid_from") or record.get("created_at") or now) if state == "active" else None,
+    )
+    lifecycle.setdefault("promotion_run_id", None)
+    lifecycle.setdefault("transition_count", 0)
+    lifecycle["source_event_count"] = source_event_count
+    return lifecycle
+
+
+def _transition_lifecycle(record: dict[str, Any], *, status: str, now: str) -> None:
+    lifecycle = _ensure_lifecycle(record, now=now)
+    new_state = _lifecycle_state(status)
+    if lifecycle.get("state") != new_state:
+        lifecycle["transition_count"] = int(lifecycle.get("transition_count", 0)) + 1
+        lifecycle["last_transition_at"] = now
+    lifecycle["state"] = new_state
+    lifecycle["updated_at"] = now
+    lifecycle["source_event_count"] = len(set(record.get("source_event_ids", [])))
+
+
+def _reinforce_lifecycle(record: dict[str, Any], *, now: str) -> None:
+    lifecycle = _ensure_lifecycle(record, now=now)
+    lifecycle["updated_at"] = now
+    lifecycle["last_reinforced_at"] = now
+    lifecycle["source_event_count"] = len(set(record.get("source_event_ids", [])))
 
 
 def _make_operation(
@@ -166,7 +256,7 @@ def _bump(summary: dict[str, Any], key: str, amount: int = 1) -> None:
 
 
 _RETYPE_ELIGIBLE_TYPES = frozenset(
-    {"project_decision", "environment_requirement", "procedural_workflow", "anti_pattern", "user_preference"}
+    {"project_decision", "environment_requirement", "workflow", "procedural_workflow", "anti_pattern", "user_preference"}
 )
 
 
@@ -196,12 +286,12 @@ def _retype_generic_records_from_source_events(
         }
         if len(inferred_types) != 1:
             continue
-        inferred_type = next(iter(inferred_types))
+        inferred_type = canonical_memory_type(next(iter(inferred_types)))
         exemplar = source_events[-1]
         record["type"] = inferred_type
         record["title"] = build_title(exemplar, inferred_type)
         record["claim_class"] = classify_claim(record["body"], title=record["title"])
-        if inferred_type == "procedural_workflow":
+        if is_workflow_memory_type(inferred_type):
             steps = parse_workflow_steps(record["body"])
             if steps:
                 record["workflow_steps"] = steps
@@ -346,6 +436,7 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
                     record["confidence"] = min(record.get("confidence", 0.5), 0.45)
                 elif vr.result == "quarantined":
                     record["status"] = "quarantined"
+                    _transition_lifecycle(record, status="quarantined", now=now)
                 elif vr.result == "verified":
                     record["provenance_tier"] = vr.provenance_tier
 
@@ -375,6 +466,10 @@ def _consolidate_locked(store: MemoryStore, *, run_id: str, now: str) -> dict[st
                             reason=op_obj.reason,
                         )
                         relation_store.add_edge(edge)
+
+    for record in existing_records:
+        record["type"] = canonical_memory_type(record.get("type"))
+        _ensure_lifecycle(record, now=now)
 
     record_models = [
         MemoryRecord(**{k: v for k, v in record.items() if k in MemoryRecord.__dataclass_fields__})
@@ -422,6 +517,7 @@ def _apply_action(
             return
         record["status"] = "quarantined"
         record["updated_at"] = now
+        _transition_lifecycle(record, status="quarantined", now=now)
         _bump(summary, "quarantined")
         operations.append(_make_operation(run_id, "quarantine", record["memory_id"], reason, source_event_ids, now=now))
         return
@@ -430,7 +526,7 @@ def _apply_action(
         return
 
     if op == "create":
-        new_record = _record_from_candidate(candidate, now=now)
+        new_record = _record_from_candidate(candidate, now=now, run_id=run_id)
         existing_records.append(new_record)
         _bump(summary, "created")
         operations.append(_make_operation(run_id, "create", new_record["memory_id"], reason, source_event_ids, now=now))
@@ -444,7 +540,13 @@ def _apply_action(
         record["conflicts_with"] = sorted(set(record["conflicts_with"]) | set(candidate.get("conflicts_with", [])))
         record["confidence"] = round(max(record["confidence"], candidate["confidence"]), 2)
         record["salience"] = round(max(record["salience"], candidate["salience"]), 2)
+        if is_workflow_memory_type(record.get("type")) or is_workflow_memory_type(candidate.get("type")):
+            record["type"] = canonical_memory_type(record.get("type"))
+            workflow_steps = candidate.get("workflow_steps", [])
+            if workflow_steps:
+                record["workflow_steps"] = list(dict.fromkeys([*record.get("workflow_steps", []), *workflow_steps]))
         record["updated_at"] = now
+        _reinforce_lifecycle(record, now=now)
         _bump(summary, "updated")
         operations.append(_make_operation(run_id, "update", record["memory_id"], reason, source_event_ids, now=now))
         return
@@ -456,7 +558,8 @@ def _apply_action(
         record["status"] = "superseded"
         record["valid_to"] = now
         record["updated_at"] = now
-        replacement = _record_from_candidate(candidate, now=now, supersedes=[record["memory_id"]])
+        _transition_lifecycle(record, status="superseded", now=now)
+        replacement = _record_from_candidate(candidate, now=now, run_id=run_id, supersedes=[record["memory_id"]])
         existing_records.append(replacement)
         _bump(summary, "superseded")
         _bump(summary, "created")
@@ -492,6 +595,7 @@ def _apply_action(
             record["conflicts_with"] = sorted(set(record["conflicts_with"]) | set(candidate.get("conflicts_with", [])))
             record["status"] = "contested"
             record["updated_at"] = now
+            _transition_lifecycle(record, status="contested", now=now)
             _bump(summary, "contested")
             operations.append(
                 _make_operation(run_id, "mark_contested", record["memory_id"], reason, source_event_ids, now=now)
@@ -501,7 +605,13 @@ def _apply_action(
         conflicts = list(candidate.get("conflicts_with", []))
         if record is not None:
             conflicts = [record["memory_id"], *conflicts]
-        contested = _record_from_candidate(candidate, now=now, status="contested", conflicts_with=conflicts)
+        contested = _record_from_candidate(
+            candidate,
+            now=now,
+            run_id=run_id,
+            status="contested",
+            conflicts_with=conflicts,
+        )
         existing_records.append(contested)
         _bump(summary, "contested")
         operations.append(

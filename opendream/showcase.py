@@ -142,6 +142,9 @@ def build_showcase_report(
             "context_id": context.get("context_id"),
             "selected_memory_ids": context.get("selected_memory_ids", []),
             "prompt_context": context.get("prompt_context", ""),
+            "visibility": context.get("prompt_context_visibility", {}),
+            "selection": context.get("selection", {}),
+            "context_pruning": context.get("context_pruning", {}),
             "links": prompt_links,
         },
         "objective": objective,
@@ -214,7 +217,7 @@ def score_showcase(
         },
         "decoy_rejection": {
             "passed": "GraphQL billing API" not in joined,
-            "detail": "unrelated GraphQL billing sandbox memory should not be selected",
+            "detail": "unrelated GraphQL billing sandbox memory should be excluded from selected durable memory",
         },
         "provenance": {
             "passed": bool(source_refs)
@@ -382,8 +385,8 @@ def _dream_effectiveness(
     return {
         "summary": (
             "The maintenance dream distilled raw session events into durable memories, marked stale guidance "
-            "as contested, preserved source provenance, and made the task prompt retrieve a compact set of "
-            "actionable memories instead of raw history."
+            "as contested, preserved source provenance, and made the task prompt retrieve curated actionable "
+            "memory instead of raw history."
         ),
         "pipeline": [
             {
@@ -435,7 +438,7 @@ def _dream_effectiveness(
                 "A stale npm prototype decision survives as evidence but is marked contested, "
                 "so current pnpm guidance wins."
             ),
-            "The unrelated GraphQL billing decoy remains in the store but is excluded from this prompt.",
+            "The unrelated GraphQL billing decoy remains in the store but is excluded from selected durable memory.",
             "The selected prompt context carries both concise memory summaries and source event links.",
             "The empty baseline proves the recall comes from seeded maintained memory, not hard-coded UI text.",
         ],
@@ -444,7 +447,7 @@ def _dream_effectiveness(
             "stale_guidance_contested": bool(contested_records),
             "decoy_excluded": decoy_excluded,
             "source_provenance_preserved": bool(selected_source_ids),
-            "compact_context_built": (
+            "curated_actionable_prompt_context_built": (
                 prompt_chars > 0 and len(context.get("selected_memory_ids", [])) <= len(active_records)
             ),
         },

@@ -16,7 +16,7 @@ AutoDream is Anthropic's built-in memory consolidation for Claude Code. OpenDrea
 - **Audit trail**: Full diff + plan + verifier per run vs "Writing memory" with no diff
 - **Contradiction handling**: Temporal validity windows with superseded/contested status vs unknown mechanism
 - **Procedural memory**: Dedicated workflow extraction vs memory file cleanup only
-- **Performance measurement**: Composite scorecard with 7 dimensions vs none publicly available
+- **Performance measurement**: Composite scorecard with 8 dimensions vs none publicly available
 - **Agent breadth**: Works with Claude Code, Codex, Cursor, Gemini, and GitHub Copilot — not locked to one agent
 
 See [docs/benchmarks/autodream-comparison.md](benchmarks/autodream-comparison.md) for the full comparison with evidence citations.
@@ -51,7 +51,7 @@ OpenDream is currently under a proprietary license (all rights reserved). It is 
 opendream eval performance --workspace .tmp/eval
 ```
 
-The scorecard covers write precision (20%), retrieval precision (20%), latency (15%), concurrency safety (15%), contradiction handling (10%), procedural reuse (10%), and gating accuracy (10%). Pass threshold: weighted total >= 80. See [docs/benchmarks/methodology.md](benchmarks/methodology.md) for full details.
+The scorecard covers write precision (15%), retrieval precision (15%), expected-answer coverage (15%), latency (10%), concurrency safety (15%), contradiction handling (10%), procedural reuse / workflow memory (10%), and gating accuracy (10%). Pass threshold: weighted total >= 80 plus required answer and workflow gates. See [docs/benchmarks/methodology.md](benchmarks/methodology.md) for full details.
 
 **Q: Do I need extra API keys for semantic mode?**
 

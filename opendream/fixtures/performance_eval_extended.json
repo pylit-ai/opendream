@@ -1,5 +1,13 @@
 {
   "description": "Extended performance eval fixture — additional task archetypes for diversity beyond base fixture",
+  "coverage_gate": {
+    "expected_answer_min_coverage": 1.0,
+    "require_expected_answers": true,
+    "require_workflow_memory": true,
+    "required_workflow_titles": [
+      "Workflow: db-migration"
+    ]
+  },
   "events": {
     "high_signal": [
       {
@@ -11,11 +19,11 @@
         "label": "high_signal"
       },
       {
-        "kind": "anti_pattern",
+        "kind": "debug_outcome",
         "content": "Never use os.system() for subprocess calls. Always use subprocess.run() with explicit arguments to avoid shell injection. This was flagged in the March 2026 security audit.",
         "message_ref": "ext-high-2",
         "timestamp": "2026-03-27T10:10:00Z",
-        "tags": ["key:security-subprocess", "severity:high"],
+        "tags": ["key:security-subprocess", "severity:high", "anti-pattern:true"],
         "label": "high_signal"
       },
       {
@@ -31,6 +39,14 @@
         "content": "Database migration workflow:\n1. Create migration file with alembic revision --autogenerate\n2. Review generated migration for data-loss operations\n3. Run alembic upgrade head on staging\n4. Verify data integrity with migration smoke tests\n5. Apply to production during maintenance window",
         "message_ref": "ext-high-4",
         "timestamp": "2026-03-27T10:30:00Z",
+        "tags": ["workflow:db-migration", "success:true"],
+        "label": "high_signal"
+      },
+      {
+        "kind": "workflow_step",
+        "content": "Database migration workflow:\n1. Create migration file with alembic revision --autogenerate\n2. Review generated migration for data-loss operations\n3. Run alembic upgrade head on staging\n4. Verify data integrity with migration smoke tests\n5. Apply to production during maintenance window",
+        "message_ref": "ext-high-5",
+        "timestamp": "2026-03-27T10:35:00Z",
         "tags": ["workflow:db-migration", "success:true"],
         "label": "high_signal"
       }
@@ -76,19 +92,23 @@
     "should_match": [
       {
         "query": "What Python version do we need and why?",
-        "expected_title": "Environment: python-version"
+        "expected_title": "Environment: python-version",
+        "expected_answer": "Python 3.10 is fine. We don't use any 3.11 features."
       },
       {
         "query": "What security rules apply to running external commands?",
-        "expected_title": "Anti-pattern: security-subprocess"
+        "expected_title": "Anti-pattern: security-subprocess",
+        "expected_answer": "Never use os.system() for subprocess calls; use subprocess.run() with explicit arguments to avoid shell injection."
       },
       {
         "query": "How should API responses be structured?",
-        "expected_title": "Decision: api-response-format"
+        "expected_title": "Decision: api-response-format",
+        "expected_answer": "API responses should use a flat structure without wrapper keys. Return the data directly."
       },
       {
         "query": "How do we run database migrations safely?",
-        "expected_title": "Workflow: db-migration"
+        "expected_title": "Workflow: db-migration",
+        "expected_answer": "Create an alembic revision, review for data-loss operations, run alembic upgrade head on staging, verify data integrity, and apply during a maintenance window."
       }
     ],
     "should_gate": [

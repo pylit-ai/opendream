@@ -5,6 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from .memory_types import memory_type_matches
 from .models import AutomationJob, AutomationRecord
 from .storage import MemoryStore
 from .util import parse_timestamp, slugify, stable_id, summarize, to_iso, utc_now
@@ -87,7 +88,7 @@ def _job_due(job: dict[str, Any], state: dict[str, Any], *, now: str) -> bool:
 
 def _matching_source_records(store: MemoryStore, job: dict[str, Any]) -> list[dict[str, Any]]:
     selectors = job.get("input_selectors", {})
-    types_any = {str(item).lower() for item in selectors.get("memory_types_any", []) if str(item).strip()}
+    types_any = [str(item).lower() for item in selectors.get("memory_types_any", []) if str(item).strip()]
     text_terms_any = [str(item).lower() for item in selectors.get("text_terms_any", []) if str(item).strip()]
     statuses_any = {str(item).lower() for item in selectors.get("statuses_any", []) if str(item).strip()}
     limit = int(selectors.get("limit", 25))
@@ -96,7 +97,7 @@ def _matching_source_records(store: MemoryStore, job: dict[str, Any]) -> list[di
     for record in store.load_durable_records():
         if statuses_any and str(record.get("status", "")).lower() not in statuses_any:
             continue
-        if types_any and str(record.get("type", "")).lower() not in types_any:
+        if not memory_type_matches(record.get("type", ""), types_any):
             continue
         haystack = " ".join(
             [

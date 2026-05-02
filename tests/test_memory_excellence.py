@@ -471,7 +471,7 @@ class TestProceduralMemoryEnrichment(unittest.TestCase):
         now = to_iso(utc_now())
         record = MemoryRecord(
             memory_id="proc-1",
-            type="procedural_workflow",
+            type="workflow",
             scope="project",
             title="Deploy Workflow",
             summary="Steps to deploy",
@@ -495,6 +495,7 @@ class TestProceduralMemoryEnrichment(unittest.TestCase):
             success_markers=["Health check passes"],
         )
         d = record.to_dict()
+        self.assertEqual(d["type"], "workflow")
         self.assertEqual(d["preconditions"], ["CI green", "Staging approved"])
         self.assertEqual(d["recovery_steps"], ["Rollback to previous tag"])
         self.assertEqual(d["anti_patterns"], ["Never skip staging"])
@@ -665,7 +666,7 @@ class TestExtractorClaimClassification(unittest.TestCase):
         candidate = extract_candidate(event, origin_mode="dream")
         self.assertIsNotNone(candidate)
         assert candidate is not None
-        self.assertEqual(candidate.type, "procedural_workflow")
+        self.assertEqual(candidate.type, "workflow")
 
 
 class TestMemoryExcellenceScorecard(unittest.TestCase):

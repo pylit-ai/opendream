@@ -112,6 +112,7 @@ class MemoryRecord:
     recovery_steps: list[str] = field(default_factory=list)
     anti_patterns: list[str] = field(default_factory=list)
     success_markers: list[str] = field(default_factory=list)
+    lifecycle: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -120,6 +121,8 @@ class MemoryRecord:
         for key in ("preconditions", "recovery_steps", "anti_patterns", "success_markers"):
             if not payload.get(key):
                 payload.pop(key, None)
+        if not payload.get("lifecycle"):
+            payload.pop("lifecycle", None)
         return payload
 
 
@@ -168,6 +171,7 @@ class ContextAssembly:
     profile: dict[str, Any] = field(default_factory=dict)
     selection: dict[str, Any] = field(default_factory=dict)
     context_pruning: dict[str, Any] = field(default_factory=dict)
+    prompt_context_visibility: dict[str, Any] = field(default_factory=dict)
     selected_learned_context_items: list[dict[str, Any]] = field(default_factory=list)
     suppressed_learned_context_items: list[dict[str, Any]] = field(default_factory=list)
 

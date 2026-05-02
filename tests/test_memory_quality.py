@@ -175,7 +175,7 @@ class MemoryQualityTests(unittest.TestCase):
                 },
                 {
                     "memory_id": "workflow-1",
-                    "type": "procedural_workflow",
+                    "type": "workflow",
                     "scope": "project",
                     "title": "Workflow: verify",
                     "summary": "Run ruff, mypy, and make verify before completion.",

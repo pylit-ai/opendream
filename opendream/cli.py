@@ -666,6 +666,7 @@ def compact_prepare_context_output(context: dict[str, Any]) -> dict[str, Any]:
         "profile",
         "selection",
         "context_pruning",
+        "prompt_context_visibility",
         "suppression_summary",
         "selected_memory_ids",
         "selected_learned_context_ids",
