@@ -51,6 +51,7 @@ REQUIRED_SCHEMA_FILES = (
     "workspace-catalog.schema.json",
     "workspace-roots.schema.json",
     "workspace-scan-report.schema.json",
+    "showcase-observability-trace.schema.json",
 )
 
 

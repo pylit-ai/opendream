@@ -90,6 +90,28 @@ def validate_demo(payload: dict[str, Any]) -> None:
         raise AssertionError("memory-assisted answer did not pass measured answer checks")
     if not comparison.get("passed"):
         raise AssertionError("memory-assisted answer did not improve over stateless baseline")
+    for key in (
+        "claim_verification",
+        "memory_safety",
+        "agent_observability_trace",
+        "evidence_drilldown",
+        "selected_vs_excluded",
+        "score_visualization",
+        "glossary",
+        "copy_actions",
+    ):
+        if key not in payload:
+            raise AssertionError(f"demo missing upgraded report field: {key}")
+    if payload["claim_verification"].get("trust_level") != "strong":
+        raise AssertionError("demo claim verification did not reach strong trust")
+    if not payload["memory_safety"].get("passed"):
+        raise AssertionError("demo memory safety did not pass")
+    trace = payload["agent_observability_trace"]
+    if not trace.get("run_id") or not trace.get("context_id"):
+        raise AssertionError("demo observability trace missing run/context ids")
+    trace_operations = {span.get("operation") for span in trace.get("spans", []) if isinstance(span, dict)}
+    if not {"memory_read", "memory_write", "context_read", "answer_generation", "eval_scoring"} <= trace_operations:
+        raise AssertionError("demo observability trace missing required operation types")
     report_path = payload.get("report_path")
     if not report_path or not (REPO_ROOT / str(report_path)).exists():
         raise AssertionError("demo report_path missing or not written")
@@ -161,6 +183,9 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
             "generated_at": demo.get("generated_at"),
             "agent_snippet": demo.get("agent_snippet"),
             "answer_score_delta": demo.get("agent_answers", {}).get("comparison", {}).get("score_delta"),
+            "claim_trust_level": demo.get("claim_verification", {}).get("trust_level"),
+            "memory_safety_risk_level": demo.get("memory_safety", {}).get("risk_level"),
+            "trace_span_count": len(demo.get("agent_observability_trace", {}).get("spans", [])),
             "global_cli": global_cli_status(),
         }
 

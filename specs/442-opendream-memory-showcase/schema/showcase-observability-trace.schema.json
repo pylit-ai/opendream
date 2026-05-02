@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "required": ["schema", "spans"],
+  "properties": {
+    "schema": {"type": "string"},
+    "run_id": {"type": "string"},
+    "session_id": {"type": "string"},
+    "context_id": {"type": "string"},
+    "source_event_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "selected_memory_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "spans": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["operation", "name"],
+        "properties": {
+          "operation": {"type": "string"},
+          "name": {"type": "string"},
+          "timestamp": {"type": "string"},
+          "selected_memory_ids": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "excluded_memory_ids": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "event_ids": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "event_count": {"type": "integer", "minimum": 0},
+          "prompt_context_chars": {"type": "integer", "minimum": 0},
+          "created": {"type": ["integer", "null"], "minimum": 0},
+          "updated": {"type": ["integer", "null"], "minimum": 0},
+          "contested": {"type": ["integer", "null"], "minimum": 0},
+          "reranked": {"type": "boolean"},
+          "gated": {"type": "boolean"},
+          "report_path": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -23,6 +23,9 @@ Expected signal:
 - `agent_snippet` starts with `OpenDream found prior memory:`
 - `agent_answers` compares measured stateless and memory-assisted answers
 - `retrieval_rationale` explains why each memory was selected
+- `claim_verification.trust_level` says whether retrieval, task success, dream value, and memory safety are all proven
+- `memory_safety.risk_categories` checks stale overwrite, contaminated decoy, hallucinated source, contradiction, and abstention failures
+- `agent_observability_trace` records memory reads/writes, context assembly, answer generation, and eval scoring as trace spans
 - `dream_effectiveness` shows extraction, consolidation, stale-memory handling, decoy rejection, and prompt-context assembly
 - `report_path` points at `.tmp/opendream-showcase/.opendream/memory/state/showcase_report.json`
 
@@ -47,6 +50,8 @@ Expected checks:
 - `provenance`: selected memories include source event refs
 - `snippet`: the agent-facing recall phrase is generated
 - `answer_improvement`: the memory-assisted answer passes measured answer checks and improves over the stateless baseline
+- `memory_safety`: safety probes reject unsupported, stale, contradicted, and unrelated memory
+- `claim_verification`: report-level claims resolve to pass/fail evidence instead of prose-only proof
 
 ## What the proof is proving
 
@@ -64,6 +69,10 @@ The report makes that inspectable:
 - `context.visibility`: selected, excluded, diagnostic-only, and startup-index-only classifications for assembled context
 - `context.links`: selected prompt memories linked to source event IDs
 - `retrieval_rationale`: score, matched evidence, inclusion reason, and status for each selected memory
+- `claim_verification`: pass/fail for retrieval, task success, dream effectiveness, and memory safety claims
+- `memory_safety`: negative controls for hallucinated source, stale overwrite, contaminated decoy, low-confidence promotion, contradiction, and abstention
+- `agent_observability_trace`: run/session/context IDs plus span-style records for memory read/write, prompt context, answer generation, and eval scoring
+- `copy_actions`: copyable command, report JSON URL, report path, and source fixture path
 - `dream_effectiveness`: the maintenance pipeline from raw events to durable memory to prompt context
 
 ## Dream effectiveness
@@ -87,6 +96,15 @@ This mirrors current memory research practice: evaluate not only retrieval, but 
 
 Open `/showcase`. The page reads the persisted showcase report and shows the objective, task prompt, exact injected prompt context, selected memories, retrieval rationale, source event evidence, dream/maintenance pipeline, and eval-style checks.
 
+The first screen is meant to answer the skeptic question quickly:
+
+- Memory system: retrieves useful prior facts.
+- Dream system: consolidates events, contests stale guidance, and preserves source evidence.
+- Trust level: strong only when retrieval, answer quality, dream effectiveness, and safety checks all pass.
+- Reproducibility: command, report JSON, report path, fixture path, git commit, dirty status, and trace IDs are visible.
+
+The page also includes a glossary for `durable memory`, `startup index`, `prompt context`, `contested`, `quarantined`, `superseded`, `source ref`, and `memory hurt`.
+
 ## Fixture
 
 The synthetic fixture lives at `opendream/fixtures/showcase_coding_agent_memory.jsonl`.
@@ -101,12 +119,18 @@ It covers:
 - stale decision plus correction
 - unrelated decoy memory
 
+It also drives safety/misevolution probes: stale guidance that should lose to a correction, unrelated decoy memory that should not enter prompt context, forced contested recall that should be detected as harmful, and abstention prompts that should select no memory.
+
 ## Research anchors
 
 Comparable memory systems make value visible through seeded recall, inspectable memory, or benchmark-style proof:
 
 - [MemoryArena](https://digitaleconomy.stanford.edu/publication/memoryarena-benchmarking-agent-memory-in-interdependent-multi-session-agentic-tasks/) argues memory should be evaluated by whether earlier experience guides later action, not isolated memorization.
 - [Memory for Autonomous LLM Agents](https://arxiv.org/abs/2603.07670) frames memory as a write-manage-read loop and calls out consolidation, causally grounded retrieval, contradiction handling, and trustworthy reflection as open challenges.
+- [MemoryAgentBench](https://arxiv.org/abs/2507.05257) identifies accurate retrieval, test-time learning, long-range understanding, and selective forgetting as core memory-agent competencies.
+- [LoCoMo-Plus](https://arxiv.org/abs/2602.10715) motivates testing latent constraints and not only surface factual recall.
+- [OpenTelemetry AI agent observability](https://opentelemetry.io/blog/2025/ai-agent-observability/) motivates span-style traces for agent memory/tool/model steps.
+- [Arize Phoenix evaluations](https://arize.com/docs/phoenix/evaluation/concepts-evals/evaluation) models retrieval evaluation with precision-like metrics, relevance, hallucination, and trace-linked evals.
 - [ByteRover](https://arxiv.org/abs/2604.01599) emphasizes agent-native context, explicit provenance, hierarchical context, lifecycle scoring, and local-first storage.
 - [Observational Memory](https://mastra.ai/research/observational-memory) demonstrates value by showing stable prompt context built from event-like observations and reflection, with compression rather than raw transcript stuffing.
 - [Supermemory Research](https://supermemory.ai/research/) highlights LongMemEval categories that matter for real memory systems: preference, multi-session reasoning, knowledge updates, temporal reasoning, and noise filtering; it also discloses prompts/code for reproducibility.

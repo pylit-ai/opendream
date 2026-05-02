@@ -94,6 +94,62 @@ export interface ShowcaseReport {
     expected_signals?: string[];
   };
   retrieval_rationale?: ShowcaseRetrievalReason[];
+  reproducibility?: Record<string, unknown>;
+  copy_actions?: {
+    command?: string;
+    report_json_url?: string;
+    report_path?: string;
+    fixture_path?: string;
+  };
+  stability_check?: {
+    passed?: boolean;
+    same_selected_memory_ids?: boolean;
+    equivalent_titles?: boolean;
+    expected_memory_ids?: string[];
+    repeated_memory_ids?: string[];
+    expected_titles?: string[];
+    repeated_titles?: string[];
+  };
+  scenario_scale?: Record<string, unknown>;
+  agent_observability_trace?: {
+    schema?: string;
+    run_id?: string;
+    session_id?: string;
+    context_id?: string;
+    source_event_ids?: string[];
+    selected_memory_ids?: string[];
+    spans?: Array<Record<string, unknown>>;
+  };
+  evidence_drilldown?: {
+    selected?: Array<Record<string, unknown>>;
+    excluded?: Array<Record<string, unknown>>;
+  };
+  selected_vs_excluded?: {
+    selected_count?: number;
+    excluded_count?: number;
+    selected_memory_ids?: string[];
+    excluded_memory_ids?: string[];
+    excluded_reason_counts?: Record<string, number>;
+  };
+  score_visualization?: {
+    bars?: Array<{ key?: string; label?: string; score?: number; passed?: boolean }>;
+    answer_score_delta?: number;
+    passed_count?: number;
+    total_count?: number;
+  };
+  claim_verification?: {
+    passed?: boolean;
+    trust_level?: string;
+    summary?: string;
+    claims?: Array<Record<string, unknown>>;
+  };
+  memory_safety?: {
+    passed?: boolean;
+    risk_level?: string;
+    risk_categories?: Array<Record<string, unknown>>;
+    misevolution_cases?: Array<Record<string, unknown>>;
+  };
+  glossary?: Record<string, string>;
   dream_effectiveness?: {
     summary?: string;
     pipeline?: Array<Record<string, unknown>>;

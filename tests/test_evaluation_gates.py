@@ -9,7 +9,6 @@ from opendream.evaluation import run_performance_eval
 from opendream.storage import MemoryStore
 from opendream.util import FIXTURE_ROOT, read_json, write_json
 
-
 FIXED_NOW = "2026-05-02T00:00:00Z"
 
 

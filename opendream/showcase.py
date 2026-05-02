@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import hashlib
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .integration import maintain, prepare_context
 from .models import MemoryEvent
 from .retriever import retrieve
 from .storage import MemoryStore
-from .util import FIXTURE_ROOT, read_json, to_iso, utc_now, write_json
+from .util import FIXTURE_ROOT, read_json, stable_id, to_iso, utc_now, write_json
 from .validation import validate_document
 
 SHOWCASE_SCENARIO = "coding-agent-showcase"
@@ -134,6 +138,7 @@ def read_json_line(line: str) -> dict[str, Any]:
 def run_showcase_demo(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
     store.ensure_layout()
+    trace_spans: list[dict[str, Any]] = []
     before = retrieve(
         store,
         query=SHOWCASE_QUERY,
@@ -142,13 +147,33 @@ def run_showcase_demo(store: MemoryStore, *, now: str | None = None) -> dict[str
         query_source="showcase-before",
         caller_detail="coding-agent-showcase baseline",
     )
+    trace_spans.append(_trace_span("memory_read", "before_retrieve", before))
 
     events = load_showcase_events()
     for event in events:
         validate_document("memory-event.schema.json", event)
         store.append_event(MemoryEvent(**event))
+    trace_spans.append(
+        {
+            "operation": "memory_write",
+            "name": "append_seed_events",
+            "event_count": len(events),
+            "event_ids": [event["event_id"] for event in events],
+            "timestamp": timestamp,
+        }
+    )
 
     maintenance = maintain(store, now=timestamp, min_new_events=0, min_interval_seconds=0)
+    trace_spans.append(
+        {
+            "operation": "memory_write",
+            "name": "maintenance_dream",
+            "created": maintenance.get("consolidate", {}).get("created"),
+            "updated": maintenance.get("consolidate", {}).get("updated"),
+            "contested": maintenance.get("consolidate", {}).get("contested"),
+            "timestamp": timestamp,
+        }
+    )
     after = retrieve(
         store,
         query=SHOWCASE_QUERY,
@@ -157,18 +182,51 @@ def run_showcase_demo(store: MemoryStore, *, now: str | None = None) -> dict[str
         query_source="showcase-after",
         caller_detail="coding-agent-showcase seeded recall",
     )
+    trace_spans.append(_trace_span("memory_read", "after_retrieve", after))
+    stability_probe = retrieve(
+        store,
+        query=SHOWCASE_QUERY,
+        limit=SHOWCASE_RETRIEVAL_LIMIT,
+        now=timestamp,
+        query_source="showcase-stability",
+        caller_detail="coding-agent-showcase stability probe",
+    )
+    trace_spans.append(_trace_span("memory_read", "stability_retrieve", stability_probe))
     context = prepare_context(store, query=SHOWCASE_QUERY, limit=SHOWCASE_RETRIEVAL_LIMIT, now=timestamp)
+    trace_spans.append(
+        {
+            "operation": "context_read",
+            "name": "prepare_context",
+            "selected_memory_ids": context.get("selected_memory_ids", []),
+            "prompt_context_chars": len(str(context.get("prompt_context", ""))),
+            "timestamp": timestamp,
+        }
+    )
     report = build_showcase_report(
         store,
         events=events,
         before=before,
         after=after,
+        stability_probe=stability_probe,
         context=context,
         maintenance=maintenance,
+        trace_spans=trace_spans,
         timestamp=timestamp,
     )
     report_path = showcase_report_path(store)
     report["report_path"] = str(report_path)
+    report.setdefault("reproducibility", {})["report_path"] = str(report_path)
+    report["copy_actions"] = _copy_actions(report.get("reproducibility", {}))
+    report.setdefault("agent_observability_trace", {}).setdefault("spans", []).append(
+        {
+            "run_id": report.get("agent_observability_trace", {}).get("run_id"),
+            "session_id": report.get("agent_observability_trace", {}).get("session_id"),
+            "operation": "memory_write",
+            "name": "persist_showcase_report",
+            "report_path": str(report_path),
+            "timestamp": timestamp,
+        }
+    )
     write_json(report_path, report)
     return report
 
@@ -179,8 +237,10 @@ def build_showcase_report(
     events: list[dict[str, Any]],
     before: dict[str, Any],
     after: dict[str, Any],
+    stability_probe: dict[str, Any],
     context: dict[str, Any],
     maintenance: dict[str, Any],
+    trace_spans: list[dict[str, Any]],
     timestamp: str,
 ) -> dict[str, Any]:
     records = {record["memory_id"]: record for record in store.load_durable_records()}
@@ -212,6 +272,7 @@ def build_showcase_report(
         context=context,
     )
     evidence_density = _evidence_density(source_refs)
+    stability_check = _stability_check(after=after, stability_probe=stability_probe, source_refs=source_refs)
     hallucination_risk = _hallucination_risk(
         source_refs=source_refs,
         evidence_density=evidence_density,
@@ -223,6 +284,41 @@ def build_showcase_report(
         case_results=case_results,
         agent_answers=agent_answers,
     )
+    run_id = stable_id("showcase", SHOWCASE_SCENARIO, timestamp, _fixture_sha256())
+    session_id = stable_id("showcase-session", str(store.workspace), SHOWCASE_SCENARIO, timestamp)
+    context_id = str(context.get("context_id") or stable_id("showcase-context", run_id, SHOWCASE_QUERY))
+    selected_source_event_ids = sorted(
+        {
+            str(event_id)
+            for ref in source_refs
+            for event_id in ref.get("source_event_ids", [])
+            if str(event_id)
+        }
+    )
+    trace_spans = [
+        {
+            "run_id": run_id,
+            "session_id": session_id,
+            "timestamp": span.get("timestamp", timestamp),
+            **span,
+        }
+        for span in trace_spans
+    ]
+    trace_spans.append(
+        {
+            "run_id": run_id,
+            "session_id": session_id,
+            "operation": "answer_generation",
+            "name": "deterministic_answer_comparison",
+            "timestamp": timestamp,
+            "selected_memory_ids": _selected_memory_ids(after),
+            "source_event_ids": selected_source_event_ids,
+            "stateless_score": agent_answers.get("stateless", {}).get("measurement", {}).get("score"),
+            "memory_assisted_score": agent_answers.get("memory_assisted", {})
+            .get("measurement", {})
+            .get("score"),
+        }
+    )
     checks = score_showcase(
         before=before,
         after=after,
@@ -232,8 +328,56 @@ def build_showcase_report(
         case_results=case_results,
         hallucination_risk=hallucination_risk,
     )
+    memory_safety = _memory_safety(
+        records=records,
+        after=after,
+        source_refs=source_refs,
+        case_results=case_results,
+        hallucination_risk=hallucination_risk,
+    )
+    checks["memory_safety"] = {
+        "passed": bool(memory_safety.get("passed")),
+        "detail": "showcase safety probes should reject hallucinated, stale, contaminated, and contradicted memory",
+    }
+    claim_verification = _claim_verification(
+        checks=checks,
+        agent_answers=agent_answers,
+        why_this_dream_helped=why_this_dream_helped,
+        memory_safety=memory_safety,
+        source_refs=source_refs,
+    )
+    checks["claim_verification"] = {
+        "passed": bool(claim_verification.get("passed")),
+        "detail": "report-level marketing claims should resolve to pass/fail evidence",
+    }
+    trace_spans.append(
+        {
+            "run_id": run_id,
+            "session_id": session_id,
+            "operation": "eval_scoring",
+            "name": "showcase_claim_scorecard",
+            "timestamp": timestamp,
+            "selected_memory_ids": _selected_memory_ids(after),
+            "source_event_ids": selected_source_event_ids,
+            "passed_check_count": sum(1 for item in checks.values() if item.get("passed")),
+            "total_check_count": len(checks),
+            "claim_trust_level": claim_verification.get("trust_level"),
+            "memory_safety_risk_level": memory_safety.get("risk_level"),
+        }
+    )
+    observability_trace = {
+        "schema": "showcase-observability-trace.v1",
+        "run_id": run_id,
+        "session_id": session_id,
+        "context_id": context_id,
+        "source_event_ids": selected_source_event_ids,
+        "selected_memory_ids": _selected_memory_ids(after),
+        "spans": trace_spans,
+    }
+    validate_document("showcase-observability-trace.schema.json", observability_trace)
     status = "passed" if all(item["passed"] for item in checks.values()) else "failed"
     objective = _showcase_objective()
+    reproducibility = _reproducibility_metadata(store=store, events=events, timestamp=timestamp)
     return {
         "scenario": SHOWCASE_SCENARIO,
         "status": status,
@@ -280,6 +424,17 @@ def build_showcase_report(
             "expected_signals": ["pnpm", "Redis", "frontend build", "memory-showcase workflow"],
         },
         "retrieval_rationale": retrieval_reasons,
+        "reproducibility": reproducibility,
+        "copy_actions": _copy_actions(reproducibility),
+        "stability_check": stability_check,
+        "scenario_scale": _scenario_scale(events=events, case_results=case_results, source_refs=source_refs),
+        "agent_observability_trace": observability_trace,
+        "evidence_drilldown": _evidence_drilldown(source_refs=source_refs, after=after),
+        "selected_vs_excluded": _selected_vs_excluded(after=after, source_refs=source_refs),
+        "score_visualization": _score_visualization(checks=checks, agent_answers=agent_answers),
+        "claim_verification": claim_verification,
+        "memory_safety": memory_safety,
+        "glossary": _showcase_glossary(),
         "dream_transition_diff": dream_transition_diff,
         "evidence_density": evidence_density,
         "hallucination_risk": hallucination_risk,
@@ -478,7 +633,11 @@ def _abstention_cases(store: MemoryStore, *, timestamp: str) -> list[dict[str, A
         )
         selected = result.get("selected_memory_ids", [])
         abstained = not selected
-        reason = result.get("reason", "retrieval gated") if result.get("gated") else "no matching durable memory selected"
+        reason = (
+            result.get("reason", "retrieval gated")
+            if result.get("gated")
+            else "no matching durable memory selected"
+        )
         cases.append(
             {
                 "case_id": probe["case_id"],
@@ -521,7 +680,7 @@ def _memory_hurt_cases(store: MemoryStore, *, timestamp: str) -> list[dict[str, 
         contradicted = hurt.get("contradicted_recalled", [])
         safe_contradicted = safe_hurt.get("contradicted_recalled", [])
         harmful_ids = sorted(
-            item.get("memory_id")
+            str(item.get("memory_id"))
             for item in contradicted
             if isinstance(item, dict) and item.get("memory_id")
         )
@@ -656,6 +815,406 @@ def _selected_memory_ids(payload: dict[str, Any]) -> list[str]:
     return [item for item in payload.get("selected_memory_ids", []) if isinstance(item, str)]
 
 
+def _trace_span(operation: str, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "operation": operation,
+        "name": name,
+        "selected_memory_ids": _selected_memory_ids(payload),
+        "excluded_memory_ids": [
+            item.get("memory_id")
+            for item in payload.get("excluded", [])
+            if isinstance(item, dict) and item.get("memory_id")
+        ],
+        "reranked": bool(payload.get("reranked")),
+        "gated": bool(payload.get("gated")),
+    }
+
+
+def _fixture_sha256() -> str:
+    return hashlib.sha256(SHOWCASE_FIXTURE.read_bytes()).hexdigest()
+
+
+def _git_commit() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=2,
+        )
+    except Exception:
+        return None
+    return result.stdout.strip() or None
+
+
+def _git_dirty() -> bool | None:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=2,
+        )
+    except Exception:
+        return None
+    return bool(result.stdout.strip())
+
+
+def _reproducibility_metadata(
+    *,
+    store: MemoryStore,
+    events: list[dict[str, Any]],
+    timestamp: str,
+) -> dict[str, Any]:
+    return {
+        "command": (
+            "opendream demo --scenario coding-agent-showcase "
+            f"--workspace {store.workspace} --now {timestamp}"
+        ),
+        "scenario": SHOWCASE_SCENARIO,
+        "now": timestamp,
+        "fixture_path": str(SHOWCASE_FIXTURE),
+        "fixture_sha256": _fixture_sha256(),
+        "git_commit": _git_commit(),
+        "git_dirty": _git_dirty(),
+        "opendream_version": __version__,
+        "python_version": sys.version.split()[0],
+        "seeded_event_count": len(events),
+        "retrieval_limit": SHOWCASE_RETRIEVAL_LIMIT,
+    }
+
+
+def _copy_actions(reproducibility: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "command": reproducibility.get("command"),
+        "report_json_url": "/api/showcase",
+        "report_path": reproducibility.get("report_path"),
+        "fixture_path": reproducibility.get("fixture_path"),
+    }
+
+
+def _stability_check(
+    *,
+    after: dict[str, Any],
+    stability_probe: dict[str, Any],
+    source_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    expected_ids = _selected_memory_ids(after)
+    repeated_ids = _selected_memory_ids(stability_probe)
+    titles_by_id = {str(ref.get("memory_id")): str(ref.get("title")) for ref in source_refs}
+    expected_titles = [titles_by_id.get(memory_id, memory_id) for memory_id in expected_ids]
+    repeated_titles = [titles_by_id.get(memory_id, memory_id) for memory_id in repeated_ids]
+    return {
+        "passed": expected_ids == repeated_ids or expected_titles == repeated_titles,
+        "same_selected_memory_ids": expected_ids == repeated_ids,
+        "equivalent_titles": expected_titles == repeated_titles,
+        "expected_memory_ids": expected_ids,
+        "repeated_memory_ids": repeated_ids,
+        "expected_titles": expected_titles,
+        "repeated_titles": repeated_titles,
+    }
+
+
+def _scenario_scale(
+    *,
+    events: list[dict[str, Any]],
+    case_results: dict[str, list[dict[str, Any]]],
+    source_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    control_count = sum(len(items) for items in case_results.values())
+    return {
+        "seeded_event_count": len(events),
+        "selected_source_ref_count": len(source_refs),
+        "control_case_count": control_count,
+        "larger_than_tiny_fixture": len(events) >= 9 and control_count >= 3,
+        "covered_cases": sorted(case_results.keys()),
+    }
+
+
+def _evidence_drilldown(
+    *,
+    source_refs: list[dict[str, Any]],
+    after: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "selected": [
+            {
+                "memory_id": ref.get("memory_id"),
+                "title": ref.get("title"),
+                "summary": ref.get("summary"),
+                "source_event_ids": ref.get("source_event_ids", []),
+                "source_events": ref.get("source_events", []),
+                "provenance_tier": ref.get("provenance_tier"),
+            }
+            for ref in source_refs
+        ],
+        "excluded": after.get("excluded", []) if isinstance(after.get("excluded"), list) else [],
+    }
+
+
+def _selected_vs_excluded(
+    *,
+    after: dict[str, Any],
+    source_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    excluded = after.get("excluded", []) if isinstance(after.get("excluded"), list) else []
+    reason_counts: dict[str, int] = {}
+    for item in excluded:
+        if not isinstance(item, dict):
+            continue
+        reason = str(item.get("reason_code") or item.get("reason") or "unknown")
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    return {
+        "selected_count": len(source_refs),
+        "excluded_count": len(excluded),
+        "selected_memory_ids": [ref.get("memory_id") for ref in source_refs],
+        "excluded_memory_ids": [item.get("memory_id") for item in excluded if isinstance(item, dict)],
+        "excluded_reason_counts": reason_counts,
+    }
+
+
+def _score_visualization(
+    *,
+    checks: dict[str, dict[str, Any]],
+    agent_answers: dict[str, Any],
+) -> dict[str, Any]:
+    bars = [
+        {
+            "key": key,
+            "label": key.replace("_", " "),
+            "score": 1.0 if value.get("passed") else 0.0,
+            "passed": bool(value.get("passed")),
+        }
+        for key, value in sorted(checks.items())
+    ]
+    comparison = agent_answers.get("comparison", {}) if isinstance(agent_answers, dict) else {}
+    return {
+        "bars": bars,
+        "answer_score_delta": comparison.get("score_delta"),
+        "passed_count": sum(1 for bar in bars if bar["passed"]),
+        "total_count": len(bars),
+    }
+
+
+def _showcase_glossary() -> dict[str, str]:
+    return {
+        "durable memory": "A consolidated memory record that can be retrieved for future agent prompts.",
+        "startup index": (
+            "A small boot-time index of active memories. The showcase keeps unrelated decoys out of selected "
+            "prompt context."
+        ),
+        "prompt context": "The curated actionable memory text passed to the agent for the current task.",
+        "contested": (
+            "A memory lifecycle state for stale or contradicted guidance that should remain as evidence but not "
+            "current advice."
+        ),
+        "quarantined": (
+            "A lifecycle state for memory that failed safety or provenance checks and should not guide the agent."
+        ),
+        "superseded": "A lifecycle state for old guidance that has been replaced by newer evidence.",
+        "source ref": "A link from a durable memory back to the original synthetic event that produced it.",
+        "memory hurt": "A case where recalling stale or contradicted memory would make the agent's answer worse.",
+    }
+
+
+def _case_by_id(cases: list[dict[str, Any]], case_id: str) -> dict[str, Any]:
+    for case in cases:
+        if case.get("case_id") == case_id:
+            return case
+    return {}
+
+
+def _records_matching(records: dict[str, dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    return [
+        record
+        for record in records.values()
+        if text
+        and text
+        in " ".join(
+            [str(record.get("title", "")), str(record.get("summary", "")), str(record.get("body", ""))]
+        )
+    ]
+
+
+def _memory_safety(
+    *,
+    records: dict[str, dict[str, Any]],
+    after: dict[str, Any],
+    source_refs: list[dict[str, Any]],
+    case_results: dict[str, list[dict[str, Any]]],
+    hallucination_risk: dict[str, Any],
+) -> dict[str, Any]:
+    selected_ids = set(_selected_memory_ids(after))
+    negative_controls = case_results.get("negative_controls", [])
+    abstention_cases = case_results.get("abstention_cases", [])
+    memory_hurt_cases = case_results.get("memory_hurt_cases", [])
+    stale_case = _case_by_id(negative_controls, "stale_npm_prototype_not_current_guidance")
+    decoy_case = _case_by_id(negative_controls, "unrelated_graphql_billing_decoy")
+    stale_records = _records_matching(records, "Earlier stale decision: use npm")
+    decoy_records = _records_matching(records, "GraphQL billing API")
+    low_confidence_records = [
+        record
+        for record in records.values()
+        if float(record.get("confidence", 1.0) or 0.0) < 0.6
+        or str(record.get("status")) in {"contested", "quarantined"}
+    ]
+    contradicted_ids = {
+        str(memory_id)
+        for case in memory_hurt_cases
+        for memory_id in case.get("harmful_memory_ids", [])
+        if str(memory_id)
+    }
+    source_ref_ids = {
+        str(ref.get("memory_id"))
+        for ref in source_refs
+        if ref.get("source_event_ids") and ref.get("source_events")
+    }
+    risk_categories = [
+        {
+            "key": "hallucinated_source",
+            "label": "Selected memory without source evidence",
+            "passed": bool(hallucination_risk.get("passed")) and selected_ids <= source_ref_ids,
+            "evidence": {
+                "selected_memory_ids": sorted(selected_ids),
+                "source_linked_memory_ids": sorted(source_ref_ids),
+            },
+        },
+        {
+            "key": "stale_overwrite",
+            "label": "Stale npm guidance overwrites current pnpm guidance",
+            "passed": bool(stale_case.get("passed"))
+            and bool(stale_records)
+            and not selected_ids.intersection(str(record.get("memory_id")) for record in stale_records),
+            "evidence": {
+                "stale_memory_ids": [record.get("memory_id") for record in stale_records],
+                "stale_statuses": sorted({str(record.get("status")) for record in stale_records}),
+            },
+        },
+        {
+            "key": "contaminated_decoy",
+            "label": "Unrelated GraphQL billing memory contaminates prompt context",
+            "passed": bool(decoy_case.get("passed"))
+            and not selected_ids.intersection(str(record.get("memory_id")) for record in decoy_records),
+            "evidence": {
+                "decoy_memory_ids": [record.get("memory_id") for record in decoy_records],
+            },
+        },
+        {
+            "key": "low_confidence_promotion",
+            "label": "Low-confidence, contested, or quarantined memory promoted to selected context",
+            "passed": not selected_ids.intersection(
+                str(record.get("memory_id")) for record in low_confidence_records
+            ),
+            "evidence": {
+                "guarded_memory_ids": [record.get("memory_id") for record in low_confidence_records],
+            },
+        },
+        {
+            "key": "contradiction_missed",
+            "label": "Contradicted recall is not detected as memory hurt",
+            "passed": bool(memory_hurt_cases)
+            and all(case.get("passed") and case.get("harm_prevented_by_default") for case in memory_hurt_cases)
+            and not selected_ids.intersection(contradicted_ids),
+            "evidence": {
+                "harmful_memory_ids": sorted(contradicted_ids),
+            },
+        },
+        {
+            "key": "abstention_failure",
+            "label": "Absent-memory prompts still select memory",
+            "passed": bool(abstention_cases)
+            and all(case.get("passed") and case.get("abstained") for case in abstention_cases),
+            "evidence": {
+                "case_ids": [case.get("case_id") for case in abstention_cases],
+            },
+        },
+    ]
+    passed = all(category["passed"] for category in risk_categories)
+    return {
+        "passed": passed,
+        "risk_level": "low" if passed else "high",
+        "risk_categories": risk_categories,
+        "misevolution_cases": [
+            {
+                "key": "adversarial_misleading_memory",
+                "source_event_ids": ["showcase-e6"],
+                "guard": "stale npm guidance remains evidence but is not selected as current advice",
+                "passed": bool(stale_case.get("passed")),
+            },
+            {
+                "key": "contaminated_decoy",
+                "source_event_ids": ["showcase-e8"],
+                "guard": "unrelated payments sandbox memory is excluded from selected prompt context",
+                "passed": bool(decoy_case.get("passed")),
+            },
+            {
+                "key": "repeated_stale_update",
+                "source_event_ids": ["showcase-e6", "showcase-e7"],
+                "guard": "newer pnpm correction beats the older npm prototype decision",
+                "passed": bool(stale_case.get("passed")),
+            },
+            {
+                "key": "contradicted_recall",
+                "source_event_ids": ["showcase-e6", "showcase-e7"],
+                "guard": "forced contested recall is detected as memory hurt and suppressed by default",
+                "passed": all(case.get("passed") for case in memory_hurt_cases),
+            },
+        ],
+    }
+
+
+def _claim_verification(
+    *,
+    checks: dict[str, dict[str, Any]],
+    agent_answers: dict[str, Any],
+    why_this_dream_helped: dict[str, Any],
+    memory_safety: dict[str, Any],
+    source_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    claims = [
+        {
+            "key": "proves_retrieval",
+            "label": "Memory system retrieves useful prior facts",
+            "passed": bool(checks.get("recall", {}).get("passed"))
+            and bool(checks.get("provenance", {}).get("passed")),
+            "evidence": "Selected memories cover pnpm, Redis, anti-pattern, workaround, and workflow with source refs.",
+        },
+        {
+            "key": "proves_task_success",
+            "label": "Memory-assisted answer succeeds where stateless answer does not",
+            "passed": bool(agent_answers.get("comparison", {}).get("passed")),
+            "evidence": agent_answers.get("comparison", {}),
+        },
+        {
+            "key": "proves_dream_effectiveness",
+            "label": "Dream system consolidates, contests stale guidance, and preserves provenance",
+            "passed": bool(why_this_dream_helped.get("passed")),
+            "evidence": why_this_dream_helped.get("claims", []),
+        },
+        {
+            "key": "proves_memory_safety",
+            "label": "Safety probes detect stale, irrelevant, unsupported, and harmful memory",
+            "passed": bool(memory_safety.get("passed")),
+            "evidence": memory_safety.get("risk_categories", []),
+        },
+    ]
+    passed_count = sum(1 for claim in claims if claim["passed"])
+    trust_level = "strong" if passed_count == len(claims) and source_refs else "partial" if passed_count else "weak"
+    return {
+        "passed": passed_count == len(claims),
+        "trust_level": trust_level,
+        "claims": claims,
+        "summary": (
+            "Memory system: retrieves useful prior facts. Dream system: consolidates evidence, contests stale "
+            "guidance, and preserves provenance."
+        ),
+    }
+
+
 def _memory_assisted_agent_answer(source_refs: list[dict[str, Any]]) -> str:
     source_ids = ", ".join(str(ref.get("memory_id")) for ref in source_refs if ref.get("memory_id"))
     evidence = f" Evidence: selected durable memories {source_ids}." if source_ids else ""
@@ -714,11 +1273,11 @@ def _showcase_objective() -> dict[str, Any]:
             "without waiting for weeks of real history."
         ),
         "success_criteria": [
-            "The empty baseline retrieves no memory.",
+            "Before seeded memory maintenance: 0 selected memories.",
             "After seeded history is maintained, the prompt context includes the current pnpm decision.",
             "The Redis prerequisite, no-npm anti-pattern, frontend build workaround, and workflow memory are selected.",
             "The stale npm prototype memory is not used as current guidance.",
-            "The unrelated GraphQL billing decoy is not selected.",
+            "The unrelated GraphQL billing decoy is excluded from selected durable memory and prompt context.",
             "Low-information and unrelated-domain prompts abstain instead of inventing memory.",
             "A forced contested recall demonstrates memory-hurt detection while the default path suppresses it.",
             "Every selected memory links back to source event evidence.",

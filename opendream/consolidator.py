@@ -161,7 +161,11 @@ def _ensure_lifecycle(record: dict[str, Any], *, now: str) -> dict[str, Any]:
             "updated_at": str(record.get("updated_at") or now),
             "last_transition_at": str(record.get("updated_at") or now),
             "last_reinforced_at": str(record.get("updated_at") or now) if state == "active" else None,
-            "promoted_at": str(record.get("valid_from") or record.get("created_at") or now) if state == "active" else None,
+            "promoted_at": (
+                str(record.get("valid_from") or record.get("created_at") or now)
+                if state == "active"
+                else None
+            ),
             "promotion_run_id": None,
             "transition_count": 0,
             "source_event_count": source_event_count,
@@ -256,7 +260,14 @@ def _bump(summary: dict[str, Any], key: str, amount: int = 1) -> None:
 
 
 _RETYPE_ELIGIBLE_TYPES = frozenset(
-    {"project_decision", "environment_requirement", "workflow", "procedural_workflow", "anti_pattern", "user_preference"}
+    {
+        "project_decision",
+        "environment_requirement",
+        "workflow",
+        "procedural_workflow",
+        "anti_pattern",
+        "user_preference",
+    }
 )
 
 

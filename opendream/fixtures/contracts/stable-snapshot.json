@@ -259,6 +259,9 @@
       "name": "service-install-report.schema.json"
     },
     {
+      "name": "showcase-observability-trace.schema.json"
+    },
+    {
       "name": "supervisor-manifest.schema.json"
     },
     {

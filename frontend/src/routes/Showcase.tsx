@@ -24,6 +24,7 @@ import { IdLink } from '~/components/IdLink';
 import { LoadingPage } from '~/components/Loading';
 import { Page } from '~/components/Page';
 import { Chip, type ChipVariant } from '~/components/Chip';
+import { CopyButton } from '~/components/CopyButton';
 
 type SummaryTone = 'success' | 'warn' | 'danger' | 'neutral';
 
@@ -60,6 +61,40 @@ function promptLinks(report: ShowcaseReport | undefined): ShowcasePromptLink[] {
 
 function retrievalReasons(report: ShowcaseReport | undefined): ShowcaseRetrievalReason[] {
   return report?.retrieval_rationale ?? [];
+}
+
+function recordArray(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    : [];
+}
+
+function scoreBars(report: ShowcaseReport | undefined): Array<{ key?: string; label?: string; score?: number; passed?: boolean }> {
+  return report?.score_visualization?.bars ?? [];
+}
+
+function traceSpans(report: ShowcaseReport | undefined): Array<Record<string, unknown>> {
+  return report?.agent_observability_trace?.spans ?? [];
+}
+
+function drilldownSelected(report: ShowcaseReport | undefined): Array<Record<string, unknown>> {
+  return recordArray(report?.evidence_drilldown?.selected);
+}
+
+function drilldownExcluded(report: ShowcaseReport | undefined): Array<Record<string, unknown>> {
+  return recordArray(report?.evidence_drilldown?.excluded);
+}
+
+function claimItems(report: ShowcaseReport | undefined): Array<Record<string, unknown>> {
+  return recordArray(report?.claim_verification?.claims);
+}
+
+function safetyItems(report: ShowcaseReport | undefined): Array<Record<string, unknown>> {
+  return recordArray(report?.memory_safety?.risk_categories);
+}
+
+function glossaryEntries(report: ShowcaseReport | undefined): Array<[string, string]> {
+  return Object.entries(report?.glossary ?? {});
 }
 
 function agentAnswerEntries(
@@ -206,6 +241,16 @@ function trustSummary(report: ShowcaseReport | undefined): {
   const checksLabel = check.total > 0 ? `${check.passed}/${check.total} checks` : 'no checks';
   const allChecksPassed = check.total > 0 && check.passed === check.total;
   const hasSources = coverage.sourceRefs > 0 && coverage.selected > 0;
+  const claimTrust = report?.claim_verification?.trust_level;
+
+  if (claimTrust === 'strong') {
+    return {
+      label: 'Strong trust',
+      detail: `${checksLabel} plus source-linked retrieval, answer, dream, and safety claims.`,
+      tone: 'success',
+      checksLabel,
+    };
+  }
 
   if (verdict.tone === 'success' && allChecksPassed && hasSources) {
     return {
@@ -236,6 +281,13 @@ function trustSummary(report: ShowcaseReport | undefined): {
 function asText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
+function asCompactText(value: unknown): string {
+  const text = asText(value);
+  if (text) return text;
+  if (value && typeof value === 'object') return JSON.stringify(value);
   return '';
 }
 
@@ -350,7 +402,111 @@ export default function ShowcaseRoute(): JSX.Element {
                     </SummaryCard>
                   </section>
 
-                <section class="rounded-md border border-border bg-surface p-5">
+                  <section class="grid gap-4 xl:grid-cols-[1fr_1fr]">
+                    <div class="rounded-md border border-border bg-surface p-5">
+                      <div class="mb-4 flex items-center gap-2 text-sm font-medium text-text">
+                        <CheckCircle2 size={16} />
+                        Claim verification
+                      </div>
+                      <p class="mb-4 text-sm leading-6 text-text-muted">
+                        {r().claim_verification?.summary}
+                      </p>
+                      <div class="grid gap-2">
+                        <For each={claimItems(r())}>
+                          {(claim) => (
+                            <div class="rounded-md border border-border bg-surface-muted p-3">
+                              <div class="mb-2 flex flex-wrap items-center gap-2">
+                                <Chip variant={Boolean(claim.passed) ? 'ok' : 'warn'}>
+                                  {Boolean(claim.passed) ? 'proven' : 'gap'}
+                                </Chip>
+                                <span class="text-sm font-medium text-text">{asText(claim.label)}</span>
+                              </div>
+                              <div class="text-xs leading-5 text-text-muted">{asCompactText(claim.evidence)}</div>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+
+                    <div class="rounded-md border border-border bg-surface p-5">
+                      <div class="mb-4 flex items-center gap-2 text-sm font-medium text-text">
+                        <CircleAlert size={16} />
+                        Memory safety
+                      </div>
+                      <div class="mb-4 flex flex-wrap gap-2">
+                        <Chip variant={r().memory_safety?.passed ? 'ok' : 'danger'}>
+                          {r().memory_safety?.risk_level ?? 'unknown'} risk
+                        </Chip>
+                        <Chip variant="neutral">{safetyItems(r()).length} probes</Chip>
+                      </div>
+                      <div class="grid gap-2">
+                        <For each={safetyItems(r())}>
+                          {(item) => (
+                            <div class="rounded-md border border-border bg-surface-muted p-3">
+                              <div class="mb-1 flex flex-wrap items-center gap-2">
+                                <Chip variant={Boolean(item.passed) ? 'ok' : 'warn'}>
+                                  {Boolean(item.passed) ? 'passed' : 'gap'}
+                                </Chip>
+                                <span class="text-sm font-medium text-text">{asText(item.label)}</span>
+                              </div>
+                              <div class="text-xs leading-5 text-text-subtle">{asText(item.key)}</div>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="rounded-md border border-border bg-surface p-5">
+                    <div class="mb-4 flex items-center gap-2 text-sm font-medium text-text">
+                      <Link2 size={16} />
+                      Reproducibility
+                    </div>
+                    <div class="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
+                      <div class="min-w-0 rounded-md bg-surface-muted p-3">
+                        <div class="mb-1 flex items-center justify-between gap-2 text-xs uppercase text-text-subtle">
+                          <span>Command</span>
+                          <CopyButton value={r().copy_actions?.command ?? ''} label="Copy command" />
+                        </div>
+                        <code class="block break-words text-sm text-text">{r().copy_actions?.command}</code>
+                      </div>
+                      <div class="grid min-w-0 gap-3">
+                        <div class="rounded-md bg-surface-muted p-3">
+                          <div class="mb-1 flex items-center justify-between gap-2 text-xs uppercase text-text-subtle">
+                            <span>Report path</span>
+                            <CopyButton value={r().copy_actions?.report_path ?? ''} label="Copy report path" />
+                          </div>
+                          <code class="block break-words text-sm text-text">
+                            {r().copy_actions?.report_path}
+                          </code>
+                        </div>
+                        <div class="rounded-md bg-surface-muted p-3">
+                          <div class="mb-1 flex items-center justify-between gap-2 text-xs uppercase text-text-subtle">
+                            <span>Fixture path</span>
+                            <CopyButton value={r().copy_actions?.fixture_path ?? ''} label="Copy fixture path" />
+                          </div>
+                          <code class="block break-words text-sm text-text">
+                            {r().copy_actions?.fixture_path}
+                          </code>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <a
+                        href={r().copy_actions?.report_json_url ?? '/api/showcase'}
+                        class="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-text-muted hover:text-text"
+                      >
+                        <Link2 size={12} />
+                        Open report JSON
+                      </a>
+                      <Chip variant="neutral">git {asText(r().reproducibility?.git_commit) || 'unknown'}</Chip>
+                      <Chip variant={r().reproducibility?.git_dirty ? 'warn' : 'ok'}>
+                        {r().reproducibility?.git_dirty ? 'dirty tree' : 'clean tree'}
+                      </Chip>
+                    </div>
+                  </section>
+
+                  <section class="rounded-md border border-border bg-surface p-5">
                   <div class="mb-4 flex items-center gap-2 text-sm font-medium text-text">
                     <Target size={16} />
                     Objective
@@ -547,6 +703,100 @@ export default function ShowcaseRoute(): JSX.Element {
                   </div>
                 </section>
 
+                <section class="grid gap-4 xl:grid-cols-[1fr_1fr]">
+                  <div class="rounded-md border border-border bg-surface p-5">
+                    <div class="mb-4 flex items-center gap-2 text-sm font-medium text-text">
+                      <FileSearch size={16} />
+                      Evidence drilldown
+                    </div>
+                    <div class="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <div class="mb-2 text-xs font-medium uppercase text-text-subtle">Selected</div>
+                        <div class="grid gap-2">
+                          <For each={drilldownSelected(r()).slice(0, 6)}>
+                            {(item) => (
+                              <div class="rounded-md border border-border bg-surface-muted p-3">
+                                <Show when={asText(item.memory_id)}>
+                                  {(id) => (
+                                    <A href={`/memories?id=${encodeURIComponent(id())}`} class="inline-flex">
+                                      <IdLink id={id()} preview={asText(item.summary)} />
+                                    </A>
+                                  )}
+                                </Show>
+                                <div class="mt-2 text-sm font-medium text-text">{asText(item.title)}</div>
+                                <div class="mt-1 text-xs leading-5 text-text-subtle">
+                                  sources {recordArray(item.source_events).length}
+                                </div>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="mb-2 text-xs font-medium uppercase text-text-subtle">Excluded</div>
+                        <div class="grid gap-2">
+                          <For each={drilldownExcluded(r()).slice(0, 6)}>
+                            {(item) => (
+                              <div class="rounded-md border border-border bg-surface-muted p-3">
+                                <div class="flex flex-wrap gap-2">
+                                  <Show when={asText(item.memory_id)}>
+                                    {(id) => <IdLink id={id()} />}
+                                  </Show>
+                                  <Chip variant="neutral">{asText(item.reason_code) || asText(item.status) || 'excluded'}</Chip>
+                                </div>
+                                <div class="mt-2 text-sm font-medium text-text">{asText(item.title)}</div>
+                                <div class="mt-1 text-xs leading-5 text-text-subtle">{asText(item.why_excluded)}</div>
+                              </div>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="rounded-md border border-border bg-surface p-5">
+                    <div class="mb-4 flex items-center gap-2 text-sm font-medium text-text">
+                      <BrainCircuit size={16} />
+                      Score and trace
+                    </div>
+                    <div class="grid gap-2">
+                      <For each={scoreBars(r())}>
+                        {(bar) => (
+                          <div>
+                            <div class="mb-1 flex justify-between gap-3 text-xs text-text-subtle">
+                              <span>{bar.label ?? bar.key}</span>
+                              <span>{Math.round((bar.score ?? 0) * 100)}%</span>
+                            </div>
+                            <div class="h-2 overflow-hidden rounded-full bg-surface-muted">
+                              <div
+                                class={`h-full ${bar.passed ? 'bg-success' : 'bg-danger'}`}
+                                style={{ width: `${Math.round((bar.score ?? 0) * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                    <div class="mt-5 border-t border-border pt-4">
+                      <div class="mb-2 flex flex-wrap gap-2">
+                        <Chip variant={r().stability_check?.passed ? 'ok' : 'warn'}>stability</Chip>
+                        <Chip variant={r().agent_observability_trace?.spans?.length ? 'ok' : 'warn'}>
+                          {traceSpans(r()).length} trace spans
+                        </Chip>
+                      </div>
+                      <div class="grid gap-2">
+                        <For each={traceSpans(r()).slice(0, 6)}>
+                          {(span) => (
+                            <div class="rounded-md bg-surface-muted p-2 text-xs leading-5 text-text-muted">
+                              {asText(span.operation)} · {asText(span.name)}
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
                 <section class="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
                   <div class="rounded-md border border-border bg-surface p-5">
                     <div class="mb-4 flex items-center gap-2 text-sm font-medium text-text">
@@ -574,7 +824,7 @@ export default function ShowcaseRoute(): JSX.Element {
                       <CheckCircle2 size={16} />
                       Checks
                     </div>
-                    <div class="mb-4 grid grid-cols-2 gap-2">
+                    <div class="mb-4 grid gap-2 sm:grid-cols-2">
                       <For each={Object.entries(r().dream_effectiveness?.effective ?? {})}>
                         {([name, passed]) => {
                           const CheckIcon = passed ? CheckCircle2 : CircleAlert;
@@ -649,6 +899,23 @@ export default function ShowcaseRoute(): JSX.Element {
                       )}
                     </For>
                   </div>
+                </section>
+
+                <section class="rounded-md border border-border bg-surface p-5">
+                  <div class="mb-4 flex items-center gap-2 text-sm font-medium text-text">
+                    <BrainCircuit size={16} />
+                    Glossary
+                  </div>
+                  <dl class="grid gap-3 md:grid-cols-2">
+                    <For each={glossaryEntries(r())}>
+                      {([term, definition]) => (
+                        <div class="rounded-md bg-surface-muted p-3">
+                          <dt class="text-sm font-medium text-text">{term}</dt>
+                          <dd class="mt-1 text-xs leading-5 text-text-muted">{definition}</dd>
+                        </div>
+                      )}
+                    </For>
+                  </dl>
                 </section>
 
                 <section class="rounded-md border border-border bg-surface p-5">
