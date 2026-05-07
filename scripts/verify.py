@@ -70,6 +70,7 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as temp_dir:
         eval_workspace = Path(temp_dir) / "dream-fidelity-eval"
         stages = [
+            ("public-boundary", [str(REPO_ROOT / "scripts" / "check_public_boundary.sh")]),
             ("lint", [sys.executable, "scripts/lint.py"]),
             ("typecheck", [sys.executable, "scripts/typecheck.py"]),
             ("tests", [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]),

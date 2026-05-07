@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
+.mypy_cache/
+.ruff_cache/
 .tmp/
 tmp/
 .DS_Store
@@ -7,6 +9,8 @@ tmp/
 .codex/
 .cursor/
 .gemini/
+.superpowers/
+frontend/node_modules/
 build/
 dist/
 !opendream/static/dist/
@@ -32,9 +36,10 @@ htmlcov/
 .opendream/
 
 # Private overlay / local agent artifacts
-AGENTS.md
 CLAUDE.md
 GEMINI.md
+CODEX.md
+AGENTS.local.md
 CLAUDE.local.md
 GEMINI.local.md
 metactl.yaml

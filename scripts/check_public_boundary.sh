@@ -1,11 +1,83 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-blocked='^(AGENTS\.md|CLAUDE\.md|GEMINI\.md|CLAUDE\.local\.md|GEMINI\.local\.md|metactl\.yaml|metactl\.lock\.json|\.metactl/|\.codex/|\.claude/|\.cursor/|\.gemini/|\.omc/|\.opendream/|Modelfile\.)'
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(git -C "$script_dir/.." rev-parse --show-toplevel)"
+cd "$repo_root"
 
-if git ls-files | grep -E "$blocked" >/dev/null; then
-  echo "Public repo tracks private overlay / local agent artifacts:"
-  git ls-files | grep -E "$blocked"
+strict_local=0
+for arg in "$@"; do
+  case "$arg" in
+    --strict-local)
+      strict_local=1
+      ;;
+    *)
+      echo "Unknown argument: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+if [ "${STRICT_LOCAL:-0}" = "1" ]; then
+  strict_local=1
+fi
+
+blocked_paths='^(CLAUDE\.md|GEMINI\.md|CODEX\.md|AGENTS\.local\.md|CLAUDE\.local\.md|GEMINI\.local\.md|metactl\.yaml|metactl\.lock\.json|\.claudeignore|\.codexignore|\.cursorignore|\.geminiignore|\.mcp\.json|opencode\.json|\.metactl/|\.agents/|\.codex/|\.claude/|\.cursor/|\.gemini/|(.*/)?\.omc/|(.*/)?\.opendream/|\.ruler/|\.aider/|\.windsurf/|\.superpowers/|(.*/)?memory/|(.*/)?notepads/|(.*/)?scratch/|\.tmp/|tmp/|frontend/node_modules/|node_modules/|\.mypy_cache/|\.pytest_cache/|\.ruff_cache/|htmlcov/|\.coverage|skills/|Modelfile\.|.*\.code-workspace$|.*\.zip$)'
+allowed_agent_docs='^(AGENTS\.md|opendream/AGENTS\.md|openspec/AGENTS\.md|tests/AGENTS\.md|\.meta/spec-adapters/AGENTS\.md)$'
+agent_doc_paths='(^|/)(AGENTS|CLAUDE|GEMINI|CODEX)\.md$'
+
+tracked_or_new="$(mktemp)"
+existing_paths="$(mktemp)"
+blocked_hits="$(mktemp)"
+agent_doc_hits="$(mktemp)"
+content_hits="$(mktemp)"
+content_filtered="$(mktemp)"
+trap 'rm -f "$tracked_or_new" "$existing_paths" "$blocked_hits" "$agent_doc_hits" "$content_hits" "$content_filtered"' EXIT
+
+{
+  git ls-files
+  git ls-files --others --exclude-standard
+  if [ "$strict_local" = "1" ]; then
+    git ls-files --others --ignored --exclude-standard
+  fi
+} | sort -u >"$tracked_or_new"
+
+while IFS= read -r path; do
+  [ -e "$path" ] && printf '%s\n' "$path"
+done <"$tracked_or_new" >"$existing_paths"
+
+grep -E "$blocked_paths" "$existing_paths" >"$blocked_hits" || true
+if [ -s "$blocked_hits" ]; then
+  echo "Public repo contains non-public, generated, or local-only paths:"
+  cat "$blocked_hits"
+  exit 1
+fi
+
+grep -E "$agent_doc_paths" "$existing_paths" | grep -Ev "$allowed_agent_docs" >"$agent_doc_hits" || true
+if [ -s "$agent_doc_hits" ]; then
+  echo "Public repo contains unexpected agent instruction documents:"
+  cat "$agent_doc_hits"
+  exit 1
+fi
+
+content_markers='/Users/[[:alnum:]_.-]+|/home/[[:alnum:]_.-]+|[A-Za-z]:\\Users\\|opendream-private|archived-public-agent-artifacts|customer/provider-specific|provider-specific private|internal URL'
+while IFS= read -r path; do
+  case "$path" in
+    scripts/check_public_boundary.sh|.gitignore|uv.lock|frontend/pnpm-lock.yaml)
+      continue
+      ;;
+    .venv/*)
+      continue
+      ;;
+  esac
+  if [ -f "$path" ] && grep -Iq . "$path"; then
+    grep -n -E "$content_markers" "$path" | sed "s#^#$path:#" >>"$content_hits" || true
+  fi
+done <"$existing_paths"
+
+grep -Ev '(/Users/example|/Users/me|/home/example|[A-Za-z]:\\Users\\example)' "$content_hits" >"$content_filtered" || true
+if [ -s "$content_filtered" ]; then
+  echo "Public repo contains non-public content markers:"
+  cat "$content_filtered"
   exit 1
 fi
 
