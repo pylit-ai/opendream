@@ -246,19 +246,22 @@ class MemoryQualityTests(unittest.TestCase):
         write_json(self.store.durable_records_path, [])
         write_json(self.store.learned_context_path, [])
 
-        with patch(
-            "opendream.semantic_setup.detect_all_tools",
-            return_value={
-                "detected_tools": ["codex"],
-                "details": [
-                    {
-                        "tool": "codex",
-                        "detected": True,
-                        "binary_found": True,
-                        "config_found": True,
-                    }
-                ],
-            },
+        with (
+            patch("opendream.semantic_setup._is_trusted_environment", return_value=True),
+            patch(
+                "opendream.semantic_setup.detect_all_tools",
+                return_value={
+                    "detected_tools": ["codex"],
+                    "details": [
+                        {
+                            "tool": "codex",
+                            "detected": True,
+                            "binary_found": True,
+                            "config_found": True,
+                        }
+                    ],
+                },
+            ),
         ):
             report = analyze_memory_quality(self.store, now="2026-04-19T12:00:00Z")
 

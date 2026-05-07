@@ -520,19 +520,22 @@ class TestSemanticStatus(unittest.TestCase):
             }
         )
 
-        with patch(
-            "opendream.semantic_setup.detect_all_tools",
-            return_value={
-                "detected_tools": ["codex"],
-                "details": [
-                    {
-                        "tool": "codex",
-                        "detected": True,
-                        "binary_found": True,
-                        "config_found": True,
-                    }
-                ],
-            },
+        with (
+            patch("opendream.semantic_setup._is_trusted_environment", return_value=True),
+            patch(
+                "opendream.semantic_setup.detect_all_tools",
+                return_value={
+                    "detected_tools": ["codex"],
+                    "details": [
+                        {
+                            "tool": "codex",
+                            "detected": True,
+                            "binary_found": True,
+                            "config_found": True,
+                        }
+                    ],
+                },
+            ),
         ):
             status = dream_status_semantic(self.store)
 
@@ -555,19 +558,22 @@ class TestSemanticStatus(unittest.TestCase):
             }
         )
 
-        with patch(
-            "opendream.semantic_setup.detect_all_tools",
-            return_value={
-                "detected_tools": ["codex"],
-                "details": [
-                    {
-                        "tool": "codex",
-                        "detected": True,
-                        "binary_found": True,
-                        "config_found": True,
-                    }
-                ],
-            },
+        with (
+            patch("opendream.semantic_setup._is_trusted_environment", return_value=True),
+            patch(
+                "opendream.semantic_setup.detect_all_tools",
+                return_value={
+                    "detected_tools": ["codex"],
+                    "details": [
+                        {
+                            "tool": "codex",
+                            "detected": True,
+                            "binary_found": True,
+                            "config_found": True,
+                        }
+                    ],
+                },
+            ),
         ):
             status = dream_status_semantic(self.store)
 
