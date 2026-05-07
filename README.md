@@ -3,7 +3,7 @@
 [![CI](https://github.com/pylit-ai/opendream/actions/workflows/ci.yml/badge.svg)](https://github.com/pylit-ai/opendream/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/opendream?label=PyPI)](https://pypi.org/project/opendream/)
 [![Python versions](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-see%20LICENSE-lightgrey.svg)](./LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
 **Local-first memory for coding agents** — activate OpenDream inside the repo you already use, let supported agent surfaces capture context locally, and keep the advanced runtime machinery available when you need it.
 
