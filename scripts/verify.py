@@ -145,6 +145,17 @@ def main() -> int:
     report["report_path"] = str(Path(args.report_path))
     write_json(Path(args.report_path), report)
     print(Path(args.report_path))
+    if report["verdict"] != "PASS":
+        for stage in report["stages"]:
+            if stage["status"] == "PASS":
+                continue
+            print(f"{stage['stage']}: {stage['status']} rc={stage.get('returncode')}")
+            stdout = str(stage.get("stdout") or "").strip()
+            stderr = str(stage.get("stderr") or "").strip()
+            if stdout:
+                print(stdout[-2000:])
+            if stderr:
+                print(stderr[-2000:])
     return 0 if report["verdict"] == "PASS" else 1
 
 
