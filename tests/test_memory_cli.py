@@ -2702,6 +2702,35 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertTrue((self.workspace / ".opendream" / "targets.json").exists())
         self.assertTrue((self.workspace / ".opendream" / "activation-state.json").exists())
 
+    def test_codex_agents_hook_instructions_skip_missing_hooks(self) -> None:
+        codex_config = self.workspace / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+
+        run_cli("init", "--workspace", str(self.workspace), "--activate-configured")
+        agents_text = (self.workspace / "AGENTS.md").read_text(encoding="utf-8")
+        pre_cmd = (
+            '[ -f .opendream/hooks/codex-pre-task.sh ] && '
+            'sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}" || true'
+        )
+        post_cmd = (
+            '[ -f .opendream/hooks/codex-post-task.sh ] && '
+            'sh .opendream/hooks/codex-post-task.sh "${OPENDREAM_SUMMARY:-Task completed.}" || true'
+        )
+        self.assertIn(pre_cmd, agents_text)
+        self.assertIn(post_cmd, agents_text)
+
+        (self.workspace / ".opendream" / "hooks" / "codex-pre-task.sh").unlink()
+        completed = subprocess.run(
+            ["sh", "-c", pre_cmd],
+            cwd=self.workspace,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stderr, "")
+
     def test_status_and_deactivate_round_trip_for_configured_target(self) -> None:
         codex_config = self.workspace / ".codex" / "config.toml"
         codex_config.parent.mkdir(parents=True, exist_ok=True)

@@ -251,17 +251,27 @@ def shell_hook_instruction_block(target_label: str, store: MemoryStore) -> str:
     del store
     pre_script = f"{target_label}-pre-task.sh"
     post_script = f"{target_label}-post-task.sh"
+    pre_cmd = (
+        f'[ -f .opendream/hooks/{pre_script} ] && '
+        f'sh .opendream/hooks/{pre_script} "${{OPENDREAM_QUERY:-current task}}" || true'
+    )
+    post_cmd = (
+        f'[ -f .opendream/hooks/{post_script} ] && '
+        f'sh .opendream/hooks/{post_script} "${{OPENDREAM_SUMMARY:-Task completed.}}" || true'
+    )
     return "\n".join(
         [
             block_start(target_label),
             "",
             "## OpenDream",
             "",
-            "Before substantial work, run:",
-            f'`sh .opendream/hooks/{pre_script} "${{OPENDREAM_QUERY:-current task}}"`',
+            "Before substantial work, run if the hook exists:",
+            f"`{pre_cmd}`",
             "",
-            "Before the final response, run:",
-            f'`sh .opendream/hooks/{post_script} "${{OPENDREAM_SUMMARY:-Task completed.}}"`',
+            "Before the final response, run if the hook exists:",
+            f"`{post_cmd}`",
+            "",
+            "If hooks are absent, continue and repair later with `opendream activate --workspace \"$PWD\" --repair`.",
             "",
             block_end(target_label),
             "",
@@ -277,11 +287,13 @@ def codex_block(store: MemoryStore) -> str:
             "",
             "## OpenDream Activation",
             "",
-            "Before substantial work, run:",
-            '`sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}"`',
+            "Before substantial work, run if the hook exists:",
+            '`[ -f .opendream/hooks/codex-pre-task.sh ] && sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}" || true`',
             "",
-            "Before the final response, run:",
-            '`sh .opendream/hooks/codex-post-task.sh "${OPENDREAM_SUMMARY:-Task completed.}"`',
+            "Before the final response, run if the hook exists:",
+            '`[ -f .opendream/hooks/codex-post-task.sh ] && sh .opendream/hooks/codex-post-task.sh "${OPENDREAM_SUMMARY:-Task completed.}" || true`',
+            "",
+            "If hooks are absent, continue and repair later with `opendream activate --workspace \"$PWD\" --repair`.",
             "",
             "For scripted Codex entrypoints, prefer:",
             (
