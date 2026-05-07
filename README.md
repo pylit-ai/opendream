@@ -31,6 +31,8 @@ opendream deactivate --workspace "$PWD"
 
 Bleeding-edge from Git (overwrites the tool env): `uv tool install --force "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
 
+Launch, upgrade, and release-gate details live in [`docs/launch-readiness.md`](./docs/launch-readiness.md).
+
 <details>
 <summary><strong>Install options</strong> (venv, editable checkout, PEP 668)</summary>
 

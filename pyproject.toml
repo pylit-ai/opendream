@@ -51,7 +51,7 @@ include-package-data = true
 include = ["opendream*"]
 
 [tool.setuptools.package-data]
-opendream = ["schema/*.json", "bundled_adapters/*.json", "fixtures/*.json", "fixtures/*.jsonl", "templates/*.tmpl", "static/**"]
+opendream = ["package_boundaries.json", "schema/*.json", "bundled_adapters/*.json", "fixtures/*.json", "fixtures/*.jsonl", "templates/*.tmpl", "static/**"]
 
 [tool.ruff]
 line-length = 120

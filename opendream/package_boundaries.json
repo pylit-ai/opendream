@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "package": "opendream",
+  "source_of_truth": "public",
+  "one_install_entrypoints": {
+    "cli": "opendream.cli:main"
+  },
+  "surfaces": {
+    "public_facades": [
+      "adapters",
+      "backends",
+      "evals",
+      "runtime",
+      "spec",
+      "ui"
+    ],
+    "public_contract": [
+      "boundaries",
+      "memory_types",
+      "models",
+      "util",
+      "validation"
+    ],
+    "runtime_core": [
+      "activation",
+      "activation_primitives",
+      "adapter_loader",
+      "adapter_profiles",
+      "auto_reviewer",
+      "bootstrap",
+      "claim_verification",
+      "consolidator",
+      "dream",
+      "dream_change_points",
+      "dream_narrative",
+      "episodes",
+      "extractor",
+      "harness_optimizer",
+      "integration",
+      "memory_quality",
+      "observability",
+      "planner",
+      "query_families",
+      "reconciliation",
+      "relation_graph",
+      "retriever",
+      "sessions",
+      "showcase",
+      "storage",
+      "transcript_probe",
+      "transcripts",
+      "verifier",
+      "workspace_catalog"
+    ],
+    "provider_backends": [
+      "automation",
+      "benchmark_adapters",
+      "evaluation",
+      "provider_registry",
+      "semantic_adapters",
+      "semantic_dreamer",
+      "semantic_ingest",
+      "semantic_readiness",
+      "semantic_setup",
+      "semantic_verifier",
+      "service"
+    ],
+    "cli_and_service": [
+      "cli",
+      "contract_export",
+      "webapp"
+    ]
+  },
+  "allowed_imports": {
+    "public_facades": [
+      "public_contract",
+      "runtime_core",
+      "provider_backends",
+      "cli_and_service"
+    ],
+    "public_contract": [
+      "public_contract"
+    ]
+  },
+  "release_include": [
+    "opendream",
+    "opendream/adapters",
+    "opendream/backends",
+    "opendream/evals",
+    "opendream/runtime",
+    "opendream/spec",
+    "opendream/ui",
+    "opendream/package_boundaries.json",
+    "opendream/schema/*.json",
+    "opendream/bundled_adapters/*.json",
+    "opendream/fixtures/*.json",
+    "opendream/fixtures/*.jsonl",
+    "opendream/templates/*.tmpl",
+    "opendream/static/**",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
+  "public_artifact_forbidden_markers": [
+    "private overlay checkout name",
+    "bootstrap agent artifact archive name",
+    "absolute private overlay checkout path",
+    "local agent notepad path",
+    "local agent runtime config path"
+  ]
+}

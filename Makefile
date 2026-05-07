@@ -1,5 +1,5 @@
 
-.PHONY: help setup sync dev demo test lint typecheck adapters-check verify release-check \
+.PHONY: help setup sync dev demo test lint typecheck package-boundaries public-artifacts adapters-check verify release-check \
 	bump-patch bump-minor bump-major tag release-patch release-minor release-major clean
 
 VENV ?= .venv
@@ -15,6 +15,8 @@ help:
 	@echo "  make setup            - python3 venv + pip install -e '.[dev]'"
 	@echo "  make demo             - run demo workspace"
 	@echo "  make test             - unit tests"
+	@echo "  make package-boundaries - package graph and public contract boundary check"
+	@echo "  make public-artifacts - stale backup/generated artifact check"
 	@echo "  make verify           - lint, typecheck, tests, eval, adapters, packaging smoke"
 	@echo "  make release-check    - full release gate (local)"
 	@echo "  make version          - print version from pyproject.toml"
@@ -51,6 +53,12 @@ lint:
 
 typecheck:
 	@$(PYTHON) scripts/typecheck.py
+
+package-boundaries:
+	@$(PYTHON) scripts/check_package_boundaries.py
+
+public-artifacts:
+	@$(PYTHON) scripts/check_public_artifacts.py
 
 adapters-check:
 	@$(PYTHON) scripts/check_adapters.py

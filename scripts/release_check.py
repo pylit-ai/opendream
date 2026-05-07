@@ -196,6 +196,22 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
                 timeout_seconds=timeout_seconds,
             )
         )
+        stages.append(
+            run_stage(
+                "package-boundaries",
+                [sys.executable, "scripts/check_package_boundaries.py"],
+                cwd=REPO_ROOT,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "public-artifacts",
+                [sys.executable, "scripts/check_public_artifacts.py"],
+                cwd=REPO_ROOT,
+                timeout_seconds=timeout_seconds,
+            )
+        )
         stages.append(tasks_complete(preferred_release_blockers()))
         stages.append(
             run_stage(

@@ -1,1 +1,6 @@
 recursive-include opendream/static *
+include opendream/package_boundaries.json
+recursive-include opendream/schema *.json
+recursive-include opendream/bundled_adapters *.json
+recursive-include opendream/fixtures *.json *.jsonl
+recursive-include opendream/templates *.tmpl
