@@ -974,10 +974,16 @@ def _autowire_codex(workspace: Path, *, force: bool, uninstall: bool) -> dict[st
             "## OpenDream hooks",
             "",
             "Before planning, run if the hook exists:",
-            '`[ -f .opendream/hooks/codex-pre-task.sh ] && sh .opendream/hooks/codex-pre-task.sh "$CODEX_TASK" || true`',
+            (
+                '`[ -f .opendream/hooks/codex-pre-task.sh ] && '
+                'sh .opendream/hooks/codex-pre-task.sh "$CODEX_TASK" || true`'
+            ),
             "",
             "After task completion, run if the hook exists:",
-            '`[ -f .opendream/hooks/codex-post-task.sh ] && sh .opendream/hooks/codex-post-task.sh "$CODEX_SUMMARY" || true`',
+            (
+                '`[ -f .opendream/hooks/codex-post-task.sh ] && '
+                'sh .opendream/hooks/codex-post-task.sh "$CODEX_SUMMARY" || true`'
+            ),
             "",
             'If hooks are absent, continue and repair later with `opendream activate --workspace "$PWD" --repair`.',
             "",

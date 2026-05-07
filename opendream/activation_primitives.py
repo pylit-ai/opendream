@@ -288,10 +288,16 @@ def codex_block(store: MemoryStore) -> str:
             "## OpenDream Activation",
             "",
             "Before substantial work, run if the hook exists:",
-            '`[ -f .opendream/hooks/codex-pre-task.sh ] && sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}" || true`',
+            (
+                '`[ -f .opendream/hooks/codex-pre-task.sh ] && '
+                'sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}" || true`'
+            ),
             "",
             "Before the final response, run if the hook exists:",
-            '`[ -f .opendream/hooks/codex-post-task.sh ] && sh .opendream/hooks/codex-post-task.sh "${OPENDREAM_SUMMARY:-Task completed.}" || true`',
+            (
+                '`[ -f .opendream/hooks/codex-post-task.sh ] && '
+                'sh .opendream/hooks/codex-post-task.sh "${OPENDREAM_SUMMARY:-Task completed.}" || true`'
+            ),
             "",
             "If hooks are absent, continue and repair later with `opendream activate --workspace \"$PWD\" --repair`.",
             "",
