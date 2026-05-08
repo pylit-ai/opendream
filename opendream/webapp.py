@@ -27,7 +27,11 @@ from .observability import (
     create_review_decision,
     get_dream_cycle,
     index_observability,
+    load_or_build_list_index,
     load_or_build_index,
+    project_retrieval_list_row,
+    project_run_list_row,
+    project_session_list_row,
     query_dream_cycles,
     query_memories,
     query_retrievals,
@@ -580,31 +584,21 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             self._write_json(_build_overview_lite(self.store))
             _finish()
             return
-        index = load_or_build_index(self.store)
-        entities = index["entities"]
         if parsed.path == "/api/overview":
-            self._write_json(index["overview"])
+            list_index = load_or_build_list_index(self.store)
+            self._write_json(list_index["overview"])
             _finish()
             return
         if parsed.path == "/api/dream/cycles":
+            list_index = load_or_build_list_index(self.store)
             limit = _parse_query_int(query.get("limit"), 50, minimum=1, maximum=_RUN_LIST_LIMIT_CAP)
             self._write_json(
                 query_dream_cycles(
-                    index,
+                    list_index,
                     limit=limit,
                     since=(query.get("since") or "").strip() or None,
                 )
             )
-            _finish()
-            return
-        if parsed.path.startswith("/api/dream/cycles/"):
-            run_id = parsed.path.split("/")[-1]
-            cycle = get_dream_cycle(index, run_id)
-            if cycle is None:
-                self._write_json({"error": f"dream cycle not found: {run_id}"}, status=HTTPStatus.NOT_FOUND)
-                _finish(404)
-                return
-            self._write_json(cycle)
             _finish()
             return
         if parsed.path == "/api/dream/coverage":
@@ -612,39 +606,32 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             _finish()
             return
         if parsed.path == "/api/dream/funnel":
-            self._write_json(build_dream_funnel(index, window=query.get("window", "7d")))
+            list_index = load_or_build_list_index(self.store)
+            self._write_json(build_dream_funnel(list_index, window=query.get("window", "7d")))
             _finish()
             return
         if parsed.path == "/api/semantic-changes/latest":
+            list_index = load_or_build_list_index(self.store)
             payload = build_semantic_change_review(
                 self.store,
-                now=str(index.get("generated_at") or ""),
+                now=str(list_index.get("generated_at") or ""),
             )
             if payload is None:
                 self._write_json(
                     build_semantic_change_unavailable(
                         self.store,
-                        now=str(index.get("generated_at") or ""),
+                        now=str(list_index.get("generated_at") or ""),
                     )
                 )
+                _finish()
                 return
             self._write_json(payload)
-            return
-        if parsed.path.startswith("/api/semantic-changes/"):
-            source_id = parsed.path.split("/")[-1]
-            payload = build_semantic_change_review(
-                self.store,
-                source_id=source_id,
-                now=str(index.get("generated_at") or ""),
-            )
-            if payload is None:
-                self._write_json({"error": f"semantic change review not found: {source_id}"}, status=HTTPStatus.NOT_FOUND)
-                return
-            self._write_json(payload)
+            _finish()
             return
         if parsed.path == "/api/workspaces":
             include_tempdir = str(query.get("include_tempdir", "")).lower() in ("1", "true", "yes")
             self._write_json(_workspace_dashboard_payload(include_tempdir=include_tempdir))
+            _finish()
             return
         if parsed.path.startswith("/api/workspaces/"):
             from urllib.parse import unquote
@@ -655,8 +642,18 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 self._write_json({"status": "missing", "workspace": workspace_arg})
             else:
                 self._write_json({"status": "ok", "entry": entry})
+            _finish()
+            return
+        if parsed.path == "/api/showcase":
+            self._write_json(load_showcase_report(self.store))
+            _finish()
+            return
+        if parsed.path == "/api/sessions/diagnostics":
+            self._write_json(_session_diagnostics(self.store))
+            _finish()
             return
         if parsed.path == "/api/memories":
+            list_index = load_or_build_list_index(self.store)
             sort_dir_raw = (query.get("sort_dir") or "").strip().lower()
             sort_dir = sort_dir_raw if sort_dir_raw in ("asc", "desc") else None
             limit = _parse_query_int(
@@ -667,7 +664,7 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             )
             offset = _parse_query_int(query.get("offset"), 0, minimum=0, maximum=10_000_000)
             result = query_memories(
-                index,
+                list_index,
                 search=query.get("search", ""),
                 filters={key: query.get(key, "") for key in ["type", "scope", "status", "agent_id"]},
                 sort=query.get("sort", "updated_at"),
@@ -684,43 +681,22 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 created_before=(query.get("created_before") or "").strip() or None,
             )
             self._write_json(result)
-            return
-        if parsed.path.startswith("/api/memories/") and parsed.path.endswith("/lineage"):
-            memory_id = parsed.path.split("/")[-2]
-            memory = _find_by_id(entities["memories"], "memory_id", memory_id)
-            self._write_json(memory.get("lineage", {}) if memory else {})
-            return
-        if parsed.path.startswith("/api/memories/"):
-            memory_id = parsed.path.split("/")[-1]
-            self._write_json(_find_by_id(entities["memories"], "memory_id", memory_id) or {})
-            return
-        if parsed.path == "/api/showcase":
-            self._write_json(load_showcase_report(self.store))
-            return
-        if parsed.path == "/api/sessions/diagnostics":
-            self._write_json(_session_diagnostics(self.store))
             _finish()
             return
         if parsed.path == "/api/sessions":
+            list_index = load_or_build_list_index(self.store)
+            entities = list_index["entities"]
             sessions = list(entities["sessions"])
-            # ?limit and ?since filtering for sessions
             since = (query.get("since") or "").strip() or None
             if since:
                 sessions = [s for s in sessions if str(s.get("started_at") or "") >= since]
             limit = _parse_query_int(query.get("limit"), 50, minimum=1, maximum=_SESSION_LIST_LIMIT_CAP)
-            sessions = sessions[:limit]
-            # 446-observability-perf: strip timeline from list view; use /api/sessions/<id>/timeline
-            _SESSION_LIST_STRIP = frozenset({"timeline", "events", "raw_events"})
-            sessions = [{k: v for k, v in s.items() if k not in _SESSION_LIST_STRIP} for s in sessions]
+            sessions = [project_session_list_row(s) for s in sessions[:limit]]
             self._write_json({"items": sessions})
             _finish()
             return
-        if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/timeline"):
-            session_id = parsed.path.split("/")[-2]
-            session = _find_by_id(entities["sessions"], "session_id", session_id)
-            self._write_json(session or {})
-            return
         if parsed.path == "/api/runs":
+            list_index = load_or_build_list_index(self.store)
             sort_dir_raw = (query.get("sort_dir") or "").strip().lower()
             sort_dir = sort_dir_raw if sort_dir_raw in ("asc", "desc") else None
             limit = _parse_query_int(
@@ -730,10 +706,9 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 maximum=_RUN_LIST_LIMIT_CAP,
             )
             offset = _parse_query_int(query.get("offset"), 0, minimum=0, maximum=10_000_000)
-            # ?since is a shorthand for ended_after (ISO timestamp filter)
             since = (query.get("since") or "").strip() or None
             result = query_runs(
-                index,
+                list_index,
                 search=query.get("search", ""),
                 sort=query.get("sort", "ended_at"),
                 sort_dir=sort_dir,
@@ -742,35 +717,12 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 ended_after=(query.get("ended_after") or "").strip() or since or None,
                 ended_before=(query.get("ended_before") or "").strip() or None,
             )
-            # 446-observability-perf: list projection — strip heavy fields.
-            # Detail endpoints (/api/runs/<id>) retain full payloads.
-            _RUN_LIST_STRIP = frozenset({"phase_traces", "operations", "candidates", "explanations", "diff_text"})
-            def _project_run_row(row: dict[str, Any]) -> dict[str, Any]:
-                out = {k: v for k, v in row.items() if k not in _RUN_LIST_STRIP}
-                # summary dict is large; drop it in list view
-                if isinstance(out.get("summary"), dict):
-                    out.pop("summary")
-                elif isinstance(out.get("summary"), str) and len(out["summary"]) > 200:
-                    out["summary"] = out["summary"][:200]
-                # phase_durations: keep only phase count
-                pd = out.get("phase_durations")
-                if isinstance(pd, dict) and len(pd) > 0:
-                    out["phase_durations"] = {"count": len(pd)}
-                return out
-            result["items"] = [_project_run_row(row) for row in result.get("items", [])]
+            result["items"] = [project_run_list_row(row) for row in result.get("items", [])]
             self._write_json(result)
             _finish()
             return
-        if parsed.path.startswith("/api/runs/") and parsed.path.endswith("/diff"):
-            run_id = parsed.path.split("/")[-2]
-            run = _find_by_id(entities["runs"], "run_id", run_id)
-            self._write_json({"run_id": run_id, "diff_text": run.get("diff_text", "") if run else ""})
-            return
-        if parsed.path.startswith("/api/runs/"):
-            run_id = parsed.path.split("/")[-1]
-            self._write_json(_find_by_id(entities["runs"], "run_id", run_id) or {})
-            return
         if parsed.path == "/api/retrievals":
+            list_index = load_or_build_list_index(self.store)
             sort_dir_raw = (query.get("sort_dir") or "").strip().lower()
             sort_dir = sort_dir_raw if sort_dir_raw in ("asc", "desc") else None
             limit = _parse_query_int(
@@ -780,10 +732,9 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 maximum=_RETRIEVAL_LIST_LIMIT_CAP,
             )
             offset = _parse_query_int(query.get("offset"), 0, minimum=0, maximum=10_000_000)
-            # ?since is a shorthand for timestamp_after (ISO timestamp filter)
             since = (query.get("since") or "").strip() or None
             result = query_retrievals(
-                index,
+                list_index,
                 search=query.get("search", ""),
                 filters={key: query.get(key, "") for key in ["agent_id"]},
                 sort=query.get("sort", "timestamp"),
@@ -799,23 +750,56 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 if (query.get("max_selected") or "").strip()
                 else None,
             )
-            # 446-observability-perf: list projection — strip heavy fields.
-            # Detail endpoints (/api/retrievals/<id>) retain full payloads.
-            _RETRIEVAL_LIST_STRIP = frozenset({
-                "candidates", "explanations", "why", "excluded", "near_threshold",
-                "final_context_assembly_order", "lexical_only_selected_memory_ids",
-            })
-            def _project_retrieval_row(row: dict[str, Any]) -> dict[str, Any]:
-                out = {k: v for k, v in row.items() if k not in _RETRIEVAL_LIST_STRIP}
-                # Keep count only for selected_memory_ids (list can be large)
-                smi = out.get("selected_memory_ids")
-                if isinstance(smi, list):
-                    out["selected_memory_ids_count"] = len(smi)
-                    out.pop("selected_memory_ids")
-                return out
-            result["items"] = [_project_retrieval_row(row) for row in result.get("items", [])]
+            result["items"] = [project_retrieval_list_row(row) for row in result.get("items", [])]
             self._write_json(result)
             _finish()
+            return
+        index = load_or_build_index(self.store)
+        entities = index["entities"]
+        if parsed.path.startswith("/api/dream/cycles/"):
+            run_id = parsed.path.split("/")[-1]
+            cycle = get_dream_cycle(index, run_id)
+            if cycle is None:
+                self._write_json({"error": f"dream cycle not found: {run_id}"}, status=HTTPStatus.NOT_FOUND)
+                _finish(404)
+                return
+            self._write_json(cycle)
+            _finish()
+            return
+        if parsed.path.startswith("/api/semantic-changes/"):
+            source_id = parsed.path.split("/")[-1]
+            payload = build_semantic_change_review(
+                self.store,
+                source_id=source_id,
+                now=str(index.get("generated_at") or ""),
+            )
+            if payload is None:
+                self._write_json({"error": f"semantic change review not found: {source_id}"}, status=HTTPStatus.NOT_FOUND)
+                return
+            self._write_json(payload)
+            return
+        if parsed.path.startswith("/api/memories/") and parsed.path.endswith("/lineage"):
+            memory_id = parsed.path.split("/")[-2]
+            memory = _find_by_id(entities["memories"], "memory_id", memory_id)
+            self._write_json(memory.get("lineage", {}) if memory else {})
+            return
+        if parsed.path.startswith("/api/memories/"):
+            memory_id = parsed.path.split("/")[-1]
+            self._write_json(_find_by_id(entities["memories"], "memory_id", memory_id) or {})
+            return
+        if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/timeline"):
+            session_id = parsed.path.split("/")[-2]
+            session = _find_by_id(entities["sessions"], "session_id", session_id)
+            self._write_json(session or {})
+            return
+        if parsed.path.startswith("/api/runs/") and parsed.path.endswith("/diff"):
+            run_id = parsed.path.split("/")[-2]
+            run = _find_by_id(entities["runs"], "run_id", run_id)
+            self._write_json({"run_id": run_id, "diff_text": run.get("diff_text", "") if run else ""})
+            return
+        if parsed.path.startswith("/api/runs/"):
+            run_id = parsed.path.split("/")[-1]
+            self._write_json(_find_by_id(entities["runs"], "run_id", run_id) or {})
             return
         if parsed.path.startswith("/api/retrievals/"):
             retrieval_id = parsed.path.split("/")[-1]

@@ -28,6 +28,7 @@ _FINGERPRINT_TTL_SECONDS = 0.0
 _INDEX_CACHE_MAX_ENTRIES = 16
 _index_cache_lock = threading.Lock()
 _index_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_compact_index_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
 # key -> (fingerprint, expires_at)
 _fingerprint_cache: dict[str, tuple[str, float]] = {}
 
@@ -73,16 +74,39 @@ def _cache_put(key: str, payload: dict[str, Any]) -> None:
             _index_cache.popitem(last=False)
 
 
+def _compact_cache_get(key: str, fingerprint: str) -> dict[str, Any] | None:
+    if _INDEX_CACHE_DISABLED:
+        return None
+    with _index_cache_lock:
+        entry = _compact_index_cache.get(key)
+        if entry is not None and entry.get("source_fingerprint") == fingerprint:
+            _compact_index_cache.move_to_end(key)
+            return entry
+        return None
+
+
+def _compact_cache_put(key: str, payload: dict[str, Any]) -> None:
+    if _INDEX_CACHE_DISABLED:
+        return
+    with _index_cache_lock:
+        _compact_index_cache[key] = payload
+        _compact_index_cache.move_to_end(key)
+        while len(_compact_index_cache) > _INDEX_CACHE_MAX_ENTRIES:
+            _compact_index_cache.popitem(last=False)
+
+
 def invalidate_index_cache(store: MemoryStore | None = None) -> None:
     """Force a rebuild on next call. Pass a store to invalidate one entry."""
     if store is None:
         with _index_cache_lock:
             _index_cache.clear()
+            _compact_index_cache.clear()
         _fingerprint_cache.clear()
         return
     key = _store_cache_key(store)
     with _index_cache_lock:
         _index_cache.pop(key, None)
+        _compact_index_cache.pop(key, None)
     _fingerprint_cache.pop(key, None)
 
 _SEMANTIC_CHANGE_COMPARE_FILTERS = ["all", "suppressed", "deactivated", "restorable", "restored"]
@@ -102,7 +126,10 @@ def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[s
         "entities": _build_entities(store),
     }
     store.save_observability_index(index)
+    compact = _build_compact_index_from_full(index)
+    store.save_observability_compact_index(compact)
     _cache_put(_store_cache_key(store), index)
+    _compact_cache_put(_store_cache_key(store), compact)
     # The fingerprint we just computed is fresh; record it so the next
     # cached read does not redo the stat sweep.
     _fingerprint_cache[_store_cache_key(store)] = (
@@ -110,6 +137,150 @@ def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[s
         time.monotonic() + _FINGERPRINT_TTL_SECONDS,
     )
     return index
+
+
+_RUN_LIST_STRIP = frozenset({"phase_traces", "operations", "candidates", "explanations", "diff_text"})
+_RETRIEVAL_LIST_STRIP = frozenset({
+    "candidates",
+    "explanations",
+    "why",
+    "excluded",
+    "near_threshold",
+    "final_context_assembly_order",
+    "lexical_only_selected_memory_ids",
+})
+_SESSION_LIST_STRIP = frozenset({"timeline", "events", "raw_events"})
+
+
+def project_run_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    out = {key: value for key, value in row.items() if key not in _RUN_LIST_STRIP}
+    if isinstance(out.get("summary"), dict):
+        out.pop("summary")
+    elif isinstance(out.get("summary"), str) and len(out["summary"]) > 200:
+        out["summary"] = out["summary"][:200]
+    phase_durations = out.get("phase_durations")
+    if isinstance(phase_durations, dict) and phase_durations:
+        out["phase_durations"] = {"count": len(phase_durations)}
+    return out
+
+
+def project_retrieval_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    out = {key: value for key, value in row.items() if key not in _RETRIEVAL_LIST_STRIP}
+    selected_memory_ids = out.get("selected_memory_ids")
+    if isinstance(selected_memory_ids, list):
+        out["selected_memory_ids_count"] = len(selected_memory_ids)
+        out.pop("selected_memory_ids")
+    return out
+
+
+def project_session_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in row.items() if key not in _SESSION_LIST_STRIP}
+
+
+def _compact_run_row(row: dict[str, Any]) -> dict[str, Any]:
+    out = {key: value for key, value in row.items() if key not in _RUN_LIST_STRIP}
+    out.pop("target_paths", None)
+    out.pop("source_paths", None)
+    return out
+
+
+def _project_overview_for_list(overview: dict[str, Any]) -> dict[str, Any]:
+    projected = dict(overview)
+    projected["recent_runs"] = [
+        project_run_list_row(row)
+        for row in (overview.get("recent_runs") or [])[:5]
+        if isinstance(row, dict)
+    ]
+    projected["recent_sessions"] = [
+        project_session_list_row(row)
+        for row in (overview.get("recent_sessions") or [])[:5]
+        if isinstance(row, dict)
+    ]
+    last_run = overview.get("last_consolidation_run")
+    if isinstance(last_run, dict):
+        projected["last_consolidation_run"] = project_run_list_row(last_run)
+    return projected
+
+
+def _build_compact_entities_from_full(entities: dict[str, Any]) -> dict[str, Any]:
+    runs = [row for row in entities.get("runs", []) if isinstance(row, dict)]
+    retrievals = [row for row in entities.get("retrievals", []) if isinstance(row, dict)]
+    sessions = [row for row in entities.get("sessions", []) if isinstance(row, dict)]
+    dream_cycles = [
+        _build_dream_cycle_projection(row, include_detail=False)
+        for row in runs
+        if _is_dream_run(row)
+    ]
+    return {
+        "memories": [row for row in entities.get("memories", []) if isinstance(row, dict)],
+        "runs": [_compact_run_row(row) for row in runs],
+        "retrievals": [project_retrieval_list_row(row) for row in retrievals],
+        "sessions": [project_session_list_row(row) for row in sessions],
+        "dream_cycles": dream_cycles,
+    }
+
+
+def _build_compact_index_from_full(index: dict[str, Any]) -> dict[str, Any]:
+    entities = index.get("entities") if isinstance(index.get("entities"), dict) else {}
+    overview = index.get("overview") if isinstance(index.get("overview"), dict) else {}
+    return {
+        "generated_at": index.get("generated_at"),
+        "source_fingerprint": index.get("source_fingerprint"),
+        "store": index.get("store", {}),
+        "overview": _project_overview_for_list(overview),
+        "entities": _build_compact_entities_from_full(entities),
+    }
+
+
+def index_observability_compact(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
+    timestamp = now or to_iso(utc_now())
+    source_fingerprint = _observability_source_fingerprint(store)
+    runs = _load_run_records(store)
+    retrievals = _load_retrieval_entities(store)
+    contexts = _load_context_entities(store)
+    sessions = _build_session_entities(store, contexts)
+    full_like_entities = {
+        "memories": _build_memory_entities(store),
+        "runs": runs,
+        "retrievals": retrievals,
+        "sessions": sessions,
+    }
+    compact = {
+        "generated_at": timestamp,
+        "source_fingerprint": source_fingerprint,
+        "store": store.status_snapshot(now=timestamp),
+        "overview": _project_overview_for_list(_build_overview(store, timestamp)),
+        "entities": _build_compact_entities_from_full(full_like_entities),
+    }
+    store.save_observability_compact_index(compact)
+    _compact_cache_put(_store_cache_key(store), compact)
+    _fingerprint_cache[_store_cache_key(store)] = (
+        source_fingerprint,
+        time.monotonic() + _FINGERPRINT_TTL_SECONDS,
+    )
+    return compact
+
+
+def load_or_build_list_index(
+    store: MemoryStore,
+    *,
+    now: str | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    if force:
+        invalidate_index_cache(store)
+        return index_observability_compact(store, now=now)
+    fingerprint = _cached_fingerprint(store)
+    key = _store_cache_key(store)
+    cached = _compact_cache_get(key, fingerprint)
+    if cached is not None:
+        return cached
+    if store.observability_compact_index_path.exists():
+        payload = store.load_observability_compact_index()
+        if payload.get("entities") and payload.get("source_fingerprint") == fingerprint:
+            _compact_cache_put(key, payload)
+            return payload
+    return index_observability_compact(store, now=now)
 
 
 def load_or_build_index(
@@ -129,6 +300,10 @@ def load_or_build_index(
     if store.observability_index_path.exists():
         payload = store.load_observability_index()
         if payload.get("entities") and payload.get("source_fingerprint") == fingerprint:
+            if not store.observability_compact_index_path.exists():
+                compact = _build_compact_index_from_full(payload)
+                store.save_observability_compact_index(compact)
+                _compact_cache_put(key, compact)
             _cache_put(key, payload)
             return payload
     return index_observability(store, now=now)
@@ -537,10 +712,21 @@ def _retrieval_passes_selected_count(
     """Inclusive bounds on ``len(selected_memory_ids)``; missing list treated as []."""
     if lo is None and hi is None:
         return True
-    n = len(row.get("selected_memory_ids") or [])
+    n = _retrieval_selected_count(row)
     if lo is not None and n < lo:
         return False
     return not (hi is not None and n > hi)
+
+
+def _retrieval_selected_count(row: dict[str, Any]) -> int:
+    selected = row.get("selected_memory_ids")
+    if isinstance(selected, list):
+        return len(selected)
+    count = row.get("selected_memory_ids_count", row.get("selected_count", 0))
+    try:
+        return int(count or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _retrieval_sort_key(
@@ -552,7 +738,7 @@ def _retrieval_sort_key(
     """Sort key with stable tie-break on ``id``."""
     rid = str(row.get("id", ""))
     if sort == "selected_count":
-        primary: Any = len(row.get("selected_memory_ids") or [])
+        primary: Any = _retrieval_selected_count(row)
     elif sort == "timestamp":
         primary = str(row.get("timestamp", "") or "")
     elif sort == "query":
@@ -739,11 +925,15 @@ def query_dream_cycles(
     limit: int = 50,
     since: str | None = None,
 ) -> dict[str, Any]:
-    rows = [
-        _build_dream_cycle_projection(run, include_detail=False)
-        for run in index["entities"]["runs"]
-        if _is_dream_run(run)
-    ]
+    entities = index["entities"]
+    if isinstance(entities.get("dream_cycles"), list):
+        rows = [dict(row) for row in entities["dream_cycles"] if isinstance(row, dict)]
+    else:
+        rows = [
+            _build_dream_cycle_projection(run, include_detail=False)
+            for run in entities["runs"]
+            if _is_dream_run(run)
+        ]
     if since:
         rows = [
             row
@@ -781,6 +971,34 @@ def get_dream_cycle(index: dict[str, Any], run_id: str) -> dict[str, Any] | None
 
 
 def build_dream_funnel(index: dict[str, Any], *, window: str = "7d") -> dict[str, Any]:
+    entities = index.get("entities", {})
+    if isinstance(entities.get("dream_cycles"), list):
+        cutoff = _window_cutoff_iso(window)
+        cycles = [
+            dict(row)
+            for row in entities["dream_cycles"]
+            if isinstance(row, dict)
+            and (not cutoff or str(row.get("ended_at") or row.get("started_at") or "") >= cutoff)
+        ]
+        totals = {key: 0 for key in _FUNNEL_KEYS}
+        for row in cycles:
+            funnel = row.get("funnel") if isinstance(row.get("funnel"), dict) else {}
+            for key in _FUNNEL_KEYS:
+                totals[key] += int(funnel.get(key, 0) or 0)
+        return {
+            "window": window,
+            "total_cycles": len(cycles),
+            "funnel": totals,
+            "cycles": [
+                {
+                    "run_id": row.get("run_id"),
+                    "started_at": row.get("started_at"),
+                    "ended_at": row.get("ended_at"),
+                    "funnel": row.get("funnel", {}),
+                }
+                for row in cycles
+            ],
+        }
     rows = _dream_runs_in_window(index, window)
     totals = {key: 0 for key in _FUNNEL_KEYS}
     cycles: list[dict[str, Any]] = []

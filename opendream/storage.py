@@ -249,6 +249,7 @@ class MemoryStore:
         self.durable_records_path = self.state_dir / "durable_records.json"
         self.index_json_path = self.state_dir / "index.json"
         self.observability_index_path = self.state_dir / "observability_index.json"
+        self.observability_compact_index_path = self.state_dir / "observability_compact_index.json"
         self.memory_md_path = self.memory_root / "MEMORY.md"
         self.processed_candidates_path = self.state_dir / "processed_candidates.json"
         self.extraction_state_path = self.state_dir / "processed_events.json"
@@ -881,6 +882,18 @@ class MemoryStore:
     def save_observability_index(self, payload: dict[str, Any]) -> None:
         self.ensure_layout()
         write_json(self.observability_index_path, payload)
+
+    def load_observability_compact_index(self) -> dict[str, Any]:
+        self.ensure_layout()
+        payload = read_json(
+            self.observability_compact_index_path,
+            {"generated_at": to_iso(utc_now()), "entities": {}},
+        )
+        return payload if isinstance(payload, dict) else {"generated_at": to_iso(utc_now()), "entities": {}}
+
+    def save_observability_compact_index(self, payload: dict[str, Any]) -> None:
+        self.ensure_layout()
+        write_json(self.observability_compact_index_path, payload)
 
     def save_durable_records(self, records: list[MemoryRecord]) -> None:
         serialized = [record.to_dict() for record in sorted(records, key=lambda item: item.memory_id)]

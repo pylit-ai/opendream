@@ -7,6 +7,7 @@ import time
 import unittest
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from opendream.integration import emit_event, maintain, prepare_context
 from opendream.observability import index_observability
@@ -145,6 +146,48 @@ class PerfEndpointTests(unittest.TestCase):
         for row in payload["items"]:
             self.assertNotIn("candidates", row)
             self.assertNotIn("explanations", row)
+
+    def test_list_endpoints_do_not_load_full_observability_index(self) -> None:
+        list_paths = [
+            "/api/overview",
+            "/api/dream/cycles?limit=50",
+            "/api/sessions",
+            "/api/runs",
+            "/api/retrievals",
+        ]
+        with patch(
+            "opendream.webapp.load_or_build_index",
+            side_effect=AssertionError("full index loaded for list endpoint"),
+        ):
+            for path in list_paths:
+                with self.subTest(path=path):
+                    payload = self.get_json(path)
+                    if path == "/api/overview":
+                        self.assertIn("memory_counts", payload)
+                    else:
+                        self.assertIn("items", payload)
+                    for row in payload.get("items", []):
+                        self.assertNotIn("graph", row)
+                        self.assertNotIn("operations", row)
+                        self.assertNotIn("candidates", row)
+                        self.assertNotIn("explanations", row)
+                        self.assertNotIn("timeline", row)
+
+    def test_compact_index_excludes_graph_and_detail_payloads(self) -> None:
+        compact = self.store.load_observability_compact_index()
+        entities = compact["entities"]
+        self.assertNotIn("graph", entities)
+        for row in entities["runs"]:
+            self.assertNotIn("phase_traces", row)
+            self.assertNotIn("operations", row)
+            self.assertNotIn("diff_text", row)
+        for row in entities["retrievals"]:
+            self.assertNotIn("candidates", row)
+            self.assertNotIn("explanations", row)
+            self.assertNotIn("selected_memory_ids", row)
+            self.assertIn("selected_memory_ids_count", row)
+        for row in entities["sessions"]:
+            self.assertNotIn("timeline", row)
 
     # --- /api/sessions?limit/since ---
 
