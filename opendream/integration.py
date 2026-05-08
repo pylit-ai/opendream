@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from .automation import tick as automation_tick
@@ -62,13 +62,47 @@ _LEARNED_CONTEXT_REASON_LABELS = {
 }
 
 
+def _timestamp_after(raw: str, cutoff: datetime) -> bool:
+    try:
+        return bool(parse_timestamp(raw) > cutoff)
+    except (TypeError, ValueError):
+        return False
+
+
 def archive_stale_learned_context(
     store: MemoryStore,
     *,
     now: str | None = None,
-    grace_days: int = _LEARNED_CONTEXT_ARCHIVE_GRACE_DAYS,
+    grace_days: int | None = None,
 ) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
+    retention = store.load_semantic_config().get("retention", {})
+    if grace_days is None:
+        configured = (
+            retention.get("learned_context_archive_grace_days")
+            if isinstance(retention, dict)
+            else None
+        )
+        try:
+            if configured is None:
+                raise TypeError
+            grace_days = int(configured)
+        except (TypeError, ValueError):
+            grace_days = _LEARNED_CONTEXT_ARCHIVE_GRACE_DAYS
+    grace_days = max(0, grace_days)
+    if isinstance(retention, dict):
+        try:
+            grace_contexts = int(retention.get("learned_context_archive_grace_contexts", 0))
+        except (TypeError, ValueError):
+            grace_contexts = 0
+    else:
+        grace_contexts = 0
+    grace_contexts = max(0, grace_contexts)
+    context_created_at = [
+        str(row.get("created_at") or "")
+        for row in store.load_context_assemblies()
+        if row.get("created_at")
+    ] if grace_contexts else []
     cutoff = parse_timestamp(timestamp) - timedelta(days=grace_days)
     records = store.load_learned_context_records()
     archived_ids: list[str] = []
@@ -82,6 +116,15 @@ def archive_stale_learned_context(
             except (TypeError, ValueError):
                 expired_at = None
             if expired_at is not None and expired_at < cutoff:
+                if grace_contexts:
+                    active_contexts = sum(
+                        1
+                        for created_at in context_created_at
+                        if _timestamp_after(created_at, expired_at)
+                    )
+                    if active_contexts < grace_contexts:
+                        updated.append(next_record)
+                        continue
                 next_record["status"] = "archived"
                 next_record["archived_at"] = timestamp
                 next_record["archive_reason"] = "stale_after_grace"
@@ -94,6 +137,7 @@ def archive_stale_learned_context(
         "archived": len(archived_ids),
         "archived_record_ids": archived_ids,
         "grace_days": grace_days,
+        "grace_contexts": grace_contexts,
     }
 
 

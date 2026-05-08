@@ -3,6 +3,8 @@ import type {
   AutoReviewerConfigUpdate,
   AutoReviewerDryRun,
   AutoReviewerStats,
+  ContextListParams,
+  ContextListResponse,
   ContextRecord,
   DreamCoverageResponse,
   DreamCycle,
@@ -30,13 +32,16 @@ import type {
   RunListResponse,
   RunRecord,
   SemanticChangeReview,
+  SemanticDreamConfig,
   SemanticDreamModeRequest,
   ServiceControlRequest,
   ShowcaseResponse,
   SessionDiagnostics,
+  SessionListParams,
   SessionRecord,
   SessionTimeline,
   SessionsResponse,
+  SettingsPayload,
   UiContext,
   UiMeta,
   WorkspaceDashboard,
@@ -111,6 +116,10 @@ export const getUiMeta = () => api<UiMeta>('/api/ui-meta');
 export const getUiContext = () => api<UiContext>('/api/ui-context');
 export const getHealth = () => api<HealthPayload>('/api/health');
 export const getOverview = () => api<OverviewPayload>('/api/overview');
+export const getSettings = () => api<SettingsPayload>('/api/settings');
+export const getSemanticConfig = () => api<SemanticDreamConfig>('/api/semantic-config');
+export const updateSemanticConfig = (payload: Partial<SemanticDreamConfig>) =>
+  api<SettingsPayload>('/api/semantic-config', { method: 'POST', body: JSON.stringify(payload) });
 
 export const getLatestSemanticChange = () =>
   api<SemanticChangeReview>('/api/semantic-changes/latest');
@@ -128,7 +137,8 @@ export const getMemory = (id: string) =>
 export const getMemoryLineage = (id: string) =>
   api<MemoryLineage>(`/api/memories/${encodeURIComponent(id)}/lineage`);
 
-export const getSessions = () => api<SessionsResponse>('/api/sessions');
+export const getSessions = (params?: SessionListParams) =>
+  api<SessionsResponse>(`/api/sessions${buildQuery(params as Record<string, unknown>)}`);
 export const getSessionTimeline = (id: string) =>
   api<SessionTimeline>(`/api/sessions/${encodeURIComponent(id)}/timeline`);
 export const getSessionDiagnostics = async (): Promise<SessionDiagnostics | null> => {
@@ -163,6 +173,8 @@ export const getRetrieval = (id: string) =>
 
 export const getContext = (id: string) =>
   api<ContextRecord>(`/api/context/${encodeURIComponent(id)}`);
+export const getContexts = (params?: ContextListParams) =>
+  api<ContextListResponse>(`/api/context${buildQuery(params as Record<string, unknown>)}`);
 
 export const getGraph = (params?: GraphParams) =>
   api<GraphPayload>(`/api/graph${buildQuery(params as Record<string, unknown>)}`);

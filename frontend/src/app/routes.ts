@@ -1,6 +1,7 @@
 import {
   Activity,
   Boxes,
+  ChartNoAxesCombined,
   Database,
   FileSearch,
   FileText,
@@ -12,7 +13,6 @@ import {
   PlayCircle,
   Settings,
   ShieldCheck,
-  Sparkles,
   type LucideProps,
 } from 'lucide-solid';
 import type { Component } from 'solid-js';
@@ -36,7 +36,7 @@ export interface RouteDef {
 export const ROUTES: RouteDef[] = [
   { path: '/workspaces', name: 'Workspaces', icon: Boxes, group: 'catalog' },
   { path: '/overview', name: 'Overview', icon: Home, group: 'workspace' },
-  { path: '/showcase', name: 'Showcase', icon: Sparkles, group: 'workspace' },
+  { path: '/insights', name: 'Insights', icon: ChartNoAxesCombined, group: 'workspace' },
   { path: '/memories', name: 'Memories', icon: Database, group: 'workspace' },
   { path: '/dreams', name: 'Dreams', icon: Moon, group: 'workspace' },
   { path: '/runs', name: 'Runs', icon: PlayCircle, group: 'trace' },

@@ -217,12 +217,51 @@ export interface OverviewPayload {
   [key: string]: unknown;
 }
 
+export interface SemanticDreamConfig {
+  mode?: 'deterministic' | 'semantic' | 'hybrid' | string;
+  retention?: {
+    learned_context_archive_grace_days?: number;
+    learned_context_archive_grace_contexts?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export interface SettingsPayload extends OverviewPayload {
+  semantic_config?: SemanticDreamConfig;
+}
+
+export interface SemanticChangeItem {
+  change_id?: string;
+  record_id?: string;
+  summary?: string;
+  change_class?: 'kept' | 'suppressed' | 'deactivated' | 'restored' | string;
+  reason_code?: string;
+  before_state?: string;
+  after_state?: string;
+  source_context_id?: string;
+  source_run_id?: string;
+  changed_at?: string;
+  restore_allowed?: boolean;
+  restore_href?: string;
+  [key: string]: unknown;
+}
+
 export interface SemanticChangeReview {
-  // TODO: build_semantic_change_review() return shape.
   source_id?: string;
-  generated_at?: string;
+  source_kind?: string;
+  source_run_id?: string;
+  created_at?: string;
   status?: string;
-  changes?: unknown[];
+  summary_counts?: {
+    kept_count?: number;
+    suppressed_count?: number;
+    deactivated_count?: number;
+    restorable_count?: number;
+    restored_count?: number;
+    [key: string]: unknown;
+  };
+  items?: SemanticChangeItem[];
   [key: string]: unknown;
 }
 
@@ -285,10 +324,19 @@ export interface MemoryLineage {
 
 export interface SessionRecord {
   session_id: string;
+  display_name?: string;
+  latest_context_id?: string;
+  latest_context_query?: string;
   agent_id?: string;
   started_at?: string;
   ended_at?: string;
+  event_count?: number;
+  context_count?: number;
   [key: string]: unknown;
+}
+
+export interface SessionListParams extends PageParams {
+  since?: string;
 }
 
 export interface SessionsResponse {
@@ -454,7 +502,30 @@ export interface RetrievalListResponse {
 
 export interface ContextRecord {
   context_id: string;
-  // TODO: context payload shape.
+  display_name?: string;
+  session_id?: string;
+  created_at?: string;
+  character_count?: number;
+  selected_memory_ids_count?: number;
+  query?: string;
+  selection?: Record<string, { candidate_count?: number; selected?: number }>;
+  context_pruning?: {
+    candidate_count?: number;
+    injected_count?: number;
+    suppressed_count?: number;
+    saved_token_estimate?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export interface ContextListParams extends PageParams {
+  session_id?: string;
+}
+
+export interface ContextListResponse {
+  items: ContextRecord[];
+  total?: number;
   [key: string]: unknown;
 }
 

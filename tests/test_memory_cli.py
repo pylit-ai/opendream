@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from opendream import cli
 from opendream.consolidator import consolidate
-from opendream.models import MemoryRecord
+from opendream.models import ContextAssembly, MemoryRecord
 from opendream.storage import DEFAULT_MEMORY_DIR, LEGACY_MEMORY_DIR, MemoryStore
 from opendream.validation import validate_document
 
@@ -643,6 +643,86 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(records["lc-stale-after-grace"]["status"], "archived")
         self.assertEqual(records["lc-stale-after-grace"]["archive_reason"], "stale_after_grace")
         self.assertEqual(records["lc-stale-after-grace"]["archived_at"], FIXED_NOW)
+
+    def test_maintain_uses_semantic_config_for_learned_context_archive_grace(self) -> None:
+        store = MemoryStore(self.workspace)
+        store.save_semantic_config(
+            {
+                **store.load_semantic_config(),
+                "retention": {"learned_context_archive_grace_days": 1},
+            }
+        )
+        self.write_learned_context_records(
+            self.workspace,
+            self.learned_context_record(
+                "lc-stale-after-one-day",
+                fresh_until="2026-03-24T12:00:00Z",
+            ),
+        )
+
+        result = run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        records = {
+            record["record_id"]: record
+            for record in MemoryStore(self.workspace).load_learned_context_records()
+        }
+
+        self.assertEqual(result["learned_context_lifecycle"]["grace_days"], 1)
+        self.assertEqual(result["learned_context_lifecycle"]["archived"], 1)
+        self.assertEqual(records["lc-stale-after-one-day"]["status"], "archived")
+
+    def test_maintain_can_gate_learned_context_archive_on_context_activity(self) -> None:
+        store = MemoryStore(self.workspace)
+        store.save_semantic_config(
+            {
+                **store.load_semantic_config(),
+                "retention": {
+                    "learned_context_archive_grace_days": 1,
+                    "learned_context_archive_grace_contexts": 2,
+                },
+            }
+        )
+        self.write_learned_context_records(
+            self.workspace,
+            self.learned_context_record(
+                "lc-activity-gated",
+                fresh_until="2026-03-24T12:00:00Z",
+            ),
+        )
+
+        first = run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        records = {
+            record["record_id"]: record
+            for record in MemoryStore(self.workspace).load_learned_context_records()
+        }
+        self.assertEqual(first["learned_context_lifecycle"]["archived"], 0)
+        self.assertEqual(records["lc-activity-gated"]["status"], "active")
+
+        for idx, created_at in enumerate(["2026-03-25T12:00:01Z", "2026-03-25T12:00:02Z"]):
+            store.write_context_assembly(
+                ContextAssembly(
+                    context_id=f"context-activity-{idx}",
+                    session_id="session-activity",
+                    turn_id=f"turn-activity-{idx}",
+                    retrieval_run_id=f"retrieve-activity-{idx}",
+                    startup_index_snapshot=[],
+                    selected_memory_ids=[],
+                    omitted_memory_ids=[],
+                    omission_reasons=[],
+                    assembled_text="# OpenDream Memory Context\nQuery: activity gate",
+                    character_count=43,
+                    token_estimate=6,
+                    created_at=created_at,
+                )
+            )
+
+        second = run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        records = {
+            record["record_id"]: record
+            for record in MemoryStore(self.workspace).load_learned_context_records()
+        }
+        self.assertEqual(second["learned_context_lifecycle"]["grace_contexts"], 2)
+        self.assertEqual(second["learned_context_lifecycle"]["archived"], 1)
+        self.assertEqual(records["lc-activity-gated"]["status"], "archived")
 
     def test_semantic_status_reports_prompt_eligible_stale_active_and_archived_counts(self) -> None:
         self.write_learned_context_records(

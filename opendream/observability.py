@@ -177,6 +177,20 @@ def project_session_list_row(row: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in row.items() if key not in _SESSION_LIST_STRIP}
 
 
+def _context_query_text(row: dict[str, Any] | None) -> str | None:
+    if not row:
+        return None
+    query = row.get("query") or row.get("request") or row.get("prompt")
+    if isinstance(query, str) and query.strip():
+        return query.strip()
+    assembled_text = row.get("assembled_text")
+    if isinstance(assembled_text, str):
+        for line in assembled_text.splitlines()[:20]:
+            if line.lower().startswith("query:"):
+                return line.partition(":")[2].strip() or None
+    return None
+
+
 def _compact_run_row(row: dict[str, Any]) -> dict[str, Any]:
     out = {key: value for key, value in row.items() if key not in _RUN_LIST_STRIP}
     out.pop("target_paths", None)
@@ -2538,6 +2552,16 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
         timeline.sort(key=lambda item: str(item.get("timestamp", "")))
         started_at = timeline[0].get("timestamp") if timeline else None
         ended_at = timeline[-1].get("timestamp") if timeline else None
+        latest_contexts = sorted(
+            grouped_contexts.get(session_id, []),
+            key=lambda item: (
+                str(item.get("created_at") or ""),
+                str(item.get("context_id") or ""),
+            ),
+            reverse=True,
+        )
+        latest_context = latest_contexts[0] if latest_contexts else None
+        latest_context_query = _context_query_text(latest_context)
         sessions.append(
             {
                 "id": session_id,
@@ -2552,6 +2576,8 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
                     key=lambda item: (item["agent_label"].casefold(), item["agent_id"]),
                 )
                 or [{"agent_id": "unknown", "agent_label": "Unknown"}],
+                "latest_context_id": latest_context.get("context_id") if latest_context else None,
+                "latest_context_query": latest_context_query,
                 "timeline": timeline,
             }
         )

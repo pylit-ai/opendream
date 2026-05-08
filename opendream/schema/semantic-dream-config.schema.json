@@ -57,6 +57,14 @@
       },
       "additionalProperties": false
     },
+    "retention": {
+      "type": "object",
+      "properties": {
+        "learned_context_archive_grace_days": { "type": "integer", "minimum": 0 },
+        "learned_context_archive_grace_contexts": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
     "fallback_policy": {
       "type": "string",
       "enum": ["fail_fast", "fallback_to_deterministic"]

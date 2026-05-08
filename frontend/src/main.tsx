@@ -38,10 +38,10 @@ import RetrievalsRoute from './routes/Retrievals';
 import SessionsRoute from './routes/Sessions';
 import ContextRoute from './routes/Context';
 import ReviewsRoute from './routes/Reviews';
-import ShowcaseRoute from './routes/Showcase';
+import InsightsRoute from './routes/Showcase';
 
 const IMPLEMENTED = new Set<string>([
-  '/overview', '/showcase', '/runs', '/memories', '/dreams',
+  '/overview', '/insights', '/showcase', '/runs', '/memories', '/dreams',
   '/graph', '/evals', '/exports', '/settings', '/workspaces',
   '/retrievals', '/sessions', '/context', '/reviews',
 ]);
@@ -55,7 +55,8 @@ render(
       <Router root={(p) => <AppShell><PerfBanner />{p.children}</AppShell>}>
         <Route path="/" component={() => <Navigate href="/overview" />} />
         <Route path="/overview" component={OverviewRoute} />
-        <Route path="/showcase" component={ShowcaseRoute} />
+        <Route path="/insights" component={InsightsRoute} />
+        <Route path="/showcase" component={InsightsRoute} />
         <Route path="/runs" component={RunsRoute} />
         <Route path="/memories" component={MemoriesSurface} />
         <Route path="/memories/explorer" component={MemoriesExplorer} />

@@ -337,6 +337,34 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertEqual(context["context_id"], self.context["context_id"])
         self.assertTrue(context["assembled_text"].startswith("# OpenDream Memory Context"))
 
+        contexts = self.get_json("/api/context?limit=1")
+        self.assertGreaterEqual(contexts["total"], 1)
+        self.assertEqual(len(contexts["items"]), 1)
+        self.assertEqual(contexts["items"][0]["context_id"], self.context["context_id"])
+        self.assertEqual(contexts["items"][0]["display_name"], "package manager and redis")
+        self.assertNotIn("assembled_text", contexts["items"][0])
+
+        context_session_id = context["session_id"]
+        sessions = self.get_json("/api/sessions")
+        context_session = next(
+            item
+            for item in sessions["items"]
+            if item["session_id"] == context_session_id
+        )
+        self.assertEqual(context_session["display_name"], "package manager and redis")
+        timeline = self.get_json(f"/api/sessions/{context_session_id}/timeline")
+        self.assertEqual(timeline["display_name"], "package manager and redis")
+
+    def test_settings_api_returns_fast_semantic_config_payload(self) -> None:
+        payload = self.get_json("/api/settings")
+        self.assertIn("semantic_config", payload)
+        self.assertIn("retention", payload["semantic_config"])
+        self.assertIn("readiness", payload)
+        self.assertEqual(
+            payload["semantic_config"]["retention"]["learned_context_archive_grace_days"],
+            7,
+        )
+
     def test_retrievals_api_pagination_and_total(self) -> None:
         r0 = self.get_json("/api/retrievals?limit=1&offset=0&sort=id&sort_dir=asc")
         self.assertIn("total", r0)

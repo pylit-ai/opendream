@@ -4,9 +4,9 @@ import { Tabs as KTabs } from '@kobalte/core/tabs';
 import { Tabs } from '~/components/Tabs';
 import { Collapsible } from '@kobalte/core/collapsible';
 import { ChevronDown } from 'lucide-solid';
-import { getAutoReviewerStats, getOverview, getUiMeta, ingestTranscripts, runAutoReviewerDryRun, runDream, setSemanticDreamMode, updateAutoReviewerConfig } from '~/api/client';
+import { getAutoReviewerStats, getSettings, getUiMeta, ingestTranscripts, runAutoReviewerDryRun, runDream, setSemanticDreamMode, updateAutoReviewerConfig, updateSemanticConfig } from '~/api/client';
 import type { DreamRunResult, TranscriptsIngestResult } from '~/api/client';
-import type { AutoReviewerDryRun, AutoReviewerRule, AutoReviewerStats, OverviewPayload, UiMeta } from '~/api/types';
+import type { AutoReviewerDryRun, AutoReviewerRule, AutoReviewerStats, OverviewPayload, SettingsPayload, UiMeta } from '~/api/types';
 import { Page } from '~/components/Page';
 import { Chip } from '~/components/Chip';
 import { LoadingPage } from '~/components/Loading';
@@ -120,6 +120,82 @@ function ReadinessSection(props: { overview: OverviewPayload | undefined }): JSX
   );
 }
 
+function RetentionSettings(props: { overview: SettingsPayload | undefined; onAfter: () => void }): JSX.Element {
+  const retention = () => props.overview?.semantic_config?.retention ?? {};
+  const [days, setDays] = createSignal(String(retention().learned_context_archive_grace_days ?? 7));
+  const [contexts, setContexts] = createSignal(String(retention().learned_context_archive_grace_contexts ?? 0));
+  const [saving, setSaving] = createSignal(false);
+  const [msg, setMsg] = createSignal('');
+
+  async function handleSave() {
+    setSaving(true);
+    setMsg('');
+    try {
+      await updateSemanticConfig({
+        retention: {
+          learned_context_archive_grace_days: Math.max(0, Number(days()) || 0),
+          learned_context_archive_grace_contexts: Math.max(0, Number(contexts()) || 0),
+        },
+      });
+      setMsg('Saved.');
+      props.onAfter();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div class="rounded-md hairline bg-surface p-4">
+      <div class="flex flex-col gap-3">
+        <div>
+          <h3 class="text-sm font-medium text-text">Learned-context retention</h3>
+          <p class="mt-1 max-w-3xl text-[11.5px] leading-5 text-text-muted">
+            Archive stale learned context after the calendar grace has elapsed, and optionally
+            after enough new context assemblies prove the workspace has been active.
+          </p>
+        </div>
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="flex flex-col gap-1 text-[11px] text-text-muted">
+            Calendar grace · days
+            <input
+              type="number"
+              min="0"
+              value={days()}
+              onInput={(e) => setDays(e.currentTarget.value)}
+              class="h-9 rounded-md border border-border bg-surface-elevated px-2 text-sm text-text focus:border-accent focus:outline-none"
+            />
+          </label>
+          <label class="flex flex-col gap-1 text-[11px] text-text-muted">
+            Activity grace · contexts
+            <input
+              type="number"
+              min="0"
+              value={contexts()}
+              onInput={(e) => setContexts(e.currentTarget.value)}
+              class="h-9 rounded-md border border-border bg-surface-elevated px-2 text-sm text-text focus:border-accent focus:outline-none"
+            />
+          </label>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving()}
+            class="rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-accent-fg transition-all duration-150 hover:opacity-90 disabled:opacity-50"
+          >
+            {saving() ? 'Saving…' : 'Save retention'}
+          </button>
+          <Show when={msg()}>
+            <span class="text-xs text-text-muted">{msg()}</span>
+          </Show>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdvancedTab(props: { overview: OverviewPayload | undefined; onRefetch: () => void }): JSX.Element {
   const rd = () => readinessOf(props.overview);
   const currentMode = (): SemanticMode => (rd()?.mode as SemanticMode) ?? 'auto';
@@ -174,6 +250,8 @@ function AdvancedTab(props: { overview: OverviewPayload | undefined; onRefetch: 
           </Show>
         </div>
       </div>
+
+      <RetentionSettings overview={props.overview as SettingsPayload | undefined} onAfter={props.onRefetch} />
 
       <DreamControls onAfter={props.onRefetch} />
 
@@ -812,7 +890,7 @@ const TAB_ITEMS = [
 export default function SettingsRoute(): JSX.Element {
   const [searchParams] = useSearchParams();
   const [tab, setTab] = createSignal('readiness');
-  const [overview, { refetch }] = createResource<OverviewPayload>(getOverview);
+  const [overview, { refetch }] = createResource<SettingsPayload>(getSettings);
   const [meta] = createResource<UiMeta>(getUiMeta);
 
   onMount(() => {

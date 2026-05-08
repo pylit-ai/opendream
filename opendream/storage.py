@@ -1302,6 +1302,10 @@ class MemoryStore:
                 "semantic_enabled": True,
                 "require_both": True,
             },
+            "retention": {
+                "learned_context_archive_grace_days": 7,
+                "learned_context_archive_grace_contexts": 0,
+            },
             "fallback_policy": "fallback_to_deterministic",
         }
 

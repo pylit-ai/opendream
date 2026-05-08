@@ -5,12 +5,12 @@ import {
   CircleAlert,
   FileSearch,
   Link2,
-  Sparkles,
   Target,
 } from 'lucide-solid';
 import { For, Show, createMemo, createResource, type JSX } from 'solid-js';
-import { getShowcase } from '~/api/client';
+import { getOverview, getShowcase } from '~/api/client';
 import type {
+  OverviewPayload,
   ShowcaseAgentAnswer,
   ShowcaseAnswerSignal,
   ShowcasePromptLink,
@@ -18,13 +18,14 @@ import type {
   ShowcaseRetrievalReason,
   ShowcaseSourceRef,
 } from '~/api/types';
-import { EmptyState } from '~/components/EmptyState';
 import { ErrorState } from '~/components/ErrorState';
 import { IdLink } from '~/components/IdLink';
 import { LoadingPage } from '~/components/Loading';
 import { Page } from '~/components/Page';
 import { Chip, type ChipVariant } from '~/components/Chip';
 import { CopyButton } from '~/components/CopyButton';
+import { cachedFetch } from '~/lib/cache';
+import { formatNumber } from '~/lib/format';
 
 type SummaryTone = 'success' | 'warn' | 'danger' | 'neutral';
 
@@ -189,14 +190,14 @@ function verdictSummary(report: ShowcaseReport | undefined): {
   if (status === 'passed' || status === 'completed') {
     return {
       label: 'Report complete',
-      detail: 'Showcase generated, but scored answer comparison is unavailable.',
+      detail: 'Report generated, but scored answer comparison is unavailable.',
       tone: 'warn',
     };
   }
 
   return {
     label: 'No verdict yet',
-    detail: 'Run the showcase demo to generate scored memory evidence.',
+    detail: 'Run the demo scenario to generate scored memory evidence.',
     tone: 'neutral',
   };
 }
@@ -323,18 +324,116 @@ function SummaryCard(props: SummaryCardProps): JSX.Element {
   );
 }
 
-export default function ShowcaseRoute(): JSX.Element {
+function numeric(value: unknown): number {
+  return typeof value === 'number' ? value : Number(value ?? 0) || 0;
+}
+
+function LiveShowcaseFallback(props: { command?: string }): JSX.Element {
+  const [overview, { refetch }] = createResource<OverviewPayload>(() =>
+    cachedFetch('insights-live-overview', getOverview, 15_000),
+  );
+  const memoryTotal = (): number => numeric(overview()?.memory_counts?.total);
+  const activeMemories = (): number => numeric(overview()?.memory_counts?.by_status?.active);
+  const contestedMemories = (): number => numeric(overview()?.contested_memories);
+  const retrievals = (): { total?: number; successful?: number; failed?: number } =>
+    (overview()?.retrievals as { total?: number; successful?: number; failed?: number } | undefined) ?? {};
+  const pruning = (): Record<string, unknown> =>
+    (overview()?.context_pruning as Record<string, unknown> | undefined) ?? {};
+  const semanticChange = (): Record<string, unknown> =>
+    (overview()?.semantic_change_summary as Record<string, unknown> | undefined) ?? {};
+  const latestContextId = (): string | undefined => {
+    const id = semanticChange().latest_context_id;
+    return typeof id === 'string' && id ? id : undefined;
+  };
+
+  return (
+    <Show when={!overview.loading} fallback={<LoadingPage label="Loading live overview" />}>
+      <Show
+        when={!overview.error}
+        fallback={
+          <ErrorState
+            title="Live insights unavailable"
+            message={overview.error instanceof Error ? overview.error.message : String(overview.error)}
+            onRetry={refetch}
+          />
+        }
+      >
+        <div class="flex flex-col gap-4">
+          <section class="grid gap-4 xl:grid-cols-3">
+            <SummaryCard
+              label="Memory surface"
+              value={formatNumber(memoryTotal())}
+              detail={`${formatNumber(activeMemories())} active, ${formatNumber(contestedMemories())} contested`}
+              tone={memoryTotal() > 0 ? 'success' : 'neutral'}
+              icon={<BrainCircuit size={18} />}
+            />
+            <SummaryCard
+              label="Retrieval evidence"
+              value={formatNumber(numeric(retrievals().total))}
+              detail={`${formatNumber(numeric(retrievals().successful))} successful, ${formatNumber(numeric(retrievals().failed))} failed`}
+              tone={numeric(retrievals().failed) === 0 ? 'success' : 'warn'}
+              icon={<FileSearch size={18} />}
+            />
+            <SummaryCard
+              label="Context pruning"
+              value={formatNumber(numeric(pruning().injected_count))}
+              detail={`${formatNumber(numeric(pruning().suppressed_count))} suppressed, ${formatNumber(numeric(pruning().saved_token_estimate))} tokens saved`}
+              tone={pruning().status === 'available' ? 'success' : 'neutral'}
+              icon={<Target size={18} />}
+            />
+          </section>
+
+          <section class="rounded-lg hairline bg-surface p-4">
+            <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div class="flex flex-col gap-1">
+                <h2 class="text-sm font-semibold text-text">Live observability snapshot</h2>
+                <p class="max-w-3xl text-[12.5px] leading-5 text-text-muted">
+                  No scored demo report exists for this workspace, so this page is showing current
+                  memory, retrieval, and context-pruning evidence.
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-2 text-[12px]">
+                <A class="rounded-md border border-border px-3 py-1.5 text-text hover:bg-surface-elevated" href="/memories">
+                  Memories
+                </A>
+                <A class="rounded-md border border-border px-3 py-1.5 text-text hover:bg-surface-elevated" href="/retrievals">
+                  Retrievals
+                </A>
+                <A
+                  class="rounded-md border border-border px-3 py-1.5 text-text hover:bg-surface-elevated"
+                  href={latestContextId() ? `/context?id=${encodeURIComponent(latestContextId()!)}` : '/context'}
+                >
+                  Context
+                </A>
+              </div>
+            </div>
+            <Show when={props.command}>
+              <div class="mt-4 rounded-md border border-border-subtle bg-surface-muted p-3">
+                <div class="mb-1 text-[10px] uppercase tracking-[0.08em] text-text-subtle">
+                  Demo report command
+                </div>
+                <code class="block break-words text-[12px] text-text">{props.command}</code>
+              </div>
+            </Show>
+          </section>
+        </div>
+      </Show>
+    </Show>
+  );
+}
+
+export default function InsightsRoute(): JSX.Element {
   const [payload, { refetch }] = createResource(getShowcase);
   const report = createMemo(() => payload()?.report ?? undefined);
 
   return (
-    <Page title="Showcase" subtitle="Task-grounded memory recall and dream evidence">
-      <Show when={!payload.loading} fallback={<LoadingPage label="Loading showcase" />}>
+    <Page title="Insights" subtitle="Live memory health, retrieval evidence, and dream-cycle behavior">
+      <Show when={!payload.loading} fallback={<LoadingPage label="Loading insights" />}>
         <Show
           when={!payload.error}
           fallback={
             <ErrorState
-              title="Showcase unavailable"
+              title="Insights unavailable"
               message={payload.error instanceof Error ? payload.error.message : String(payload.error)}
               onRetry={refetch}
             />
@@ -342,16 +441,7 @@ export default function ShowcaseRoute(): JSX.Element {
         >
           <Show
             when={payload()?.available && report()}
-            fallback={
-              <EmptyState
-                icon={Sparkles}
-                title="No showcase report"
-                description={
-                  payload()?.command ??
-                  'opendream demo --scenario coding-agent-showcase --workspace .tmp/opendream-showcase'
-                }
-              />
-            }
+            fallback={<LiveShowcaseFallback command={payload()?.command} />}
           >
             {(r) => {
               const verdict = () => verdictSummary(r());

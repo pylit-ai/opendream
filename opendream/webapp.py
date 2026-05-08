@@ -402,6 +402,14 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 out["status"] = "ok"
                 self._write_json(out)
                 return
+            elif parsed.path == "/api/semantic-config":
+                try:
+                    response = _apply_semantic_config_update(self.store, payload)
+                except (ValueError, TypeError, SchemaValidationError) as exc:
+                    self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                self._write_json(response)
+                return
             elif parsed.path == "/api/learned-context/restore":
                 record_id = str(payload.get("record_id", "")).strip()
                 if not record_id:
@@ -584,6 +592,14 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             self._write_json(_build_overview_lite(self.store))
             _finish()
             return
+        if parsed.path == "/api/settings":
+            self._write_json(_settings_payload(self.store))
+            _finish()
+            return
+        if parsed.path == "/api/semantic-config":
+            self._write_json(_semantic_config_payload(self.store))
+            _finish()
+            return
         if parsed.path == "/api/overview":
             list_index = load_or_build_list_index(self.store)
             self._write_json(list_index["overview"])
@@ -691,7 +707,8 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             if since:
                 sessions = [s for s in sessions if str(s.get("started_at") or "") >= since]
             limit = _parse_query_int(query.get("limit"), 50, minimum=1, maximum=_SESSION_LIST_LIMIT_CAP)
-            sessions = [project_session_list_row(s) for s in sessions[:limit]]
+            sessions = [_session_display_name(s, {}) for s in sessions[:limit]]
+            sessions = [project_session_list_row(s) for s in sessions]
             self._write_json({"items": sessions})
             _finish()
             return
@@ -790,7 +807,11 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/timeline"):
             session_id = parsed.path.split("/")[-2]
             session = _find_by_id(entities["sessions"], "session_id", session_id)
+            if session:
+                context_by_session = _latest_context_by_session(list(entities["contexts"]))
+                session = _session_display_name(session, context_by_session)
             self._write_json(session or {})
+            _finish()
             return
         if parsed.path.startswith("/api/runs/") and parsed.path.endswith("/diff"):
             run_id = parsed.path.split("/")[-2]
@@ -805,9 +826,38 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             retrieval_id = parsed.path.split("/")[-1]
             self._write_json(_find_by_id(entities["retrievals"], "id", retrieval_id) or {})
             return
+        if parsed.path == "/api/context":
+            rows = list(entities["contexts"])
+            session_id = (query.get("session_id") or "").strip()
+            if session_id:
+                rows = [row for row in rows if str(row.get("session_id") or "") == session_id]
+            rows.sort(
+                key=lambda row: (
+                    str(row.get("created_at") or ""),
+                    str(row.get("context_id") or ""),
+                ),
+                reverse=True,
+            )
+            total = len(rows)
+            limit = _parse_query_int(query.get("limit"), 100, minimum=1, maximum=500)
+            offset = _parse_query_int(query.get("offset"), 0, minimum=0, maximum=1_000_000)
+            self._write_json(
+                {
+                    "items": [_context_list_row(row) for row in rows[offset : offset + limit]],
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                    "has_more": offset + limit < total,
+                }
+            )
+            _finish()
+            return
         if parsed.path.startswith("/api/context/"):
             context_id = parsed.path.split("/")[-1]
-            self._write_json(_find_by_id(entities["contexts"], "context_id", context_id) or {})
+            context = _find_by_id(entities["contexts"], "context_id", context_id)
+            if context:
+                context = {**context, "display_name": _context_list_row(context).get("display_name")}
+            self._write_json(context or {})
             return
         if parsed.path == "/api/graph":
             index = load_or_build_index(self.store)
@@ -966,6 +1016,65 @@ def _apply_semantic_dream_mode(store: MemoryStore, mode: str) -> None:
     config["mode"] = mode
     validate_document("semantic-dream-config.schema.json", config)
     store.save_semantic_config(config)
+
+
+def _semantic_config_payload(store: MemoryStore) -> dict[str, Any]:
+    config = dict(store.load_semantic_config())
+    if "providers" not in config or not isinstance(config.get("providers"), list):
+        config["providers"] = []
+    if "mode" not in config:
+        config["mode"] = "deterministic"
+    retention = config.get("retention")
+    if not isinstance(retention, dict):
+        retention = {}
+    retention.setdefault("learned_context_archive_grace_days", 7)
+    retention.setdefault("learned_context_archive_grace_contexts", 0)
+    config["retention"] = retention
+    return config
+
+
+def _apply_semantic_config_update(store: MemoryStore, payload: dict[str, Any]) -> dict[str, Any]:
+    config = _semantic_config_payload(store)
+    if "retention" in payload:
+        retention_payload = payload.get("retention")
+        if isinstance(retention_payload, dict):
+            retention = dict(config.get("retention") or {})
+            for key in (
+                "learned_context_archive_grace_days",
+                "learned_context_archive_grace_contexts",
+            ):
+                if key in retention_payload:
+                    retention[key] = max(0, int(retention_payload[key]))
+            config["retention"] = retention
+    validate_document("semantic-dream-config.schema.json", config)
+    store.save_semantic_config(config)
+    return _settings_payload(store)
+
+
+def _settings_payload(store: MemoryStore) -> dict[str, Any]:
+    config = _semantic_config_payload(store)
+    semantic_status = dream_status_semantic(store)
+    mode = str(config.get("mode") or semantic_status.get("mode") or "deterministic")
+    posture = "semantic-first" if mode in {"semantic", "hybrid"} else "deterministic"
+    state = str(semantic_status.get("semantic_capability_state") or "unknown")
+    reason = semantic_status.get("availability_reason")
+    next_action = semantic_status.get("next_action")
+    return {
+        "generated_at": to_iso(utc_now()),
+        "product_posture": posture,
+        "semantic_capability_state": state,
+        "semantic_unavailability_reason": reason,
+        "next_action": next_action,
+        "semantic_status": semantic_status,
+        "semantic_config": config,
+        "readiness": {
+            "mode": mode,
+            "posture": posture,
+            "status": state,
+            "mode_reason": reason,
+            "next_action": next_action,
+        },
+    }
 
 
 def _ui_context_payload(store: MemoryStore) -> dict[str, Any]:
@@ -1173,3 +1282,86 @@ def _find_by_id(rows: list[dict[str, Any]], key: str, value: str) -> dict[str, A
         if str(row.get(key, "")) == value:
             return row
     return None
+
+
+def _compact_label(text: str | None, fallback: str, *, limit: int = 84) -> str:
+    label = " ".join(str(text or "").split())
+    if not label:
+        label = fallback
+    return label if len(label) <= limit else f"{label[: limit - 1].rstrip()}…"
+
+
+def _context_query(row: dict[str, Any]) -> str | None:
+    assembled = row.get("assembled_text")
+    if isinstance(assembled, str):
+        for line in assembled.splitlines():
+            if line.startswith("Query:"):
+                return line.partition(":")[2].strip() or None
+    return None
+
+
+def _latest_context_by_session(contexts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    by_session: dict[str, dict[str, Any]] = {}
+    for row in sorted(
+        contexts,
+        key=lambda item: (
+            str(item.get("created_at") or ""),
+            str(item.get("context_id") or ""),
+        ),
+        reverse=True,
+    ):
+        session_id = str(row.get("session_id") or "")
+        if session_id and session_id not in by_session:
+            by_session[session_id] = row
+    return by_session
+
+
+def _session_display_name(row: dict[str, Any], context_by_session: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    session_id = str(row.get("session_id") or "")
+    context = context_by_session.get(session_id) if session_id else None
+    query = _context_query(context) if context else None
+    if not query:
+        latest_query = row.get("latest_context_query")
+        query = latest_query.strip() if isinstance(latest_query, str) and latest_query.strip() else None
+    if query and query.lower() != "current task":
+        label = _compact_label(query, session_id)
+    elif query:
+        label = "Current task"
+    else:
+        agents = row.get("reporting_agents")
+        if isinstance(agents, list) and agents:
+            names = [
+                str(agent.get("agent_label") or agent.get("agent_id") or "").strip()
+                for agent in agents
+                if isinstance(agent, dict)
+            ]
+            label = _compact_label(", ".join(name for name in names if name), session_id)
+        else:
+            label = _compact_label(None, session_id)
+    enriched = dict(row)
+    enriched["display_name"] = label
+    if context:
+        enriched["latest_context_id"] = context.get("context_id")
+    elif row.get("latest_context_id"):
+        enriched["latest_context_id"] = row.get("latest_context_id")
+    if query:
+        enriched["latest_context_query"] = query
+    return enriched
+
+
+def _context_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    selected_ids = row.get("selected_memory_ids")
+    selected_count = len(selected_ids) if isinstance(selected_ids, list) else None
+    query = _context_query(row)
+    context_id = row.get("context_id")
+    out = {
+        "context_id": context_id,
+        "session_id": row.get("session_id"),
+        "created_at": row.get("created_at"),
+        "character_count": row.get("character_count"),
+        "token_estimate": row.get("token_estimate"),
+        "selected_memory_ids_count": selected_count,
+        "query": query,
+        "display_name": _compact_label(query, str(context_id or "context")),
+    }
+    return {key: value for key, value in out.items() if value is not None}

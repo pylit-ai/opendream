@@ -1,9 +1,9 @@
-import { createResource, createSignal, For, Show, type JSX } from 'solid-js';
-import { useNavigate } from '@solidjs/router';
+import { createEffect, createResource, createSignal, For, Show, type JSX } from 'solid-js';
+import { useSearchParams } from '@solidjs/router';
 import { FileText } from 'lucide-solid';
-import { getContext, getSessions } from '~/api/client';
+import { getContext, getContexts } from '~/api/client';
 import { cachedFetch } from '~/lib/cache';
-import type { ContextRecord } from '~/api/types';
+import type { ContextListResponse, ContextRecord } from '~/api/types';
 import { Page } from '~/components/Page';
 import { EmptyState } from '~/components/EmptyState';
 import { LoadingPage } from '~/components/Loading';
@@ -14,59 +14,65 @@ import { cn } from '~/lib/cn';
 
 interface ContextEntry {
   context_id: string;
+  session_id?: string;
   created_at?: string;
   character_count?: number;
+  selected_memory_ids_count?: number;
   query?: string;
+  display_name?: string;
 }
 
-/** Derive context IDs from sessions timeline events. */
-function extractContextEntries(sessions: { items: unknown[] }): ContextEntry[] {
-  const seen = new Set<string>();
-  const entries: ContextEntry[] = [];
-  for (const session of sessions.items) {
-    const timeline = (session as { timeline?: Array<{
-      kind?: string;
-      object_id?: string;
-      label?: string;
-      payload?: {
-        context_id?: string;
-        created_at?: string;
-        character_count?: number;
-        assembled_text?: string;
-      };
-    }> }).timeline ?? [];
-    for (const ev of timeline) {
-      // only pick up actual context assembly events
-      if (ev.kind !== 'memory.context.assembled') continue;
-      const ctxId = ev.payload?.context_id ?? ev.object_id;
-      if (!ctxId || seen.has(ctxId)) continue;
-      seen.add(ctxId);
-      // extract query from assembled_text first line
-      const text = ev.payload?.assembled_text ?? '';
-      const queryMatch = text.match(/Query:\s*(.+)/);
-      entries.push({
-        context_id: ctxId,
-        created_at: ev.payload?.created_at,
-        character_count: ev.payload?.character_count,
-        query: queryMatch?.[1]?.trim(),
-      });
-    }
-  }
-  return entries.slice(0, 50);
+function SelectionMetric(props: {
+  label: string;
+  candidateCount?: number;
+  selectedCount?: number;
+  emptyHint?: string;
+}): JSX.Element {
+  const candidates = () => props.candidateCount ?? 0;
+  const selected = () => props.selectedCount ?? 0;
+  const empty = () => candidates() === 0 || selected() === 0;
+  return (
+    <div class="rounded-md border border-border bg-surface-elevated px-3 py-2">
+      <div class="flex items-center justify-between gap-3">
+        <span class="text-[11px] font-medium text-text">{props.label}</span>
+        <span class={cn('font-mono text-[11px]', empty() ? 'text-warn' : 'text-success')}>
+          {formatNumber(selected())}/{formatNumber(candidates())}
+        </span>
+      </div>
+      <Show when={empty() && props.emptyHint}>
+        <p class="mt-1 text-[10.5px] leading-4 text-text-muted">{props.emptyHint}</p>
+      </Show>
+    </div>
+  );
 }
 
 export default function ContextRoute(): JSX.Element {
-  const navigate = useNavigate();
-  const [selectedId, setSelectedId] = createSignal<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialId = typeof searchParams.id === 'string' ? searchParams.id : null;
+  const [selectedId, setSelectedId] = createSignal<string | null>(initialId);
 
-  const [sessionsData, { refetch: refetchSessions }] = createResource(() =>
-    cachedFetch('sessions', getSessions, 15_000),
+  const [contextsData, { refetch: refetchContexts }] = createResource<ContextListResponse>(() =>
+    cachedFetch('contexts:200', () => getContexts({ limit: 200 }), 15_000),
   );
 
   const contextEntries = (): ContextEntry[] => {
-    const s = sessionsData();
-    if (!s) return [];
-    return extractContextEntries(s as { items: unknown[] });
+    return (contextsData()?.items ?? []) as ContextEntry[];
+  };
+
+  createEffect(() => {
+    const id = typeof searchParams.id === 'string' ? searchParams.id : null;
+    if (id && id !== selectedId()) setSelectedId(id);
+  });
+
+  createEffect(() => {
+    if (selectedId()) return;
+    const first = contextEntries()[0];
+    if (first) setSelectedId(first.context_id);
+  });
+
+  const selectContext = (id: string): void => {
+    setSelectedId(id);
+    setSearchParams({ id }, { replace: false });
   };
 
   const [contextDetail] = createResource<ContextRecord | null, string | null>(
@@ -90,17 +96,17 @@ export default function ContextRoute(): JSX.Element {
 
   return (
     <Page title="Context" subtitle="Assembled memory context records">
-      <Show when={!sessionsData.loading} fallback={<LoadingPage />}>
+      <Show when={!contextsData.loading} fallback={<LoadingPage />}>
         <Show
-          when={!sessionsData.error}
+          when={!contextsData.error}
           fallback={
             <ErrorState
               message={
-                sessionsData.error instanceof Error
-                  ? sessionsData.error.message
-                  : String(sessionsData.error)
+                contextsData.error instanceof Error
+                  ? contextsData.error.message
+                  : String(contextsData.error)
               }
-              onRetry={refetchSessions}
+              onRetry={refetchContexts}
             />
           }
         >
@@ -121,7 +127,7 @@ export default function ContextRoute(): JSX.Element {
                   {(entry) => (
                     <button
                       type="button"
-                      onClick={() => setSelectedId(entry.context_id)}
+                      onClick={() => selectContext(entry.context_id)}
                       class={cn(
                         'hairline-b row-hover flex flex-col gap-0.5 px-4 py-3 text-left text-xs',
                         selectedId() === entry.context_id
@@ -129,19 +135,26 @@ export default function ContextRoute(): JSX.Element {
                           : 'hover:bg-surface-elevated',
                       )}
                     >
-                      <span class="font-mono text-text-muted truncate">{entry.context_id}</span>
-                      <Show when={entry.query}>
-                        <span class="truncate text-text-subtle">{entry.query}</span>
-                      </Show>
+                      <span class="truncate font-medium text-text">
+                        {entry.display_name ?? entry.query ?? entry.context_id}
+                      </span>
+                      <span class="truncate font-mono text-[10.5px] text-text-muted">
+                        {entry.context_id}
+                      </span>
                       <div class="flex items-center gap-2 text-text-subtle">
                         <Show when={entry.created_at}>
                           <span>{formatDate(entry.created_at!)}</span>
                         </Show>
-                        <Show when={entry.character_count}>
-                          <span class="tabular-nums">{formatNumber(entry.character_count!)} chars</span>
-                        </Show>
-                      </div>
-                    </button>
+                      <Show when={entry.character_count}>
+                        <span class="tabular-nums">{formatNumber(entry.character_count!)} chars</span>
+                      </Show>
+                      <Show when={entry.selected_memory_ids_count !== undefined}>
+                        <span class="tabular-nums">
+                          {formatNumber(entry.selected_memory_ids_count!)} selected
+                        </span>
+                      </Show>
+                    </div>
+                  </button>
                   )}
                 </For>
               </nav>
@@ -163,6 +176,10 @@ export default function ContextRoute(): JSX.Element {
                     {(d) => (
                       <div class="flex flex-col gap-3">
                         <dl class="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1 text-sm">
+                          <Show when={(d() as { display_name?: string }).display_name}>
+                            <dt class="text-text-muted">Name</dt>
+                            <dd class="text-text">{(d() as { display_name?: string }).display_name}</dd>
+                          </Show>
                           <dt class="text-text-muted">Context ID</dt>
                           <dd class="font-mono text-xs text-text">{d().context_id}</dd>
                           <Show when={(d() as { created_at?: string }).created_at}>
@@ -172,6 +189,45 @@ export default function ContextRoute(): JSX.Element {
                             </dd>
                           </Show>
                         </dl>
+                        {(() => {
+                          const selection = d().selection ?? {};
+                          const durable = selection.durable_memory ?? {};
+                          const learned = selection.learned_context ?? {};
+                          const automation = selection.automation ?? {};
+                          const pruning = d().context_pruning ?? {};
+                          return (
+                            <section class="flex flex-col gap-2">
+                              <div class="flex items-center justify-between gap-3">
+                                <h4 class="text-2xs uppercase tracking-wide text-text-subtle">
+                                  Selection diagnostics
+                                </h4>
+                                <span class="text-[10.5px] text-text-muted">
+                                  {formatNumber(pruning.suppressed_count ?? 0)} suppressed
+                                </span>
+                              </div>
+                              <div class="grid gap-2 md:grid-cols-3">
+                                <SelectionMetric
+                                  label="Durable memory"
+                                  candidateCount={durable.candidate_count}
+                                  selectedCount={durable.selected}
+                                  emptyHint="No durable memories matched this query."
+                                />
+                                <SelectionMetric
+                                  label="Learned context"
+                                  candidateCount={learned.candidate_count}
+                                  selectedCount={learned.selected}
+                                  emptyHint="No active prompt-eligible learned-context records matched."
+                                />
+                                <SelectionMetric
+                                  label="Automation"
+                                  candidateCount={automation.candidate_count}
+                                  selectedCount={automation.selected}
+                                  emptyHint="No active automation projections are available."
+                                />
+                              </div>
+                            </section>
+                          );
+                        })()}
                         <section class="flex flex-col gap-1">
                           <h4 class="text-2xs uppercase tracking-wide text-text-subtle">
                             Assembled text

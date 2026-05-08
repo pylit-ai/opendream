@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from '@solidjs/router';
 import { Database } from 'lucide-solid';
 import {
   getDreamCycles,
+  getLatestSemanticChange,
   getMemories,
   getMemory,
   getOverview,
@@ -13,6 +14,8 @@ import type {
   MemoryListResponse,
   MemoryRecord,
   OverviewPayload,
+  SemanticChangeItem,
+  SemanticChangeReview,
 } from '~/api/types';
 import { Page } from '~/components/Page';
 import { Tabs } from '~/components/Tabs';
@@ -23,7 +26,7 @@ import { SlideOver } from '~/components/SlideOver';
 import { SkeletonRows, SkeletonStats } from '~/components/Skeleton';
 import { ErrorState } from '~/components/ErrorState';
 import { EmptyState } from '~/components/EmptyState';
-import { formatDate, formatDateLong } from '~/lib/format';
+import { formatDate, formatDateLong, formatNumber } from '~/lib/format';
 import { MemoryInspector } from '~/components/MemoryInspector';
 import { IdLink } from '~/components/IdLink';
 import { cachedFetch } from '~/lib/cache';
@@ -629,14 +632,21 @@ export function MemoriesExplorer(): JSX.Element {
 }
 
 export function MemoriesChanges(): JSX.Element {
-  // Spec 448: Memory changes are produced by dream cycles. The legacy
-  // /api/semantic-changes/latest endpoint only returns one context's review;
-  // the actual stream of "what changed in memory" is the dream cycle list,
-  // filtered to cycles whose learned-context delta is non-zero. Each row
-  // links into the Dreams cycle detail.
   const navigate = useNavigate();
+  const [showDreamDeltas, setShowDreamDeltas] = createSignal(false);
   const [cycles, { refetch }] = createResource(() =>
     cachedFetch('dream-cycles', () => getDreamCycles({ limit: 200 }), 15_000),
+  );
+  const [semanticChange, { refetch: refetchSemanticChange }] =
+    createResource<SemanticChangeReview>(() =>
+      cachedFetch('semantic-change-latest', getLatestSemanticChange, 15_000),
+    );
+  const [memorySummary] = createResource<MemoryListResponse>(() =>
+    cachedFetch(
+      'memory-summary:changes',
+      () => getMemories({ limit: 5, sort: 'created_at', sort_dir: 'desc' }),
+      15_000,
+    ),
   );
 
   const allCycles = (): DreamCycle[] => cycles()?.items ?? [];
@@ -654,6 +664,66 @@ export function MemoriesChanges(): JSX.Element {
       const approved = c.proposals_approved ?? 0;
       return created === 0 && superseded === 0 && approved === 0;
     });
+  const semanticItems = (): SemanticChangeItem[] => semanticChange()?.items ?? [];
+  const semanticCounts = () => semanticChange()?.summary_counts ?? {};
+  const memoryTotal = (): number =>
+    memorySummary()?.total ?? memorySummary()?.items?.length ?? 0;
+
+  const semanticColumns: TableColumn<SemanticChangeItem>[] = [
+    {
+      key: 'changed_at',
+      header: 'When',
+      width: '140px',
+      render: (item) =>
+        item.changed_at ? (
+          <span title={formatDateLong(item.changed_at)} class="text-xs text-text">
+            {formatDate(item.changed_at)}
+          </span>
+        ) : (
+          <span class="text-xs text-text-subtle">unknown</span>
+        ),
+    },
+    {
+      key: 'change_class',
+      header: 'Change',
+      width: '120px',
+      render: (item) => {
+        const cls = item.change_class ?? 'unknown';
+        const variant: ChipVariant =
+          cls === 'kept' || cls === 'restored'
+            ? 'ok'
+            : cls === 'deactivated'
+              ? 'danger'
+              : cls === 'suppressed'
+                ? 'warn'
+                : 'neutral';
+        return <Chip variant={variant}>{cls}</Chip>;
+      },
+    },
+    {
+      key: 'record_id',
+      header: 'Record',
+      width: '150px',
+      render: (item) => (
+        <span class="font-mono text-xs text-text">
+          {item.record_id ?? 'unknown'}
+        </span>
+      ),
+    },
+    {
+      key: 'reason',
+      header: 'Reason',
+      width: '180px',
+      render: (item) => (
+        <span class="text-xs text-text-muted">{item.reason_code ?? 'none'}</span>
+      ),
+    },
+    {
+      key: 'summary',
+      header: 'Summary',
+      render: (item) => <span class="line-clamp-2 text-xs text-text">{item.summary ?? 'No summary'}</span>,
+    },
+  ];
 
   const cycleColumns: TableColumn<DreamCycle>[] = [
     {
@@ -732,70 +802,162 @@ export function MemoriesChanges(): JSX.Element {
 
   return (
     <MemoriesShell>
-      <Show when={!cycles.loading} fallback={<SkeletonRows rows={6} />}>
+      <Show when={!cycles.loading && !semanticChange.loading} fallback={<SkeletonRows rows={6} />}>
         <Show
-          when={!cycles.error}
+          when={!cycles.error && !semanticChange.error}
           fallback={
             <ErrorState
-              message={cycles.error instanceof Error ? cycles.error.message : String(cycles.error)}
-              onRetry={refetch}
+              message={
+                cycles.error instanceof Error
+                  ? cycles.error.message
+                  : semanticChange.error instanceof Error
+                    ? semanticChange.error.message
+                    : String(cycles.error ?? semanticChange.error)
+              }
+              onRetry={() => {
+                refetch();
+                refetchSemanticChange();
+              }}
             />
           }
         >
           <div class="flex flex-col gap-3">
-            <section class="flex flex-wrap items-stretch gap-x-6 gap-y-2 rounded-md hairline bg-surface px-4 py-2.5">
-              <CompactStat label="Cycles with changes" value={String(changedCycles().length)} />
-              <CompactStat label="No-op cycles" value={String(noopCycles().length)} />
-              <CompactStat
-                label="Total created"
-                value={String(
-                  allCycles().reduce((s, c) => s + (c.learned_context_created ?? 0), 0),
-                )}
-                tone="ok"
-              />
-              <CompactStat
-                label="Total superseded"
-                value={String(
-                  allCycles().reduce((s, c) => s + (c.learned_context_superseded ?? 0), 0),
-                )}
-                tone="warn"
-              />
-              <CompactStat
-                label="Total approved"
-                value={String(
-                  allCycles().reduce((s, c) => s + (c.proposals_approved ?? 0), 0),
-                )}
+            <section class="flex flex-col gap-3 rounded-md hairline bg-surface p-4">
+              <div class="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h2 class="text-sm font-semibold text-text">Context changes</h2>
+                  <p class="max-w-3xl text-[11.5px] leading-5 text-text-muted">
+                    Latest semantic review for context{' '}
+                    <span class="font-mono text-text">{semanticChange()?.source_id ?? 'unknown'}</span>.
+                    Suppressed records were omitted from this context; deactivated records left the
+                    active learned-context set.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = semanticChange()?.source_id;
+                    if (id) navigate(`/context?id=${encodeURIComponent(id)}`);
+                  }}
+                  disabled={!semanticChange()?.source_id}
+                  class="rounded-md border border-border px-3 py-1.5 text-[12px] text-text hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Open context
+                </button>
+              </div>
+
+              <section class="flex flex-wrap items-stretch gap-x-6 gap-y-2 rounded-md bg-surface-elevated px-3 py-2">
+                <CompactStat
+                  label="Suppressed"
+                  value={formatNumber(Number(semanticCounts().suppressed_count ?? 0))}
+                  tone="warn"
+                />
+                <CompactStat
+                  label="Deactivated"
+                  value={formatNumber(Number(semanticCounts().deactivated_count ?? 0))}
+                  tone="danger"
+                />
+                <CompactStat
+                  label="Kept"
+                  value={formatNumber(Number(semanticCounts().kept_count ?? 0))}
+                  tone="ok"
+                />
+                <CompactStat
+                  label="Restorable"
+                  value={formatNumber(Number(semanticCounts().restorable_count ?? 0))}
+                />
+              </section>
+
+              <Table
+                items={semanticItems()}
+                columns={semanticColumns}
+                rowKey={(item) =>
+                  item.change_id ?? `${item.record_id ?? 'record'}:${item.change_class ?? 'change'}`
+                }
+                onRowClick={(item) => {
+                  const id = item.source_context_id ?? semanticChange()?.source_id;
+                  if (id) navigate(`/context?id=${encodeURIComponent(id)}`);
+                }}
+                empty={
+                  <EmptyState
+                    icon={Database}
+                    title="No context changes yet"
+                    description="No semantic context review has been recorded for the latest context."
+                  />
+                }
               />
             </section>
 
-            <p class="text-[11.5px] text-text-muted">
-              Each row is one dream cycle. Click the run id to open the Dreams cycle detail and
-              see the full proposal funnel + audit artifacts. No-op cycles are hidden by default
-              — they're cycles where no proposals were approved.
-            </p>
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowDreamDeltas((v) => !v)}
+                class="rounded-md border border-border px-3 py-1.5 text-[12px] text-text hover:bg-surface-elevated"
+              >
+                {showDreamDeltas() ? 'Hide dream-cycle deltas' : 'Show dream-cycle deltas'}
+              </button>
+            </div>
 
-            <Table
-              items={changedCycles()}
-              columns={cycleColumns}
-              rowKey={(c) => c.run_id}
-              onRowClick={(c) => navigate(`/dreams?id=${encodeURIComponent(c.run_id)}`)}
-              empty={
-                <EmptyState
-                  icon={Database}
-                  title="No memory changes yet"
-                  description="Run a dream cycle to produce memory changes."
-                  action={
-                    <button
-                      type="button"
-                      onClick={() => navigate('/dreams')}
-                      class="mt-2 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-fg hover:opacity-90"
-                    >
-                      Go to Dreams →
-                    </button>
-                  }
+            <Show when={showDreamDeltas()}>
+              <section class="flex flex-wrap items-stretch gap-x-6 gap-y-2 rounded-md hairline bg-surface px-4 py-2.5">
+                <CompactStat label="Cycles with changes" value={String(changedCycles().length)} />
+                <CompactStat label="No-op cycles" value={String(noopCycles().length)} />
+                <CompactStat label="Memories" value={formatNumber(memoryTotal())} />
+                <CompactStat
+                  label="Total created"
+                  value={String(
+                    allCycles().reduce((s, c) => s + (c.learned_context_created ?? 0), 0),
+                  )}
+                  tone="ok"
                 />
-              }
-            />
+                <CompactStat
+                  label="Total superseded"
+                  value={String(
+                    allCycles().reduce((s, c) => s + (c.learned_context_superseded ?? 0), 0),
+                  )}
+                  tone="warn"
+                />
+                <CompactStat
+                  label="Total approved"
+                  value={String(
+                    allCycles().reduce((s, c) => s + (c.proposals_approved ?? 0), 0),
+                  )}
+                />
+              </section>
+
+              <p class="text-[11.5px] text-text-muted">
+                Each row is one dream cycle. Click the run id to open the Dreams cycle detail and
+                see the full proposal funnel + audit artifacts. No-op cycles are hidden by default
+                — they're cycles where no proposals were approved.
+              </p>
+
+              <Table
+                items={changedCycles()}
+                columns={cycleColumns}
+                rowKey={(c) => c.run_id}
+                onRowClick={(c) => navigate(`/dreams?id=${encodeURIComponent(c.run_id)}`)}
+                empty={
+                  <EmptyState
+                    icon={Database}
+                    title={memoryTotal() > 0 ? 'No dream-cycle memory deltas' : 'No memory changes yet'}
+                    description={
+                      memoryTotal() > 0
+                        ? `${formatNumber(memoryTotal())} memories exist, but the loaded dream cycles are no-op cycles with no approved memory delta.`
+                        : 'Run a dream cycle to produce memory changes.'
+                    }
+                    action={
+                      <button
+                        type="button"
+                        onClick={() => navigate(memoryTotal() > 0 ? '/memories' : '/dreams')}
+                        class="mt-2 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-fg hover:opacity-90"
+                      >
+                        {memoryTotal() > 0 ? 'View memories →' : 'Go to Dreams →'}
+                      </button>
+                    }
+                  />
+                }
+              />
+            </Show>
           </div>
         </Show>
       </Show>

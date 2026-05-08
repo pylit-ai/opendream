@@ -41,9 +41,19 @@ const SORT_OPTIONS = [
 ];
 
 const ORPHAN_SESSION_RE = /^session_[a-f0-9]+$/i;
-function isLikelyOrphan(r: { session_id: string; event_count?: number }): boolean {
-  const ec = r.event_count ?? 0;
-  return ec <= 1 && ORPHAN_SESSION_RE.test(r.session_id);
+function countOf(value: unknown): number {
+  return typeof value === 'number' ? value : Number(value ?? 0) || 0;
+}
+
+function isLikelyOrphan(r: { session_id: string; event_count?: number; context_count?: number }): boolean {
+  const ec = countOf(r.event_count);
+  const cc = countOf(r.context_count);
+  return ec <= 1 && cc === 0 && ORPHAN_SESSION_RE.test(r.session_id);
+}
+
+function sessionLabel(r: SessionRecord): string {
+  const label = (r as { display_name?: string }).display_name;
+  return label && label !== r.session_id ? label : r.session_id;
 }
 
 export default function SessionsRoute(): JSX.Element {
@@ -65,7 +75,7 @@ export default function SessionsRoute(): JSX.Element {
   );
 
   const [sessions, { refetch }] = createResource<SessionsResponse>(() =>
-    cachedFetch('sessions', getSessions, 15_000),
+    cachedFetch('sessions:500', () => getSessions({ limit: 500 }), 15_000),
   );
 
   const showDiagnostics = () => (searchParams.diagnostics as string) === '1';
@@ -130,7 +140,7 @@ export default function SessionsRoute(): JSX.Element {
       list = list.filter(
         (r) =>
           !isLikelyOrphan(
-            r as unknown as { session_id: string; event_count?: number },
+            r as unknown as { session_id: string; event_count?: number; context_count?: number },
           ),
       );
     }
@@ -160,7 +170,9 @@ export default function SessionsRoute(): JSX.Element {
   const orphanCount = (): number => {
     const list = sessions()?.items ?? [];
     return list.filter((r) =>
-      isLikelyOrphan(r as unknown as { session_id: string; event_count?: number }),
+      isLikelyOrphan(
+        r as unknown as { session_id: string; event_count?: number; context_count?: number },
+      ),
     ).length;
   };
 
@@ -198,6 +210,7 @@ export default function SessionsRoute(): JSX.Element {
       ?? 0;
     return cnt;
   };
+  const contextCount = (r: SessionRecord): number => countOf((r as { context_count?: number }).context_count);
 
   const columns: TableColumn<SessionRecord>[] = [
     {
@@ -216,14 +229,35 @@ export default function SessionsRoute(): JSX.Element {
     {
       key: 'id',
       header: 'Session',
-      width: '220px',
+      width: '320px',
       render: (r) => (
-        <span class="flex items-center gap-1.5">
-          <IdLink id={r.session_id} onClick={() => openSession(r)} />
-          <Show when={(r as { event_count?: number }).event_count === 0}>
-            <Chip variant="warn" aria-label="Session has 0 events — see diagnostics">empty</Chip>
-          </Show>
-        </span>
+        <div class="flex min-w-0 flex-col gap-1">
+          <button
+            type="button"
+            onClick={() => openSession(r)}
+            class="truncate text-left text-xs font-medium text-text hover:text-accent"
+            title={sessionLabel(r)}
+          >
+            {sessionLabel(r)}
+          </button>
+          <span class="flex items-center gap-1.5">
+            <IdLink id={r.session_id} onClick={() => openSession(r)} />
+            <Show
+              when={countOf((r as { event_count?: number }).event_count) === 0}
+            >
+              <Chip
+                variant={contextCount(r) > 0 ? 'neutral' : 'warn'}
+                aria-label={
+                  contextCount(r) > 0
+                    ? 'Session has assembled context but no explicit emitted events'
+                    : 'Session has 0 events — see diagnostics'
+                }
+              >
+                {contextCount(r) > 0 ? 'context' : 'empty'}
+              </Chip>
+            </Show>
+          </span>
+        </div>
       ),
     },
     {
@@ -250,6 +284,16 @@ export default function SessionsRoute(): JSX.Element {
       numeric: true,
       render: (r) => (
         <span class="font-mono text-xs text-text-muted">{formatNumber(runCount(r))}</span>
+      ),
+    },
+    {
+      key: 'contexts',
+      header: 'Contexts',
+      width: '90px',
+      align: 'right',
+      numeric: true,
+      render: (r) => (
+        <span class="font-mono text-xs text-text-muted">{formatNumber(contextCount(r))}</span>
       ),
     },
   ];
@@ -394,7 +438,7 @@ export default function SessionsRoute(): JSX.Element {
               <For each={filteredItems()}>
                 {(s) => (
                   <option value={s.session_id}>
-                    {s.session_id} · {reportingAgents(s)} ·{' '}
+                    {sessionLabel(s)} · {reportingAgents(s)} ·{' '}
                     {s.started_at ? formatDate(s.started_at) : ''}
                   </option>
                 )}
@@ -405,6 +449,10 @@ export default function SessionsRoute(): JSX.Element {
             {(s) => (
               <div class="flex flex-col gap-4">
                 <dl class="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1.5 text-[12.5px]">
+                  <dt class="text-text-subtle">Name</dt>
+                  <dd class="text-text">{sessionLabel(s())}</dd>
+                  <dt class="text-text-subtle">Session ID</dt>
+                  <dd class="font-mono text-xs text-text-muted">{s().session_id}</dd>
                   <dt class="text-text-subtle">Started</dt>
                   <dd class="text-text">
                     {s().started_at ? formatDateLong(s().started_at!) : '—'}
