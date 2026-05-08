@@ -16,7 +16,7 @@ export interface TabsProps {
 export function Tabs(props: TabsProps): JSX.Element {
   return (
     <KTabs value={props.value} onChange={props.onChange}>
-      <KTabs.List class="hairline-b relative flex items-center gap-6">
+      <KTabs.List class="hairline-b relative flex flex-wrap items-center gap-x-4 gap-y-0">
         <For each={props.items}>
           {(item) => (
             <KTabs.Trigger

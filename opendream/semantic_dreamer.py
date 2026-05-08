@@ -131,6 +131,31 @@ def semantic_dream_run(
             orientation_tokens = _orient(store)
             gathered = _gather_recent_signal(rows, orientation_tokens, policy["max_recent_episodes"])
             phases.append("gather_recent_signal")
+            trace: dict[str, Any] = {
+                "signal": {
+                    "source": signal_status["latest_signal_source"],
+                    "latest_timestamp": signal_status["latest_signal_timestamp"],
+                    "rows_scanned": signal_status["signal_row_count"],
+                    "rows_gathered": len(gathered),
+                    "row_limit": policy["max_recent_episodes"],
+                },
+                "planner": {},
+                "synthesis": {
+                    "family_results": [],
+                    "fallback_reason": "",
+                    "drop_reasons": [],
+                },
+                "verification": {
+                    "verdict_counts": {},
+                    "results": [],
+                },
+                "materialization": {
+                    "promoted_record_ids": [],
+                    "rejected_count": 0,
+                    "retention_status": "not-run",
+                    "no_materialization_reason": "",
+                },
+            }
 
             # Phase 3: Anticipation planning
             phases.append("infer_families")
@@ -140,6 +165,15 @@ def semantic_dream_run(
             )
             families_selected = anticipation_plan.get("families_selected", 0)
             selected_families = anticipation_plan.get("selected_families", [])
+            trace["planner"] = {
+                "families_considered": anticipation_plan.get("total_families_considered", 0),
+                "families_selected": families_selected,
+                "selected_family_ids": [
+                    str(family.get("family_id") or "")
+                    for family in selected_families
+                    if isinstance(family, dict)
+                ],
+            }
 
             # Phase 4: Synthesize learned context proposals
             phases.append("synthesize")
@@ -149,7 +183,14 @@ def semantic_dream_run(
                 selected_families=selected_families,
                 budgets=budgets,
                 now=timestamp,
+                trace=trace["synthesis"],
             )
+            trace["synthesis"]["proposal_count"] = len(proposals)
+            trace["synthesis"]["proposal_ids"] = [
+                str(proposal.get("proposal_id") or "")
+                for proposal in proposals
+                if proposal.get("proposal_id")
+            ]
 
             # Phase 5: Verify proposals
             phases.append("verify")
@@ -162,6 +203,7 @@ def semantic_dream_run(
                     source_events=source_events_list[-50:],
                 )
                 verification_results.append(vresult)
+            trace["verification"] = _verification_trace(verification_results)
 
             # Phase 6: Promote approved proposals
             phases.append("promote")
@@ -176,6 +218,19 @@ def semantic_dream_run(
                     promoted += 1
                 else:
                     rejected += 1
+            no_materialization_reason = _no_materialization_reason(
+                gathered_rows=gathered,
+                proposals=proposals,
+                verification_results=verification_results,
+                synthesis_trace=trace["synthesis"],
+            )
+            trace["materialization"] = {
+                "promoted_record_ids": promoted_record_ids,
+                "created_count": promoted,
+                "rejected_count": rejected,
+                "retention_status": "active" if promoted else "no-new-records",
+                "no_materialization_reason": no_materialization_reason,
+            }
 
             phases.append("prune_and_reindex")
 
@@ -214,6 +269,8 @@ def semantic_dream_run(
             summary["latest_signal_source"] = signal_status["latest_signal_source"]
             summary["latest_signal_timestamp"] = signal_status["latest_signal_timestamp"]
             summary["signal_row_count"] = signal_status["signal_row_count"]
+            summary["semantic_trace"] = trace
+            summary["no_materialization_reason"] = no_materialization_reason
             summary["narrative"] = synthesize_dream_narrative(summary)
             summary["audit"] = store.write_semantic_dream_audit(
                 run_id,
@@ -296,6 +353,7 @@ def _synthesize_proposals(
     selected_families: list[dict[str, Any]],
     budgets: dict[str, Any],
     now: str,
+    trace: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Synthesize learned context proposals from gathered signal and query families.
 
@@ -305,6 +363,8 @@ def _synthesize_proposals(
     max_proposals = int(budgets.get("max_proposals_per_run", 20))
     proposals: list[dict[str, Any]] = []
     workspace_id = store.store_id
+    family_results: list[dict[str, Any]] = []
+    drop_reasons: list[str] = []
 
     # Group gathered rows by semantic similarity to families
     for family in selected_families:
@@ -319,60 +379,212 @@ def _synthesize_proposals(
 
         # Find rows relevant to this family
         relevant_rows: list[dict[str, Any]] = []
+        best_overlap = 0.0
         for row in gathered_rows:
             text = str(row.get("text") or row.get("message") or "")
             row_tokens = semantic_tokens(text)
             if row_tokens and family_tokens:
                 overlap = len(row_tokens & family_tokens) / max(1, len(row_tokens | family_tokens))
+                best_overlap = max(best_overlap, overlap)
                 if overlap >= 0.1:
                     relevant_rows.append(row)
 
         if not relevant_rows:
+            family_results.append({
+                "family_id": family.get("family_id", ""),
+                "title": family.get("title", ""),
+                "matched_rows": 0,
+                "best_score": round(best_overlap, 3),
+                "drop_reason": "no-row-family-token-overlap",
+            })
+            drop_reasons.append("no-row-family-token-overlap")
             continue
 
         # Synthesize a proposal from relevant content
-        content_parts = [str(r.get("text") or r.get("message") or "") for r in relevant_rows[:10]]
-        combined_content = " ".join(content_parts)
-
-        # Extract key information
-        summary = _extract_summary(combined_content, family)
-        if not summary:
+        proposal = _proposal_from_rows(
+            workspace_id,
+            family=family,
+            relevant_rows=relevant_rows,
+            now=now,
+        )
+        if not proposal:
+            family_results.append({
+                "family_id": family.get("family_id", ""),
+                "title": family.get("title", ""),
+                "matched_rows": len(relevant_rows),
+                "best_score": round(best_overlap, 3),
+                "drop_reason": "empty-summary",
+            })
+            drop_reasons.append("empty-summary")
             continue
 
-        # Compute freshness window
-        freshness_hours = family.get("freshness_window_hours", 168)
-        fresh_until = to_iso(
-            parse_timestamp(now) + timedelta(hours=freshness_hours)
-        )
-
-        event_ids: list[str] = []
-        for row in relevant_rows:
-            eid = row.get("event_id") or row.get("id", "")
-            if eid:
-                event_ids.append(str(eid))
-
-        proposal = {
-            "workspace_id": workspace_id,
-            "source_event_ids": event_ids[:20],
-            "source_episode_ids": [],
-            "source_trace_ids": [],
-            "query_family_tags": [family.get("family_id", "")],
-            "summary": summary,
-            "details": combined_content[:2000],
-            "assumptions": (
-                f"Synthesized from {len(relevant_rows)} relevant transcript rows"
-                f" for family '{family.get('title', '')}'"
-            ),
-            "provider_id": "builtin",
-            "model_id": "heuristic-v1",
-            "prompt_version": "1",
-            "fresh_until": fresh_until,
-            "confidence": min(0.9, 0.4 + 0.05 * len(relevant_rows)),
-            "estimated_tokens": len(combined_content.split()),
-        }
+        duplicate = _equivalent_learned_context(store, proposal)
+        if duplicate:
+            family_results.append({
+                "family_id": family.get("family_id", ""),
+                "title": family.get("title", ""),
+                "matched_rows": len(relevant_rows),
+                "best_score": round(best_overlap, 3),
+                "drop_reason": "equivalent-active-learned-context",
+                "existing_record_id": duplicate,
+            })
+            drop_reasons.append("equivalent-active-learned-context")
+            continue
+        proposal["proposal_id"] = stable_id("proposal", now, proposal.get("summary", ""))
         proposals.append(proposal)
+        family_results.append({
+            "family_id": family.get("family_id", ""),
+            "title": family.get("title", ""),
+            "matched_rows": len(relevant_rows),
+            "best_score": round(best_overlap, 3),
+            "proposal_id": proposal["proposal_id"],
+        })
 
+    if not proposals and gathered_rows and len(proposals) < max_proposals:
+        fallback_family = {
+            "family_id": "recent-project-activity",
+            "title": "Recent project activity",
+            "description": "Bounded fallback when specific query-family matching yields no proposal",
+            "freshness_window_hours": 168,
+        }
+        fallback_rows = gathered_rows[-min(len(gathered_rows), 8):]
+        proposal = _proposal_from_rows(
+            workspace_id,
+            family=fallback_family,
+            relevant_rows=fallback_rows,
+            now=now,
+        )
+        if proposal:
+            duplicate = _equivalent_learned_context(store, proposal)
+            if duplicate:
+                drop_reasons.append("equivalent-active-learned-context")
+                family_results.append({
+                    "family_id": fallback_family["family_id"],
+                    "title": fallback_family["title"],
+                    "matched_rows": len(fallback_rows),
+                    "drop_reason": "equivalent-active-learned-context",
+                    "existing_record_id": duplicate,
+                })
+            else:
+                proposal["proposal_id"] = stable_id("proposal", now, proposal.get("summary", ""))
+                proposals.append(proposal)
+                family_results.append({
+                    "family_id": fallback_family["family_id"],
+                    "title": fallback_family["title"],
+                    "matched_rows": len(fallback_rows),
+                    "proposal_id": proposal["proposal_id"],
+                    "fallback": True,
+                })
+                if trace is not None:
+                    trace["fallback_reason"] = "no-family-proposal"
+        elif trace is not None:
+            trace["fallback_reason"] = "recent-project-activity-empty-summary"
+
+    if trace is not None:
+        trace["family_results"] = family_results
+        trace["drop_reasons"] = sorted(set(drop_reasons))
     return proposals
+
+
+def _proposal_from_rows(
+    workspace_id: str,
+    *,
+    family: dict[str, Any],
+    relevant_rows: list[dict[str, Any]],
+    now: str,
+) -> dict[str, Any] | None:
+    content_parts = [str(r.get("text") or r.get("message") or "") for r in relevant_rows[:10]]
+    combined_content = " ".join(part for part in content_parts if part.strip())
+    summary = _extract_summary(combined_content, family)
+    if not summary:
+        return None
+    freshness_hours = family.get("freshness_window_hours", 168)
+    fresh_until = to_iso(parse_timestamp(now) + timedelta(hours=freshness_hours))
+    event_ids: list[str] = []
+    for row in relevant_rows:
+        eid = row.get("event_id") or row.get("id", "")
+        if eid:
+            event_ids.append(str(eid))
+    return {
+        "workspace_id": workspace_id,
+        "source_event_ids": event_ids[:20],
+        "source_episode_ids": [],
+        "source_trace_ids": [],
+        "query_family_tags": [family.get("family_id", "")],
+        "summary": summary,
+        "details": combined_content[:2000],
+        "assumptions": (
+            f"Synthesized from {len(relevant_rows)} relevant transcript rows"
+            f" for family '{family.get('title', '')}'"
+        ),
+        "provider_id": "builtin",
+        "model_id": "heuristic-v1",
+        "prompt_version": "1",
+        "fresh_until": fresh_until,
+        "confidence": min(0.9, 0.4 + 0.05 * len(relevant_rows)),
+        "estimated_tokens": len(combined_content.split()),
+    }
+
+
+def _equivalent_learned_context(store: MemoryStore, proposal: dict[str, Any]) -> str | None:
+    proposal_tokens = semantic_tokens(f"{proposal.get('summary', '')} {proposal.get('details', '')}")
+    proposal_sources = {str(item) for item in proposal.get("source_event_ids", [])}
+    if not proposal_tokens:
+        return None
+    for record in store.load_learned_context_records():
+        if record.get("status") != "active":
+            continue
+        record_tokens = semantic_tokens(f"{record.get('summary', '')} {record.get('details', '')}")
+        if not record_tokens:
+            continue
+        overlap = len(proposal_tokens & record_tokens) / max(1, len(proposal_tokens | record_tokens))
+        record_sources = {str(item) for item in record.get("source_event_ids", [])}
+        if overlap >= 0.86 or (proposal_sources and proposal_sources == record_sources):
+            return str(record.get("record_id") or "")
+    return None
+
+
+def _verification_trace(results: list[dict[str, Any]]) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    compact: list[dict[str, Any]] = []
+    for result in results:
+        verdict = str(result.get("combined_verdict") or "unknown")
+        counts[verdict] = counts.get(verdict, 0) + 1
+        compact.append({
+            "run_id": result.get("run_id"),
+            "verdict": verdict,
+            "proposal_summary": result.get("proposal_summary", ""),
+            "failed_checks": [
+                finding.get("check")
+                for verifier in result.get("verifier_results", [])
+                if isinstance(verifier, dict)
+                for finding in verifier.get("findings", [])
+                if isinstance(finding, dict) and finding.get("status") == "fail"
+            ],
+        })
+    return {"verdict_counts": counts, "results": compact}
+
+
+def _no_materialization_reason(
+    *,
+    gathered_rows: list[dict[str, Any]],
+    proposals: list[dict[str, Any]],
+    verification_results: list[dict[str, Any]],
+    synthesis_trace: dict[str, Any],
+) -> str:
+    if not gathered_rows:
+        return "gather_recent_signal:no-signal-rows"
+    if not proposals:
+        fallback_reason = str(synthesis_trace.get("fallback_reason") or "")
+        drops = synthesis_trace.get("drop_reasons") or []
+        if fallback_reason:
+            return f"synthesize:{fallback_reason}"
+        if drops:
+            return "synthesize:" + ",".join(str(item) for item in drops)
+        return "synthesize:no-proposals"
+    if verification_results and all(r.get("combined_verdict") == "reject" for r in verification_results):
+        return "verify:all-proposals-rejected"
+    return ""
 
 
 def _extract_summary(content: str, family: dict[str, Any]) -> str:

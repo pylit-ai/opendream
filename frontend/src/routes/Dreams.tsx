@@ -163,6 +163,22 @@ function noopLabel(r: DreamCycle): string {
   return 'No memory changes, staged events, failures, drift, or phase anomalies.';
 }
 
+function traceNoMaterializationReason(r: DreamCycle): string | undefined {
+  const trace = r.trace_summary;
+  if (!trace) return undefined;
+  const created = trace.learned_context_created ?? funnelValue(r, 'created');
+  if (created > 0) return undefined;
+  return trace.no_materialization_reason || r.reason || undefined;
+}
+
+function verifierSummary(r: DreamCycle): string {
+  const verdicts = r.trace_summary?.verifier_verdicts ?? {};
+  const parts = Object.entries(verdicts)
+    .filter(([, value]) => typeof value === 'number' && value > 0)
+    .map(([key, value]) => `${key} ${value}`);
+  return parts.length > 0 ? parts.join(' · ') : '—';
+}
+
 function rowAccentClass(r: DreamCycle): string | undefined {
   const cp = r.change_point;
   if (!cp) {
@@ -1096,6 +1112,29 @@ function CompactStat(props: {
   );
 }
 
+function TraceRow(props: { label: string; value: string | number | boolean | undefined | null; tone?: 'ok' | 'warn' | 'danger' }): JSX.Element {
+  const display = (): string => {
+    const v = props.value;
+    if (v === undefined || v === null || v === '') return '—';
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    return String(v);
+  };
+  const tone =
+    props.tone === 'ok'
+      ? 'text-success'
+      : props.tone === 'warn'
+        ? 'text-warn'
+        : props.tone === 'danger'
+          ? 'text-danger'
+          : 'text-text';
+  return (
+    <div class="flex items-baseline justify-between gap-3 border-b border-border-subtle/40 py-1 last:border-b-0">
+      <span class="text-text-subtle">{props.label}</span>
+      <span class={`min-w-0 break-words text-right font-mono text-[11px] ${tone}`}>{display()}</span>
+    </div>
+  );
+}
+
 interface DreamSummary {
   cost_usd?: number;
   duration_ms?: number;
@@ -1258,6 +1297,42 @@ function DreamDetail(props: { run: DreamCycle; onOpenRun: (id: string) => void }
           <FunnelRow label="Learned context superseded" value={summaryDict().learned_context_superseded} />
         </div>
       </section>
+
+      <Show when={props.run.trace_summary}>
+        {(trace) => (
+          <section class="flex flex-col gap-1.5">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <h4 class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">Dream trace</h4>
+              <Chip variant={trace().input_consumed ? 'ok' : 'neutral'}>
+                input {trace().input_consumed ? 'consumed' : 'idle'}
+              </Chip>
+              <Show when={traceNoMaterializationReason(props.run)}>
+                {(reason) => <Chip variant="warn">{reason()}</Chip>}
+              </Show>
+            </div>
+            <div class="flex flex-col rounded-md hairline bg-surface p-2.5 text-[12px]">
+              <TraceRow label="Rows scanned" value={trace().rows_scanned} />
+              <TraceRow label="Rows gathered" value={trace().rows_gathered} />
+              <TraceRow label="Families selected" value={`${trace().families_selected ?? 0}/${trace().families_considered ?? 0}`} />
+              <TraceRow label="Proposals" value={trace().proposals_generated} />
+              <TraceRow label="Verifier" value={verifierSummary(props.run)} />
+              <TraceRow label="Learned records" value={trace().learned_context_created} tone={trace().learned_context_created ? 'ok' : undefined} />
+              <TraceRow label="Retention" value={trace().retention_status} />
+              <TraceRow label="Fallback" value={trace().fallback_reason} />
+            </div>
+            <Show when={(trace().drop_reasons ?? []).length > 0 || (trace().promoted_record_ids ?? []).length > 0}>
+              <div class="flex flex-wrap gap-1">
+                <For each={(trace().drop_reasons ?? []).slice(0, 4)}>
+                  {(reason) => <Chip variant="neutral">{reason}</Chip>}
+                </For>
+                <For each={(trace().promoted_record_ids ?? []).slice(0, 3)}>
+                  {(id) => <Chip variant="ok">{shortId(id)}</Chip>}
+                </For>
+              </div>
+            </Show>
+          </section>
+        )}
+      </Show>
 
       <Show when={summaryDict().latest_signal_source || summaryDict().latest_signal_timestamp}>
         <section class="flex flex-col gap-1">

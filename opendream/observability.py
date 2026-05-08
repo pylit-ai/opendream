@@ -1111,6 +1111,7 @@ def _build_dream_cycle_projection(run: dict[str, Any], *, include_detail: bool) 
         "phase_durations": phase_durations,
         "phase_traces": phase_traces if include_detail else [],
         "phases": summary.get("phases") or [trace.get("phase") for trace in phase_traces],
+        "trace_summary": _semantic_trace_summary(summary),
         "narrative": narrative,
         "reporting_agent_label": run.get("reporting_agent_label"),
         "warnings": run.get("warnings", []),
@@ -1196,6 +1197,74 @@ def _dream_funnel_counts(summary: dict[str, Any]) -> dict[str, int]:
         "generated": generated,
         "approved": approved,
         "created": created,
+    }
+
+
+def _semantic_trace_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    trace = summary.get("semantic_trace")
+    if not isinstance(trace, dict):
+        return {
+            "input_consumed": bool(summary.get("latest_signal_source")),
+            "signal_source": summary.get("latest_signal_source"),
+            "latest_signal_timestamp": summary.get("latest_signal_timestamp"),
+            "rows_scanned": _int(summary.get("signal_row_count") or summary.get("gathered_rows")),
+            "families_selected": _int(summary.get("query_families_selected")),
+            "proposals_generated": _int(summary.get("proposals_generated")),
+            "verifier_verdicts": {},
+            "learned_context_created": _int(summary.get("learned_context_created")),
+            "no_materialization_reason": summary.get("no_materialization_reason") or summary.get("reason") or "",
+        }
+    signal = trace.get("signal") if isinstance(trace.get("signal"), dict) else {}
+    planner = trace.get("planner") if isinstance(trace.get("planner"), dict) else {}
+    synthesis = trace.get("synthesis") if isinstance(trace.get("synthesis"), dict) else {}
+    verification = trace.get("verification") if isinstance(trace.get("verification"), dict) else {}
+    materialization = trace.get("materialization") if isinstance(trace.get("materialization"), dict) else {}
+    family_results = synthesis.get("family_results") if isinstance(synthesis.get("family_results"), list) else []
+    rows_gathered = _int(signal.get("rows_gathered") or signal.get("rows_scanned"))
+    selected_family_ids = (
+        planner.get("selected_family_ids")
+        if isinstance(planner.get("selected_family_ids"), list)
+        else []
+    )
+    return {
+        "input_consumed": bool(signal.get("source") and rows_gathered > 0),
+        "signal_source": signal.get("source"),
+        "latest_signal_timestamp": signal.get("latest_timestamp"),
+        "rows_scanned": _int(signal.get("rows_scanned")),
+        "rows_gathered": _int(signal.get("rows_gathered")),
+        "families_considered": _int(planner.get("families_considered")),
+        "families_selected": _int(planner.get("families_selected")),
+        "selected_family_ids": selected_family_ids,
+        "family_result_count": len(family_results),
+        "drop_reasons": (
+            synthesis.get("drop_reasons")
+            if isinstance(synthesis.get("drop_reasons"), list)
+            else []
+        ),
+        "fallback_reason": synthesis.get("fallback_reason") or "",
+        "proposal_ids": (
+            synthesis.get("proposal_ids")
+            if isinstance(synthesis.get("proposal_ids"), list)
+            else []
+        ),
+        "proposals_generated": _int(synthesis.get("proposal_count") or summary.get("proposals_generated")),
+        "verifier_verdicts": (
+            verification.get("verdict_counts")
+            if isinstance(verification.get("verdict_counts"), dict)
+            else {}
+        ),
+        "learned_context_created": _int(materialization.get("created_count") or summary.get("learned_context_created")),
+        "promoted_record_ids": (
+            materialization.get("promoted_record_ids")
+            if isinstance(materialization.get("promoted_record_ids"), list)
+            else []
+        ),
+        "retention_status": materialization.get("retention_status") or "",
+        "no_materialization_reason": (
+            materialization.get("no_materialization_reason")
+            or summary.get("no_materialization_reason")
+            or ""
+        ),
     }
 
 

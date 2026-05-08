@@ -424,6 +424,35 @@ class ObservabilityIntegrationTests(unittest.TestCase):
                     "learned_context_created": 1,
                     "signal_row_count": 8,
                     "latest_signal_source": "explicit_events",
+                    "semantic_trace": {
+                        "signal": {
+                            "source": "explicit_events",
+                            "latest_timestamp": FIXED_NOW,
+                            "rows_scanned": 8,
+                            "rows_gathered": 8,
+                        },
+                        "planner": {
+                            "families_considered": 5,
+                            "families_selected": 3,
+                            "selected_family_ids": ["what-failed", "command-sequences"],
+                        },
+                        "synthesis": {
+                            "proposal_count": 2,
+                            "proposal_ids": ["proposal-1", "proposal-2"],
+                            "drop_reasons": ["no-row-family-token-overlap"],
+                            "fallback_reason": "",
+                        },
+                        "verification": {
+                            "verdict_counts": {"approve": 1, "reject": 1},
+                            "results": [],
+                        },
+                        "materialization": {
+                            "created_count": 1,
+                            "promoted_record_ids": ["lc-viz"],
+                            "retention_status": "active",
+                            "no_materialization_reason": "",
+                        },
+                    },
                     "narrative": (
                         "Hybrid dream reviewed 2 proposal(s), approved 1, "
                         "created 1 learned-context record(s), and rejected 1."
@@ -438,6 +467,11 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         row = next(item for item in cycles["items"] if item["run_id"] == "semantic-dream-viz")
         self.assertEqual(row["funnel"]["generated"], 2)
         self.assertIn("narrative", row)
+        self.assertEqual(row["trace_summary"]["rows_scanned"], 8)
+        self.assertEqual(row["trace_summary"]["families_selected"], 3)
+        self.assertEqual(row["trace_summary"]["verifier_verdicts"]["approve"], 1)
+        self.assertEqual(row["trace_summary"]["learned_context_created"], 1)
+        self.assertNotIn("semantic_trace", row)
         self.assertEqual(row["change_point"]["kind"], "material")
         self.assertGreaterEqual(row["change_point"]["score"], 80)
         self.assertNotIn("diff_text", row)
@@ -446,6 +480,7 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertEqual(detail["phase_durations"]["orient"], 10)
         self.assertEqual(detail["change_point"], row["change_point"])
         self.assertIn("summary", detail)
+        self.assertIn("semantic_trace", detail["summary"])
 
         funnel = self.get_json("/api/dream/funnel?window=9999d")
         self.assertGreaterEqual(funnel["funnel"]["created"], 1)

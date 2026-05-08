@@ -445,6 +445,7 @@ export interface DreamCycle {
   phase_durations: Record<string, number>;
   phase_traces?: DreamPhaseTrace[];
   phases?: string[];
+  trace_summary?: DreamTraceSummary;
   narrative: string;
   reporting_agent_label?: string;
   warnings?: string[];
@@ -455,6 +456,28 @@ export interface DreamCycle {
   proposals_approved?: number;
   proposals_rejected?: number;
   change_point?: DreamChangePoint;
+  [key: string]: unknown;
+}
+
+export interface DreamTraceSummary {
+  input_consumed?: boolean;
+  signal_source?: string;
+  latest_signal_timestamp?: string;
+  rows_scanned?: number;
+  rows_gathered?: number;
+  families_considered?: number;
+  families_selected?: number;
+  selected_family_ids?: string[];
+  family_result_count?: number;
+  drop_reasons?: string[];
+  fallback_reason?: string;
+  proposal_ids?: string[];
+  proposals_generated?: number;
+  verifier_verdicts?: Record<string, number>;
+  learned_context_created?: number;
+  promoted_record_ids?: string[];
+  retention_status?: string;
+  no_materialization_reason?: string;
   [key: string]: unknown;
 }
 

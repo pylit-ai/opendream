@@ -651,6 +651,63 @@ class TestSemanticStatus(unittest.TestCase):
         self.assertGreaterEqual(result["learned_context_created"], 1)
         self.assertGreaterEqual(len(self.store.load_learned_context_records()), 1)
         self.assertGreaterEqual(len(self.store.load_query_families()), 1)
+        trace = result["semantic_trace"]
+        self.assertEqual(trace["signal"]["source"], "explicit_events")
+        self.assertEqual(trace["signal"]["rows_scanned"], 2)
+        self.assertGreaterEqual(trace["synthesis"]["proposal_count"], 1)
+        self.assertGreaterEqual(trace["verification"]["verdict_counts"]["approve"], 1)
+        self.assertGreaterEqual(len(trace["materialization"]["promoted_record_ids"]), 1)
+        self.assertEqual(result["no_materialization_reason"], "")
+
+        repeated = semantic_dream_run(
+            self.store,
+            episode_paths=[],
+            mode="semantic",
+            now="2026-03-31T12:10:00Z",
+        )
+
+        self.assertEqual(repeated["status"], "completed")
+        self.assertEqual(repeated["learned_context_created"], 0)
+        self.assertIn("equivalent-active-learned-context", repeated["no_materialization_reason"])
+        self.assertEqual(len(self.store.load_learned_context_records()), 1)
+
+    def test_semantic_dream_run_explains_no_signal_noop_phase(self) -> None:
+        from opendream.semantic_dreamer import semantic_dream_run
+
+        self.store.save_semantic_config(
+            {
+                **self.store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "direct-provider",
+                "active_adapter": None,
+                "candidate_strategies": ["direct-provider", "deterministic"],
+                "preferred_auth_mode": "direct-provider",
+            }
+        )
+        self.store.save_provider_registry(
+            [
+                {
+                    "provider_id": "openai-primary",
+                    "transport": "openai",
+                    "model_id": "gpt-5.4",
+                    "roles": ["synthesis", "verification"],
+                    "health_status": "healthy",
+                }
+            ]
+        )
+
+        result = semantic_dream_run(
+            self.store,
+            episode_paths=[],
+            mode="semantic",
+            now=FIXED_NOW,
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["learned_context_created"], 0)
+        self.assertEqual(result["no_materialization_reason"], "gather_recent_signal:no-signal-rows")
+        self.assertEqual(result["semantic_trace"]["signal"]["rows_gathered"], 0)
+        self.assertEqual(result["semantic_trace"]["materialization"]["retention_status"], "no-new-records")
 
 
 class TestSecurityPolicy(unittest.TestCase):
