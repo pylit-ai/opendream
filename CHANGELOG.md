@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 - 2026-05-08
+
+- Rename Showcase to Insights and make the page useful for live workspaces without a demo report.
+- Add a fast Settings payload plus learned-context retention controls for calendar days and activity-based context assemblies.
+- Preserve cold Observe performance by serving list endpoints from a compact observability index.
+- Show human-readable session and context names across list and timeline views.
+- Make memory change review default to context changes while keeping dream-cycle deltas behind a toggle.
+
 ## 440 — Advanced memory platform release bundle
 
 - OpenDream positions as a cross-runtime, verified memory control plane
