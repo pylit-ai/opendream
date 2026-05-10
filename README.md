@@ -7,7 +7,7 @@
 
 **Local-first memory for coding agents** — activate OpenDream inside the repo you already use, let supported agent surfaces capture context locally, and keep the advanced runtime machinery available when you need it.
 
-![OpenDream CLI quick start](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/01-first-run-local-memory.gif)
+![OpenDream CLI quick start](./docs/assets/demos/01-first-run-local-memory.gif)
 
 | If you want to… | Start here |
 |-----------------|------------|
@@ -42,9 +42,9 @@ OpenDream's first-run path is intentionally small. These clips show the next dec
 
 | Demo | What it shows |
 |------|---------------|
-| ![Agent context retrieval](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/02-agent-context-retrieval.gif) | `prepare-context` turns durable repo memory into prompt-ready agent context. |
-| ![Memory safety abstention](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/03-memory-safety-abstention.gif) | Unrelated prompts return an explicit no-match instead of injecting stale or irrelevant memory. |
-| ![Showcase evaluation proof](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
+| ![Agent context retrieval](./docs/assets/demos/02-agent-context-retrieval.gif) | `prepare-context` turns durable repo memory into prompt-ready agent context. |
+| ![Memory safety abstention](./docs/assets/demos/03-memory-safety-abstention.gif) | Unrelated prompts return an explicit no-match instead of injecting stale or irrelevant memory. |
+| ![Showcase evaluation proof](./docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
 
 Full demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
 
