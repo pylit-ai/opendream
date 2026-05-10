@@ -7,6 +7,8 @@
 
 **Local-first memory for coding agents** — activate OpenDream inside the repo you already use, let supported agent surfaces capture context locally, and keep the advanced runtime machinery available when you need it.
 
+![OpenDream CLI quick start](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/01-first-run-local-memory.gif)
+
 | If you want to… | Start here |
 |-----------------|------------|
 | Try it in a few commands | [Quick start](#quick-start) |
@@ -32,6 +34,21 @@ opendream deactivate --workspace "$PWD"
 Bleeding-edge from Git (overwrites the tool env): `uv tool install --force "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
 
 Launch, upgrade, and release-gate details live in [`docs/launch-readiness.md`](./docs/launch-readiness.md).
+
+<details>
+<summary><strong>More short CLI demos</strong></summary>
+
+OpenDream's first-run path is intentionally small. These clips show the next decisions without making the README front-load every advanced feature.
+
+| Demo | What it shows |
+|------|---------------|
+| ![Agent context retrieval](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/02-agent-context-retrieval.gif) | `prepare-context` turns durable repo memory into prompt-ready agent context. |
+| ![Memory safety abstention](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/03-memory-safety-abstention.gif) | Unrelated prompts return an explicit no-match instead of injecting stale or irrelevant memory. |
+| ![Showcase evaluation proof](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
+
+Full demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
+
+</details>
 
 <details>
 <summary><strong>Install options</strong> (venv, editable checkout, PEP 668)</summary>
@@ -410,6 +427,7 @@ Activation and compressed-status metadata (for the standard `init --activate-con
 | [PRD.md](./PRD.md) | Requirements |
 | [CONSTITUTION.md](./CONSTITUTION.md) | Governance |
 | [AGENTS.md](./AGENTS.md) | AI assistant / agent conventions |
+| [docs/showcase/cli-demos.md](./docs/showcase/cli-demos.md) | Short recorded CLI demos for onboarding, agent context, safety, evals, observability, contracts, and automation |
 
 ---
 

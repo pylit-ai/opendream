@@ -2,6 +2,8 @@
 
 Short reference for tools that drive the CLI (hooks, IDE agents, scripts).
 
+![OpenDream agent context retrieval](./assets/demos/02-agent-context-retrieval.gif)
+
 ## Workspace and working directory
 
 - Pass **`--workspace`** explicitly; it must be the **repository root** (or the root you initialized).
@@ -82,6 +84,8 @@ If the repo uses automations:
 - **`opendream automation tick --workspace "$WORKSPACE"`** runs only due automation jobs.
 
 ## Empty context is not always a failure
+
+![OpenDream memory safety abstention](./assets/demos/03-memory-safety-abstention.gif)
 
 `prepare-context` JSON:
 

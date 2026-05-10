@@ -2,6 +2,8 @@
 
 Single place for **ordered CLI sequences**: feature mining + automation radar, transcript **dream** in hybrid/semantic mode, and **where a real LLM is involved** vs deterministic OpenDream code.
 
+![OpenDream automation radar scaffold](../assets/demos/07-automation-radar.gif)
+
 **Prerequisites:** [Dream task playbook](dream-task-playbook.md) (layers A/B/C). **Deeper detail:** [semantic-mode-and-feature-radar-setup.md](semantic-mode-and-feature-radar-setup.md) (config file shapes), [examples/feature-mining.md](examples/feature-mining.md) (job JSON and event kinds).
 
 ---
