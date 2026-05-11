@@ -2,6 +2,8 @@
 
 This walkthrough creates a disposable, synthetic coding-agent history and then demonstrates the full memory loop on the next task: objective → prompt context → selected memories → source evidence → dream/maintenance effects. It is meant for first-run demos, skeptical evaluation, and release checks.
 
+![OpenDream memory showcase eval](../assets/demos/04-eval-proof.gif)
+
 ## 90-second path
 
 ```bash

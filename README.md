@@ -7,6 +7,8 @@
 
 **Local-first memory for coding agents** — activate OpenDream inside the repo you already use, let supported agent surfaces capture context locally, and keep the advanced runtime machinery available when you need it.
 
+![OpenDream CLI quick start](./docs/assets/demos/01-first-run-local-memory.gif)
+
 | If you want to… | Start here |
 |-----------------|------------|
 | Try it in a few commands | [Quick start](#quick-start) |
@@ -35,6 +37,21 @@ Launch, upgrade, release-gate details, known limitations, and clean-room
 provenance live in [`docs/launch-readiness.md`](./docs/launch-readiness.md),
 [`KNOWN_LIMITATIONS.md`](./KNOWN_LIMITATIONS.md), and
 [`CLEAN_ROOM.md`](./CLEAN_ROOM.md).
+
+<details>
+<summary><strong>More short CLI demos</strong></summary>
+
+OpenDream's first-run path is intentionally small. These clips show the next decisions without making the README front-load every advanced feature.
+
+| Demo | What it shows |
+|------|---------------|
+| ![Agent context retrieval](./docs/assets/demos/02-agent-context-retrieval.gif) | `prepare-context` turns durable repo memory into prompt-ready agent context. |
+| ![Memory safety abstention](./docs/assets/demos/03-memory-safety-abstention.gif) | Unrelated prompts return an explicit no-match instead of injecting stale or irrelevant memory. |
+| ![Showcase evaluation proof](./docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
+
+Full demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
+
+</details>
 
 <details>
 <summary><strong>Install options</strong> (venv, editable checkout, PEP 668)</summary>
@@ -417,6 +434,7 @@ Activation and compressed-status metadata (for the standard `init --activate-con
 | [docs/claims.md](./docs/claims.md) | Evidence-backed claims matrix |
 | [CLEAN_ROOM.md](./CLEAN_ROOM.md) | Provenance and no-reuse policy |
 | [docs/technical-notes/dreaming-memory-change-control.md](./docs/technical-notes/dreaming-memory-change-control.md) | Dreaming memory change control |
+| [docs/showcase/cli-demos.md](./docs/showcase/cli-demos.md) | Short recorded CLI demos for onboarding, agent context, safety, evals, observability, contracts, and automation |
 
 OpenDream does not send telemetry by default. Provider/API-key paths are
 operator-configured execution paths and are separate from analytics or tracking.
