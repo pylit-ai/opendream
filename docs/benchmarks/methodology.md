@@ -12,7 +12,7 @@ OpenDream's performance benchmark is a fixture-driven composite evaluation that 
 | Retrieval precision | 15% | Whether expected records appear in top-5 retrieval results for labeled queries. |
 | Expected-answer coverage | 15% | Whether retrieved memories cover the fixture's expected answer terms, not only the expected title. |
 | Latency | 10% | Consolidation time. Penalizes runs exceeding 1 second. |
-| Concurrency safety | 15% | Structural guarantee via single-writer file lock. Tested separately. |
+| Concurrency safety | 15% | Structural protection via single-writer file lock. Tested separately. |
 | Contradiction handling | 10% | Whether contradictory events produce contested or superseded records rather than silent overwrite. |
 | Procedural reuse / workflow memory | 10% | Whether required workflow memories are active procedural records with extracted workflow steps. |
 | Gating accuracy | 10% | Whether short/noise queries are correctly gated (skipped) rather than retrieving irrelevant memories. |

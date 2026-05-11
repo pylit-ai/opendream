@@ -454,7 +454,7 @@ def run_performance_eval(
     retrieval_score = round(retrieval_precision * 100, 1)
     expected_answer_score = round(expected_answer_coverage * 100, 1)
     latency_score = round(min(100, max(0, 100 - maintain_ms / 10)), 1)  # penalize >1s
-    concurrency_score = 100.0  # tested separately; structural guarantee
+    concurrency_score = 100.0  # tested separately; structural protection
     contradiction_score = 100.0 if contradiction_resolved else 0.0
     procedural_score = round(workflow_memory_raw * 100, 1)
     gating_score = round(gating_accuracy * 100, 1)
@@ -717,8 +717,8 @@ def run_advanced_runtime_report(
 ) -> dict[str, Any]:
     """Generate the advanced-runtime report combining excellence, execution modes, and docs truthfulness.
 
-    This report proves that memory-excellence guarantees hold across
-    supported execution modes, and that docs match runtime state.
+    This report checks memory-excellence evidence across supported execution
+    modes, and that docs match runtime state.
     """
     from .models import AdvancedRuntimeReport
     from .semantic_setup import EXECUTION_STRATEGIES

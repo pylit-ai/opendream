@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT_ROOT = REPO_ROOT / ".tmp" / "release-check"
 LOCK_PATH = ARTIFACT_ROOT / "release-check.lock"
 SEMANTIC_RELEASE_PROOF_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "semantic_release_proof.json"
+RELEASE_EVIDENCE_SCHEMA = REPO_ROOT / "opendream" / "schema" / "release-evidence.schema.json"
 
 
 def run_stage(name: str, command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, Any]:
@@ -62,6 +63,34 @@ def tasks_complete(spec_ids: list[str]) -> dict[str, Any]:
         if "- [ ]" in text:
             incomplete.append(spec_id)
     return {"name": "spec-blockers", "status": "PASS" if not incomplete else "FAIL", "incomplete_specs": incomplete}
+
+
+def validate_release_manifest_shape(manifest: dict[str, Any]) -> dict[str, Any]:
+    schema = json.loads(RELEASE_EVIDENCE_SCHEMA.read_text(encoding="utf-8"))
+    required = [str(item) for item in schema.get("required", [])]
+    missing = [key for key in required if key not in manifest]
+    stage_problems: list[str] = []
+    stages = manifest.get("stages")
+    if not isinstance(stages, list) or not stages:
+        stage_problems.append("stages must be a non-empty list")
+    else:
+        for index, stage in enumerate(stages):
+            if not isinstance(stage, dict):
+                stage_problems.append(f"stage {index} is not an object")
+                continue
+            if "name" not in stage and "stage" not in stage:
+                stage_problems.append(f"stage {index} missing name")
+            if stage.get("status") not in {"PASS", "FAIL"}:
+                stage_problems.append(f"stage {index} has invalid status")
+    status = "PASS" if not missing and not stage_problems else "FAIL"
+    return {
+        "name": "release-evidence-schema",
+        "status": status,
+        "schema_path": str(RELEASE_EVIDENCE_SCHEMA.relative_to(REPO_ROOT)),
+        "required_keys": required,
+        "missing_keys": missing,
+        "stage_problems": stage_problems,
+    }
 
 
 def preferred_release_blockers() -> list[str]:
@@ -208,6 +237,22 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
             run_stage(
                 "public-artifacts",
                 [sys.executable, "scripts/check_public_artifacts.py"],
+                cwd=REPO_ROOT,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "vendor-assets",
+                [sys.executable, "scripts/check_vendor_assets.py"],
+                cwd=REPO_ROOT,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
+                "provenance-risk",
+                [sys.executable, "scripts/check_provenance_risk.py"],
                 cwd=REPO_ROOT,
                 timeout_seconds=timeout_seconds,
             )
@@ -522,7 +567,6 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
         built_artifacts = sorted(dist_dir.glob("*"))
         artifact_hashes = {path.name: sha256_path(path) for path in built_artifacts}
 
-    overall_verdict = "PASS" if all(stage["status"] == "PASS" for stage in stages) else "FAIL"
     git_sha = (
         subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -534,16 +578,23 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
         or "unknown"
     )
     manifest = {
+        "schema_version": 1,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "git_sha": git_sha,
         "python": sys.version,
         "platform": platform.platform(),
         "timeout_seconds": timeout_seconds,
-        "verdict": overall_verdict,
+        "verdict": "FAIL",
         "stages": stages,
         "artifact_hashes": artifact_hashes,
         "performance_scorecard": perf_scorecard,
     }
+    schema_stage = validate_release_manifest_shape(manifest)
+    manifest["schema_validation"] = {
+        key: value for key, value in schema_stage.items() if key not in {"name"}
+    }
+    stages.append(schema_stage)
+    manifest["verdict"] = "PASS" if all(stage["status"] == "PASS" for stage in stages) else "FAIL"
     return manifest
 
 
@@ -574,6 +625,7 @@ def main() -> int:
             manifest = release_manifest(args.timeout_seconds)
     except LockError:
         manifest = {
+            "schema_version": 1,
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "git_sha": "unknown",
             "python": sys.version,

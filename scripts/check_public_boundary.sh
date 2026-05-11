@@ -21,7 +21,7 @@ if [ "${STRICT_LOCAL:-0}" = "1" ]; then
   strict_local=1
 fi
 
-blocked_paths='^(CLAUDE\.md|GEMINI\.md|CODEX\.md|AGENTS\.local\.md|CLAUDE\.local\.md|GEMINI\.local\.md|metactl\.yaml|metactl\.lock\.json|\.claudeignore|\.codexignore|\.cursorignore|\.geminiignore|\.mcp\.json|opencode\.json|\.metactl/|\.agents/|\.codex/|\.claude/|\.cursor/|\.gemini/|(.*/)?\.omc/|(.*/)?\.opendream/|\.ruler/|\.aider/|\.windsurf/|\.superpowers/|(.*/)?memory/|(.*/)?notepads/|(.*/)?scratch/|\.tmp/|tmp/|frontend/node_modules/|node_modules/|\.mypy_cache/|\.pytest_cache/|\.ruff_cache/|htmlcov/|\.coverage|skills/|Modelfile\.|.*\.code-workspace$|.*\.zip$)'
+blocked_paths='^(CLAUDE\.md|GEMINI\.md|CODEX\.md|AGENTS\.local\.md|CLAUDE\.local\.md|GEMINI\.local\.md|metactl\.yaml|metactl\.lock\.json|\.claudeignore|\.codexignore|\.cursorignore|\.geminiignore|\.mcp\.json|opencode\.json|\.metactl/|\.agents/|\.codex/|\.codex-goal/|\.claude/|\.cursor/|\.gemini/|(.*/)?\.omc/|(.*/)?\.opendream/|\.ruler/|\.aider/|\.windsurf/|\.superpowers/|docs/superpowers/|(.*/)?memory/|(.*/)?notepads/|(.*/)?scratch/|\.tmp/|tmp/|frontend/node_modules/|node_modules/|\.mypy_cache/|\.pytest_cache|\.ruff_cache/|htmlcov/|\.coverage|skills/|Modelfile\.|.*\.code-workspace$|.*\.zip$)'
 allowed_agent_docs='^(AGENTS\.md|opendream/AGENTS\.md|openspec/AGENTS\.md|tests/AGENTS\.md|\.meta/spec-adapters/AGENTS\.md)$'
 agent_doc_paths='(^|/)(AGENTS|CLAUDE|GEMINI|CODEX)\.md$'
 
@@ -31,7 +31,15 @@ blocked_hits="$(mktemp)"
 agent_doc_hits="$(mktemp)"
 content_hits="$(mktemp)"
 content_filtered="$(mktemp)"
-trap 'rm -f "$tracked_or_new" "$existing_paths" "$blocked_hits" "$agent_doc_hits" "$content_hits" "$content_filtered"' EXIT
+tracked_codex_goal="$(mktemp)"
+trap 'rm -f "$tracked_or_new" "$existing_paths" "$blocked_hits" "$agent_doc_hits" "$content_hits" "$content_filtered" "$tracked_codex_goal"' EXIT
+
+git ls-files --cached -- .codex-goal >"$tracked_codex_goal"
+if [ -s "$tracked_codex_goal" ]; then
+  echo "Public repo tracks or stages local launch metadata:"
+  cat "$tracked_codex_goal"
+  exit 1
+fi
 
 {
   git ls-files
@@ -39,7 +47,7 @@ trap 'rm -f "$tracked_or_new" "$existing_paths" "$blocked_hits" "$agent_doc_hits
   if [ "$strict_local" = "1" ]; then
     git ls-files --others --ignored --exclude-standard
   fi
-} | sort -u >"$tracked_or_new"
+} | grep -Ev '^\.codex-goal(/|$)' | sort -u >"$tracked_or_new"
 
 while IFS= read -r path; do
   [ -e "$path" ] && printf '%s\n' "$path"
@@ -59,10 +67,10 @@ if [ -s "$agent_doc_hits" ]; then
   exit 1
 fi
 
-content_markers='/Users/[[:alnum:]_.-]+|/home/[[:alnum:]_.-]+|[A-Za-z]:\\Users\\|opendream-private|archived-public-agent-artifacts|customer/provider-specific|provider-specific private|internal URL'
+content_markers='/Users/[[:alnum:]_.-]+|/home/[[:alnum:]_.-]+|[A-Za-z]:\\Users\\|opendream-private|archived-public-agent-artifacts|customer/provider-specific|provider-specific private:|internal URL:|internal_url|https?://internal'
 while IFS= read -r path; do
   case "$path" in
-    scripts/check_public_boundary.sh|.gitignore|uv.lock|frontend/pnpm-lock.yaml)
+    scripts/check_public_boundary.sh|scripts/check_provenance_risk.py|.gitignore|uv.lock|frontend/pnpm-lock.yaml)
       continue
       ;;
     .venv/*)

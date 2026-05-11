@@ -235,6 +235,9 @@
       "name": "relation-edge.schema.json"
     },
     {
+      "name": "release-evidence.schema.json"
+    },
+    {
       "name": "repair-report.schema.json"
     },
     {

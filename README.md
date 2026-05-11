@@ -31,7 +31,10 @@ opendream deactivate --workspace "$PWD"
 
 Bleeding-edge from Git (overwrites the tool env): `uv tool install --force "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
 
-Launch, upgrade, and release-gate details live in [`docs/launch-readiness.md`](./docs/launch-readiness.md).
+Launch, upgrade, release-gate details, known limitations, and clean-room
+provenance live in [`docs/launch-readiness.md`](./docs/launch-readiness.md),
+[`KNOWN_LIMITATIONS.md`](./KNOWN_LIMITATIONS.md), and
+[`CLEAN_ROOM.md`](./CLEAN_ROOM.md).
 
 <details>
 <summary><strong>Install options</strong> (venv, editable checkout, PEP 668)</summary>
@@ -410,6 +413,13 @@ Activation and compressed-status metadata (for the standard `init --activate-con
 | [PRD.md](./PRD.md) | Requirements |
 | [CONSTITUTION.md](./CONSTITUTION.md) | Governance |
 | [AGENTS.md](./AGENTS.md) | AI assistant / agent conventions |
+| [KNOWN_LIMITATIONS.md](./KNOWN_LIMITATIONS.md) | Truthful launch limits |
+| [docs/claims.md](./docs/claims.md) | Evidence-backed claims matrix |
+| [CLEAN_ROOM.md](./CLEAN_ROOM.md) | Provenance and no-reuse policy |
+| [docs/technical-notes/dreaming-memory-change-control.md](./docs/technical-notes/dreaming-memory-change-control.md) | Dreaming memory change control |
+
+OpenDream does not send telemetry by default. Provider/API-key paths are
+operator-configured execution paths and are separate from analytics or tracking.
 
 ---
 

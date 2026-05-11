@@ -110,7 +110,7 @@ The setup wizard (`opendream semantic setup`) resolves a single recommended stra
 - The advanced-runtime report (`advanced-runtime-report.schema.json`) combines memory-excellence scorecard results, execution-mode test coverage, and docs truthfulness checks
 - Generated during `make release-check` and archived alongside release artifacts
 - Release verdict (`pass`, `fail`, `partial`) gates the release — `fail` blocks shipping
-- Proves that memory-excellence guarantees hold across direct-provider and delegated execution modes
+- Checks memory-excellence evidence across direct-provider and delegated execution modes
 
 ## Out of scope for this doc
 - Per-change rollout, file lists, and verification steps → `specs/<id>/plan.md`

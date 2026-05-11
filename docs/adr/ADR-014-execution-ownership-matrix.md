@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-With multiple execution surfaces (direct-provider, codex-account, claude-scheduled-task, cursor-automation, deterministic), operators needed a single source of truth for who owns each semantic execution run and what trust guarantees apply. Without an explicit matrix, docs could drift from runtime, and status surfaces could show stale or inaccurate ownership information.
+With multiple execution surfaces (direct-provider, codex-account, claude-scheduled-task, cursor-automation, deterministic), operators needed a single source of truth for who owns each semantic execution run and what trust controls apply. Without an explicit matrix, docs could drift from runtime, and status surfaces could show stale or inaccurate ownership information.
 
 ## Decision
 Execution ownership is a first-class runtime concept with the following invariants:
@@ -12,7 +12,7 @@ Execution ownership is a first-class runtime concept with the following invarian
 1. **Every semantic run records its execution owner** — one of `opendream-local` or `vendor-runtime`.
 2. **Status, contract export, and observability surfaces always show the active owner**, the auth source, and the trust boundary.
 3. **Docs use the same vocabulary as runtime** — "OpenDream owns" vs "vendor owns" vs "deterministic (no model call)".
-4. **The advanced-runtime report proves that memory-excellence guarantees hold across all supported execution modes**, not just the one the developer happens to use locally.
+4. **The advanced-runtime report checks memory-excellence evidence across all supported execution modes**, not just the one the developer happens to use locally.
 
 | Surface | Shows execution owner | Shows auth source | Shows trust boundary |
 |---|---|---|---|

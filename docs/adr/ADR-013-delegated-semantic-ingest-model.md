@@ -28,7 +28,7 @@ The ingest command is `opendream semantic ingest --workspace <ws> [--path <envel
 ## Alternatives considered
 - **Direct memory mutation by vendor runtimes**: rejected because it bypasses verification and audit.
 - **Unstructured file drops**: rejected because they cannot be schema-validated or linked to provenance.
-- **API callback from vendor to OpenDream**: rejected because it requires a running OpenDream server, which is not guaranteed for local-first usage.
+- **API callback from vendor to OpenDream**: rejected because it requires a running OpenDream server, which is not required for local-first usage.
 
 ## References
 - `openspec/changes/438-semantic-auth-adapters-release-bundle/design/06-delegated-ingest-model.md`

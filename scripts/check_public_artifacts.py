@@ -6,10 +6,26 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STALE_SUFFIXES = (".orig", ".bak")
 STALE_NAMES = {".DS_Store"}
+REQUIRED_PUBLIC_FILES = (
+    "CLEAN_ROOM.md",
+    "KNOWN_LIMITATIONS.md",
+    "RELEASE_CRITERIA.md",
+    "RELEASE_EVIDENCE_TEMPLATE.md",
+    "SECURITY.md",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/claims.md",
+    "docs/launch-readiness.md",
+    "docs/release-protocol.md",
+    "docs/technical-notes/dreaming-memory-change-control.md",
+    "opendream/schema/release-evidence.schema.json",
+)
 
 
 def main() -> int:
     problems: list[str] = []
+    for required in REQUIRED_PUBLIC_FILES:
+        if not (REPO_ROOT / required).is_file():
+            problems.append(required)
     for path in REPO_ROOT.rglob("*"):
         if ".git" in path.parts or ".venv" in path.parts or ".tmp" in path.parts:
             continue

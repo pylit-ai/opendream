@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Sleep-time compute introduces offline semantic synthesis where models generate abstractions, summaries, and inferred relationships from durable memory during idle periods. These model-generated outputs are useful for enriching retrieval but differ fundamentally from canonical durable records: they go stale faster, may contain non-canonical inferences, and require an independent freshness policy. Mixing them into the existing durable-record store would compromise the integrity guarantees of the canonical memory layer.
+Sleep-time compute introduces offline semantic synthesis where models generate abstractions, summaries, and inferred relationships from durable memory during idle periods. These model-generated outputs are useful for enriching retrieval but differ fundamentally from canonical durable records: they go stale faster, may contain non-canonical inferences, and require an independent freshness policy. Mixing them into the existing durable-record store would weaken the integrity controls of the canonical memory layer.
 
 ## Decision
 Introduce a separate learned-context layer for model-generated semantic abstractions. Learned-context records are stored under `memory/learned_context/`, distinct from `memory/state/durable_records.json`. Each record carries:

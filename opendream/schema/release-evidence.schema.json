@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opendream.local/schema/release-evidence.schema.json",
+  "title": "OpenDream release evidence manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "git_sha",
+    "python",
+    "platform",
+    "timeout_seconds",
+    "verdict",
+    "stages",
+    "artifact_hashes"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "generated_at": {"type": "string"},
+    "git_sha": {"type": "string"},
+    "python": {"type": "string"},
+    "platform": {"type": "string"},
+    "timeout_seconds": {"type": "integer", "minimum": 1},
+    "verdict": {"enum": ["PASS", "FAIL"]},
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": {"type": "string"},
+          "stage": {"type": "string"},
+          "status": {"enum": ["PASS", "FAIL"]},
+          "returncode": {"type": "integer"},
+          "duration_seconds": {"type": "number"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "artifact_hashes": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "performance_scorecard": {
+      "type": ["object", "null"]
+    },
+    "schema_validation": {
+      "type": "object",
+      "required": ["status", "schema_path"],
+      "properties": {
+        "status": {"enum": ["PASS", "FAIL"]},
+        "schema_path": {"type": "string"},
+        "required_keys": {"type": "array", "items": {"type": "string"}},
+        "missing_keys": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}
