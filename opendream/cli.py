@@ -2686,7 +2686,7 @@ def _dream_fidelity_failure_hint(result: dict[str, Any]) -> str | None:
     if "compatibility_views" in failed:
         msg += (
             ". For compatibility_views, `project.md` and `user.md` must exist under the active memory root "
-            "(AutoDream layout). Use `--compat-mode autodream` consistently with `demo`/init, the same "
+            "(legacy compatibility layout). Use `--compat-mode autodream` consistently with `demo`/init, the same "
             "`--memory-dir`, or a fresh workspace."
         )
     return msg

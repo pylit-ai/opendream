@@ -1,0 +1,21 @@
+html,
+body {
+  min-height: 100%;
+}
+
+.graph-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.graph-canvas {
+  min-height: 30rem;
+  border: 1px solid #d4d7dd;
+  background: #ffffff;
+}
+
+.graph-status {
+  color: #3c4452;
+  font-size: 0.9rem;
+}

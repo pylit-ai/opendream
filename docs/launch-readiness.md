@@ -29,6 +29,9 @@ opendream dream run --workspace .tmp/demo --compat-mode autodream
 opendream eval dream-fidelity --workspace .tmp/demo --compat-mode autodream
 ```
 
+`--compat-mode autodream` is a legacy compatibility fixture name. It does not
+mean OpenDream copies non-public internals.
+
 ## Upgrade
 
 ```bash
@@ -53,4 +56,39 @@ make verify
 .venv/bin/python scripts/release_check.py
 ```
 
-The release gate covers boundary checks, stale artifact checks, unit tests, eval smoke, package build, clean-venv install, CLI help, demo, dream, service lifecycle, and advanced runtime eval.
+The release gate covers boundary checks, stale artifact checks, vendored asset
+checks, provenance-risk checks, unit tests, eval smoke, package build,
+clean-venv install, CLI help, demo, dream, service lifecycle, semantic release
+proof, and advanced runtime eval.
+
+## Public Evidence
+
+- Release criteria: [`RELEASE_CRITERIA.md`](../RELEASE_CRITERIA.md)
+- Release evidence template: [`RELEASE_EVIDENCE_TEMPLATE.md`](../RELEASE_EVIDENCE_TEMPLATE.md)
+- Clean-room manifest: [`CLEAN_ROOM.md`](../CLEAN_ROOM.md)
+- Claims matrix: [`docs/claims.md`](./claims.md)
+- Known limitations: [`KNOWN_LIMITATIONS.md`](../KNOWN_LIMITATIONS.md)
+- Change-control note:
+  [`docs/technical-notes/dreaming-memory-change-control.md`](./technical-notes/dreaming-memory-change-control.md)
+
+## Security And Supply Chain
+
+- Dependabot checks Python and GitHub Actions weekly.
+- OpenSSF Scorecard runs on a non-blocking schedule and on manual dispatch.
+- Security reporting and supported-version policy are in [`SECURITY.md`](../SECURITY.md).
+- OpenDream sends no telemetry by default. Any provider/API-key execution path
+  is explicit operator setup.
+
+## Branch Protection And Release Environment
+
+Before a public tag, an operator must verify:
+
+| Setting | Required state |
+| --- | --- |
+| `main` branch protection | PR review and required CI checks enabled |
+| Required checks | CI plus release-relevant local gates from this document |
+| PyPI trusted publisher | GitHub Actions `publish-pypi.yml` bound to the `pypi` environment |
+| Release environment | Manual approval or maintainer-only access |
+| Tags | No local or remote collision for the candidate `vX.Y.Z` |
+
+The private release report records the exact verification date and result.

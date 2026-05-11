@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5 - 2026-05-11
+
+- Add public launch-readiness gates for clean-room provenance, vendored assets, release evidence, no-network defaults, CLI golden paths, and supply-chain baseline.
+- Add public-safe release criteria, limitations, claims matrix, contribution templates, and security/telemetry policy.
+- Remove generated agent planning artifacts from public docs and keep local launch metadata excluded from publishable content.
+
 ## 0.3.3 - 2026-05-08
 
 - Rename Showcase to Insights and make the page useful for live workspaces without a demo report.

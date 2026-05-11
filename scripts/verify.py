@@ -73,6 +73,8 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
             ("public-boundary", [str(REPO_ROOT / "scripts" / "check_public_boundary.sh")]),
             ("package-boundaries", [sys.executable, "scripts/check_package_boundaries.py"]),
             ("public-artifacts", [sys.executable, "scripts/check_public_artifacts.py"]),
+            ("vendor-assets", [sys.executable, "scripts/check_vendor_assets.py"]),
+            ("provenance-risk", [sys.executable, "scripts/check_provenance_risk.py"]),
             ("lint", [sys.executable, "scripts/lint.py"]),
             ("typecheck", [sys.executable, "scripts/typecheck.py"]),
             ("tests", [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]),

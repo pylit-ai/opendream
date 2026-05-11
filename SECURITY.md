@@ -15,6 +15,16 @@ Security issues include:
 - writes escaping the intended `memory/` subtree
 - lock bypass or corruption that can damage durable memory state
 - packaging or installation behavior that changes trust boundaries unexpectedly
+- hidden network calls, analytics, tracking, or telemetry in default runtime paths
+
+OpenDream sends no telemetry by default. Provider/API-key execution paths are
+explicit operator setup paths and should not be described as analytics.
+
+## Supported versions
+
+Security fixes are targeted at the latest published package and the current
+`main` branch. Older alpha releases may receive a patch only when the maintainer
+judges the fix low-risk and relevant to active users.
 
 ## Response expectations
 - acknowledge receipt within 5 business days

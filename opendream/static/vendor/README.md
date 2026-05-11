@@ -20,21 +20,19 @@ directory. The bundle was produced locally:
 
 ## sha256 checksums (verify with `shasum -a 256 *.js`)
 
-- `sigma.min.js`: `be6f790da9c1856765b1c430de3b1aac50433223361870edb3097a9868218a88`
-- `graphology.umd.min.js`: `641ea047e2f414dead999769d62567ce3c6f1ddc334f1e728bd5edb19d337977`
-- `graphology-layout-forceatlas2.min.js`: `03cee0f88c84726f8d27e31772676feec3a5adb665f5a604e3758b449dd84f4a`
+- `sigma.min.js`: `a3fbc2f48d30a85f32cca5e17447bc290bc7d696358b5b28432c8dde783aa635`
+- `graphology.umd.min.js`: `065a8594599f61ffad22eac4b6dc23e20bd1a9b824281944434ffe74bacbbc70`
+- `graphology-layout-forceatlas2.min.js`: `80cf971abed8df07d732b37bebda38c67d42286087e915ad7d33d5232fc2041f`
 
-Note: checksums above are for the bare downloaded/built files before the
-provenance header comment was prepended. The header adds ~150 bytes; the
-sha256 of the file on disk will differ slightly from the upstream sha256.
+These are on-disk checksums, including the provenance header comments committed
+with the vendored files. Upstream/source checksums are tracked in the source
+rows above when available.
 
 ## Refresh procedure
 
 1. Look up the desired version on cdnjs.com / jsdelivr.com.
-2. Re-run the `curl -fsSL -o ...` commands with the new URLs (see the
-   `opendream/static/vendor/` section of `docs/superpowers/plans/2026-04-10-graph-explorer.md`
-   Task 10 for exact commands).
-3. For `graphology-layout-forceatlas2`, re-run the esbuild step (see note above).
+2. Download the pinned files from the source URLs above into this directory.
+3. For `graphology-layout-forceatlas2`, re-run the esbuild step shown above.
 4. Update the version cells in this README and the `version` line in each
    file's header comment.
 5. Recompute sha256 for each file (`shasum -a 256 *.js`) and update this README.

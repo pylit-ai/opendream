@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Release claims about memory-excellence need evidence that guarantees hold across all supported execution modes, not just deterministic. Without cross-mode evidence, a release could claim superiority while only testing the fallback path.
+Release claims about memory-excellence need evidence across all supported execution modes, not just deterministic. Without cross-mode evidence, a release could claim superiority while only testing the fallback path.
 
 ## Decision
 1. **An advanced-runtime report is generated during release-check** and validates against `advanced-runtime-report.schema.json`.
