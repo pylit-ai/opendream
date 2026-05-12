@@ -45,7 +45,7 @@ fi
   git ls-files
   git ls-files --others --exclude-standard
   if [ "$strict_local" = "1" ]; then
-    git ls-files --others --ignored --exclude-standard
+    git ls-files --others --ignored --exclude-standard | grep -Ev '^(\.mypy_cache/|\.pytest_cache/|\.ruff_cache/|\.tmp/|tmp/|htmlcov/|frontend/node_modules/|node_modules/|\.coverage$)' || true
   fi
 } | grep -Ev '^\.codex-goal(/|$)' | sort -u >"$tracked_or_new"
 

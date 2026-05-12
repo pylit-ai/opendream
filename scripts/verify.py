@@ -8,9 +8,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from opendream.util import write_json
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from opendream.util import write_json  # noqa: E402
+
 DEFAULT_REPORT_PATH = REPO_ROOT / ".tmp" / "verification" / "verification_report.json"
 
 

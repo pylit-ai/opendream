@@ -2477,6 +2477,10 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertTrue(all(result["checks"].values()))
         self.assertTrue(any("pnpm" in title.lower() for title in result["selected_titles"]))
+        boundary = result["boundary_enforcement"]
+        self.assertEqual(boundary["violations"], [])
+        self.assertEqual(boundary["blocked_code_writes"], [])
+        self.assertTrue(boundary["allowed_memory_writes"])
 
     def test_service_lifecycle_status_and_doctor(self) -> None:
         transcript = REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"

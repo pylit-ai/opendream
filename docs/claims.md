@@ -23,6 +23,8 @@ negative or scoped as a limitation:
 - leak-derived
 - private provider
 - internal URL
+- proprietary-system superiority claims unless backed by live, cited,
+  independently reproducible evidence
 
 Run:
 

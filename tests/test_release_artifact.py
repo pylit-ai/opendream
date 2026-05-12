@@ -411,6 +411,31 @@ class ReleaseArtifactTests(unittest.TestCase):
                 text=True,
             )
             self.assertIn('"status": "passed"', fidelity_eval.stdout)
+            fidelity_payload = json.loads(fidelity_eval.stdout)
+            self.assertEqual(fidelity_payload["boundary_enforcement"]["violations"], [])
+            self.assertEqual(fidelity_payload["boundary_enforcement"]["blocked_code_writes"], [])
+
+    def test_public_docs_do_not_contain_license_contradictions(self) -> None:
+        forbidden = (
+            "proprietary " "license",
+            "all rights " "reserved",
+            "not offered under an " "open-source license",
+        )
+        roots = [
+            REPO_ROOT / "README.md",
+            REPO_ROOT / "docs",
+            *REPO_ROOT.glob("*.md"),
+        ]
+        hits: list[str] = []
+        for root in roots:
+            paths = [root] if root.is_file() else list(root.rglob("*.md"))
+            for path in paths:
+                rel = path.relative_to(REPO_ROOT).as_posix()
+                text = path.read_text(encoding="utf-8").lower()
+                for term in forbidden:
+                    if term in text:
+                        hits.append(f"{rel}: {term}")
+        self.assertEqual(hits, [])
 
 
 if __name__ == "__main__":

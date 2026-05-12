@@ -147,6 +147,7 @@ def run_dream_fidelity_eval(
         "fixture": str(fixture),
         "checks": checks,
         "dream_run": result,
+        "boundary_enforcement": result.get("boundary_enforcement", {}),
         "dream_status": dream_snapshot,
         "record_count": len(records),
         "selected_titles": sorted(selected_titles),
@@ -602,8 +603,18 @@ def run_semantic_benchmark_eval(
     }
     scores["combined"] = round(sum(scores.values()) / max(1, len(scores)), 4)
 
-    tier_passed = sum(1 for s in [internal, mab, coding] if s.get("status") == "passed")
-    overall_status = "passed" if tier_passed >= 2 else "failed"
+    tiers = [internal, mab, coding]
+    tier_passed = sum(1 for s in tiers if s.get("status") == "passed")
+    tier_skipped = sum(1 for s in tiers if s.get("status") == "skipped_no_fixture")
+    tier_failed = sum(1 for s in tiers if s.get("status") == "failed")
+    if tier_passed >= 2 and tier_skipped:
+        overall_status = "passed_with_skips"
+    elif tier_passed >= 2 and tier_failed == 0:
+        overall_status = "passed"
+    elif tier_passed:
+        overall_status = "degraded"
+    else:
+        overall_status = "failed"
 
     return {
         "status": overall_status,
@@ -615,6 +626,8 @@ def run_semantic_benchmark_eval(
             "coding_task": coding,
         },
         "tiers_passed": tier_passed,
+        "tiers_skipped": tier_skipped,
+        "tiers_failed": tier_failed,
         "tiers_total": 3,
     }
 
@@ -668,7 +681,9 @@ def run_memory_excellence_eval(
     if store.audit_boundary_dir.exists():
         for p in store.audit_boundary_dir.glob("*.json"):
             boundary_reports.append(read_json(p, {}))
-    boundary_violations = sum(1 for r in boundary_reports if r.get("violations"))
+    boundary_violations = sum(
+        1 for r in boundary_reports if r.get("violations") or r.get("blocked_code_writes")
+    )
     concurrency_safety = 1.0 if boundary_violations == 0 else 0.0
 
     # 5. Reconciliation: run a sweep and check health.

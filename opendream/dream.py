@@ -162,6 +162,8 @@ def dream_run(
                 worker_type="dream",
                 allowed_roots=allowed_roots,
                 violations=boundary_report.get("violations", []),
+                allowed_memory_writes=boundary_report.get("allowed_memory_writes", []),
+                blocked_code_writes=boundary_report.get("blocked_code_writes", []),
             )
             store.write_boundary_audit(enforcement["report_id"], enforcement)
 

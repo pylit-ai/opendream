@@ -11,10 +11,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from opendream.storage import FileLock, LockError
-from opendream.util import sha256_path, write_json
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from opendream.storage import FileLock, LockError  # noqa: E402
+from opendream.util import sha256_path, write_json  # noqa: E402
+
 ARTIFACT_ROOT = REPO_ROOT / ".tmp" / "release-check"
 LOCK_PATH = ARTIFACT_ROOT / "release-check.lock"
 SEMANTIC_RELEASE_PROOF_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "semantic_release_proof.json"

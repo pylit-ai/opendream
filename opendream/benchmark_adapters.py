@@ -256,6 +256,41 @@ def run_memory_agent_bench(
     # Load test data from config or use defaults
     durable = store.load_durable_records()
     active_records = [r for r in durable if r.get("status") == "active"]
+    if not active_records:
+        duration_ms = round((time.monotonic() - started_at) * 1000)
+        report = BenchmarkRunReport(
+            run_id=run_id,
+            benchmark_type="memory_agent_bench",
+            mode=mode,
+            status="skipped_no_fixture",
+            started_at=timestamp,
+            ended_at=to_iso(utc_now()),
+            scores={
+                "accurate_retrieval": 0.0,
+                "test_time_learning": 0.0,
+                "long_range_understanding": 0.0,
+                "conflict_resolution": 0.0,
+                "overall": 0.0,
+            },
+            competency_results=[
+                {
+                    "name": "fixture_availability",
+                    "score": 0.0,
+                    "passed": False,
+                    "details": "MemoryAgentBench-style tier skipped: no active memory fixtures are available.",
+                }
+            ],
+            ablation_tag=f"{mode}-only",
+            duration_ms=duration_ms,
+            notes=(
+                "skipped_no_fixture: populate active AR/TTL/LRU/CR memory fixtures "
+                "before claiming MemoryAgentBench-style success."
+            ),
+        )
+        payload = report.to_dict()
+        payload["skip_reason"] = "no_active_memory_fixtures"
+        store.write_benchmark_report(run_id, payload)
+        return payload
 
     # Build test queries from existing records
     ar_queries = [

@@ -26,7 +26,7 @@ from opendream.claim_verification import (
     should_promote,
     verify_claim,
 )
-from opendream.evaluation import run_memory_excellence_eval
+from opendream.evaluation import run_memory_excellence_eval, run_semantic_benchmark_eval
 from opendream.extractor import extract_candidate
 from opendream.integration import emit_event, maintain
 from opendream.models import (
@@ -107,6 +107,27 @@ class TestRuntimeBoundaries(unittest.TestCase):
         after = {mem_path: "new"}
         result = verify_no_code_writes(before, after, memory_root=self.memory_root)
         self.assertTrue(result["passed"])
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(result["allowed_memory_writes"], [mem_path])
+
+    def test_verify_no_code_writes_allows_workspace_relative_memory_changes(self) -> None:
+        memory_root = self.root / ".opendream" / "memory"
+        rel_path = ".opendream/memory/MEMORY.md"
+        before = {rel_path: "old"}
+        after = {rel_path: "new"}
+        result = verify_no_code_writes(before, after, memory_root=memory_root)
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(result["allowed_memory_writes"], [rel_path])
+
+    def test_verify_no_code_writes_blocks_workspace_relative_code_changes(self) -> None:
+        rel_path = "opendream/cli.py"
+        before = {rel_path: "old"}
+        after = {rel_path: "new"}
+        result = verify_no_code_writes(before, after, memory_root=self.memory_root)
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["blocked_code_writes"], [rel_path])
+        self.assertEqual(result["violations"], [f"code write detected: {rel_path}"])
 
     def test_boundary_enforcement_report_structure(self) -> None:
         allowed_roots = default_allowed_write_roots(self.memory_root)
@@ -117,7 +138,19 @@ class TestRuntimeBoundaries(unittest.TestCase):
         self.assertTrue(report["enforced"])
         self.assertEqual(report["runtime_mode"], "memory-only")
         self.assertEqual(report["worker_type"], "dream")
+        self.assertEqual(report["allowed_memory_writes"], [])
+        self.assertEqual(report["blocked_code_writes"], [])
         self.assertEqual(report["violations"], [])
+
+    def test_semantic_benchmark_marks_empty_memory_agent_bench_as_skipped(self) -> None:
+        store = MemoryStore(self.root)
+        store.ensure_layout()
+        result = run_semantic_benchmark_eval(store, now="2026-03-26T12:00:00Z")
+        tier = result["tiers"]["memory_agent_bench"]
+        self.assertEqual(tier["status"], "skipped_no_fixture")
+        self.assertEqual(tier["skip_reason"], "no_active_memory_fixtures")
+        self.assertNotEqual(result["status"], "passed")
+        self.assertIn(result["status"], {"passed_with_skips", "degraded", "failed"})
 
 
 class TestClaimVerification(unittest.TestCase):

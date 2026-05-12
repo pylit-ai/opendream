@@ -37,6 +37,13 @@ RISK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             re.IGNORECASE,
         ),
     ),
+    (
+        "license contradiction",
+        re.compile(
+            r"proprietary license|all rights reserved|not offered under an open-source license",
+            re.IGNORECASE,
+        ),
+    ),
 )
 
 

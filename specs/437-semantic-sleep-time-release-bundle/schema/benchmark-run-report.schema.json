@@ -22,7 +22,7 @@
     },
     "status": {
       "type": "string",
-      "enum": ["passed", "failed", "partial"]
+      "enum": ["passed", "failed", "partial", "skipped_no_fixture"]
     },
     "started_at": { "type": "string", "format": "date-time" },
     "ended_at": { "type": "string", "format": "date-time" },
@@ -69,6 +69,7 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "skip_reason": { "type": "string" },
     "notes": { "type": "string" }
   },
   "additionalProperties": false

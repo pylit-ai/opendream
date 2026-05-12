@@ -8,18 +8,17 @@ OpenDream is a local-first memory subsystem for coding agents. It captures, cons
 
 Coding agents lose context between sessions. OpenDream provides durable memory with typed records, contradiction handling, and retrieval that gets better over time — so agents stop re-asking questions you already answered.
 
-## How is it different from AutoDream?
+## How is it different from managed agent memory systems?
 
-AutoDream is Anthropic's built-in memory consolidation for Claude Code. OpenDream differs in several measurable ways:
+OpenDream focuses on local-first, inspectable memory for coding-agent workflows:
+source-grounded records, local audit artifacts, explicit stale/contested
+handling, fixture-driven release checks, and activation surfaces across multiple
+agent tools.
 
-- **Concurrency safety**: Single-writer file lock vs no locking (AutoDream has a known concurrency issue)
-- **Audit trail**: Full diff + plan + verifier per run vs "Writing memory" with no diff
-- **Contradiction handling**: Temporal validity windows with superseded/contested status vs unknown mechanism
-- **Procedural memory**: Dedicated workflow extraction vs memory file cleanup only
-- **Performance measurement**: Composite scorecard with 8 dimensions vs none publicly available
-- **Agent breadth**: Works with Claude Code, Codex, Cursor, Gemini, and GitHub Copilot — not locked to one agent
-
-See [docs/benchmarks/autodream-comparison.md](benchmarks/autodream-comparison.md) for the full comparison with evidence citations.
+OpenDream does not claim live parity or benchmark superiority over proprietary
+managed memory systems. Comparisons in
+[docs/benchmarks/autodream-comparison.md](benchmarks/autodream-comparison.md)
+are limited to public behavior and OpenDream's own fixture-driven evidence.
 
 ## What does OpenDream NOT do?
 
@@ -35,7 +34,10 @@ Yes for **data**: artifacts stay under your workspace memory root (default `.ope
 
 ## What is the license?
 
-OpenDream is currently under a proprietary license (all rights reserved). It is not offered under an open-source license unless the LICENSE file is replaced with an explicit grant. See [LICENSE](../LICENSE) for the exact terms.
+OpenDream is licensed under Apache-2.0. See [LICENSE](../LICENSE).
+Third-party notices and provenance notes are documented in
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and
+[CLEAN_ROOM.md](../CLEAN_ROOM.md).
 
 ## What are the known limitations?
 
@@ -76,7 +78,7 @@ Learned context is a separate mutable memory layer for model-generated semantic 
 OpenDream's benchmark suite has three tiers:
 
 1. **Internal fixtures**: Controlled tests for query-family anticipation, stale abstraction detection, contradiction handling, and memory-hurt adversarial cases.
-2. **MemoryAgentBench-style adapters**: Clean-room implementations measuring Accurate Retrieval (AR), Test-Time Learning (TTL), Long-Range Understanding (LRU), and Conflict Resolution (CR).
+2. **MemoryAgentBench-style adapters**: Clean-room implementations measuring Accurate Retrieval (AR), Test-Time Learning (TTL), Long-Range Understanding (LRU), and Conflict Resolution (CR). Empty adapter tiers are reported as `skipped_no_fixture`, not external-benchmark success.
 3. **Coding-task evals**: Repeated task evaluations measuring pass rate, retrieval latency, irrelevant recall, contradiction recovery, procedural reuse, and memory-hurt rate.
 
 Run with `opendream eval semantic-benchmark --workspace .tmp/eval --mode hybrid`. The semantic-first contract is not just "LLM mode ran": release evidence is expected to compare degraded fallback, unpruned baseline behavior, and semantic-ready progressive disclosure. See [docs/benchmarks/semantic-mode.md](benchmarks/semantic-mode.md) for the pruning and repeated-task proof expectations, and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for provenance of benchmark concepts.

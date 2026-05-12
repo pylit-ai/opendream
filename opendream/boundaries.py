@@ -77,7 +77,8 @@ def verify_no_code_writes(
     now = to_iso(utc_now())
     report_id = stable_id("boundary-verify", now)
     changed_paths: list[str] = []
-    code_writes: list[str] = []
+    allowed_memory_writes: list[str] = []
+    blocked_code_writes: list[str] = []
     memory_root_resolved = memory_root.resolve()
 
     all_paths = set(before_snapshot.keys()) | set(after_snapshot.keys())
@@ -86,21 +87,49 @@ def verify_no_code_writes(
         after = after_snapshot.get(path_str)
         if before != after:
             changed_paths.append(path_str)
-            try:
-                Path(path_str).resolve().relative_to(memory_root_resolved)
-            except ValueError:
-                code_writes.append(path_str)
+            if _snapshot_path_is_under_memory_root(path_str, memory_root_resolved):
+                allowed_memory_writes.append(path_str)
+            else:
+                blocked_code_writes.append(path_str)
 
     return {
         "report_id": report_id,
         "verified_at": now,
         "changed_paths": changed_paths,
-        "code_writes": code_writes,
-        "passed": len(code_writes) == 0,
+        "allowed_memory_writes": allowed_memory_writes,
+        "blocked_code_writes": blocked_code_writes,
+        "code_writes": blocked_code_writes,
+        "passed": len(blocked_code_writes) == 0,
         "violations": [
-            f"code write detected: {p}" for p in code_writes
+            f"code write detected: {p}" for p in blocked_code_writes
         ],
     }
+
+
+def _snapshot_path_is_under_memory_root(path_str: str, memory_root_resolved: Path) -> bool:
+    path = Path(path_str)
+    candidates: list[Path] = []
+    if path.is_absolute():
+        candidates.append(path)
+    else:
+        parts = path.parts
+        if parts and parts[0] == memory_root_resolved.name:
+            candidates.append(memory_root_resolved.parent / path)
+        if (
+            len(parts) >= 2
+            and parts[0] == memory_root_resolved.parent.name
+            and parts[1] == memory_root_resolved.name
+        ):
+            candidates.append(memory_root_resolved.parent.parent / path)
+        candidates.append(Path.cwd() / path)
+
+    for candidate in candidates:
+        try:
+            candidate.resolve().relative_to(memory_root_resolved)
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 def boundary_enforcement_report(
@@ -108,6 +137,8 @@ def boundary_enforcement_report(
     worker_type: str,
     allowed_roots: list[Path],
     violations: list[dict[str, Any]] | None = None,
+    allowed_memory_writes: list[str] | None = None,
+    blocked_code_writes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Produce a summary report of boundary enforcement for a worker run."""
     now = to_iso(utc_now())
@@ -116,6 +147,8 @@ def boundary_enforcement_report(
         "worker_type": worker_type,
         "runtime_mode": "memory-only",
         "allowed_write_roots": [str(r.resolve()) for r in allowed_roots],
+        "allowed_memory_writes": allowed_memory_writes or [],
+        "blocked_code_writes": blocked_code_writes or [],
         "violations": violations or [],
         "enforced": True,
         "generated_at": now,
