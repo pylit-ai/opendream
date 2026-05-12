@@ -227,8 +227,39 @@ export interface SemanticDreamConfig {
   [key: string]: unknown;
 }
 
+export interface SemanticRetentionProjection {
+  grace_days: number;
+  grace_contexts: number;
+  would_archive_now: number;
+  held_by_activity: number;
+  expired_within_calendar_grace: number;
+  active_total: number;
+  archived_total: number;
+  directly_restorable_total?: number;
+  reopenable_archived_total?: number;
+  restore_window_expired_total?: number;
+  restore_window_missing_total?: number;
+  learned_context_total: number;
+  context_assembly_total: number;
+  latest_context_created_at?: string | null;
+  oldest_active_fresh_until?: string | null;
+  future_only?: boolean;
+  immediate_effect?: 'future_only' | 'would_archive' | 'no_active_change' | string;
+  id?: string;
+  label?: string;
+  [key: string]: unknown;
+}
+
+export interface SemanticRetentionPreview {
+  generated_at?: string;
+  selected?: SemanticRetentionProjection;
+  presets?: SemanticRetentionProjection[];
+  [key: string]: unknown;
+}
+
 export interface SettingsPayload extends OverviewPayload {
   semantic_config?: SemanticDreamConfig;
+  retention_preview?: SemanticRetentionPreview;
 }
 
 export interface SemanticChangeItem {
@@ -439,6 +470,7 @@ export interface DreamCycle {
   cost_usd?: number;
   tokens_used?: number;
   signal_source?: string;
+  latest_signal_timestamp?: string;
   signal_row_count?: number;
   appended_events?: number;
   funnel: DreamFunnelCounts;
@@ -622,6 +654,12 @@ export interface SemanticDreamModeRequest {
 
 export interface LearnedContextRestoreRequest {
   // TODO
+  [key: string]: unknown;
+}
+
+export interface LearnedContextReopenRequest {
+  limit?: number;
+  record_ids?: string[];
   [key: string]: unknown;
 }
 

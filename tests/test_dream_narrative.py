@@ -30,6 +30,22 @@ def test_narrative_completed_deterministic_events() -> None:
     assert "staged 3 event(s)" in text
 
 
+def test_narrative_completed_semantic_no_proposals() -> None:
+    text = synthesize_dream_narrative(
+        {
+            "status": "completed",
+            "mode": "semantic",
+            "signal_row_count": 120,
+            "latest_signal_source": "explicit_events",
+            "proposals_generated": 0,
+            "learned_context_created": 0,
+        }
+    )
+    assert "Semantic dream scanned 120 explicit-event row(s)" in text
+    assert "generated 0 learned-context proposals" in text
+    assert "created 0 learned-context records" in text
+
+
 def test_narrative_completed_no_changes() -> None:
     assert "completed with no proposal or event changes" in synthesize_dream_narrative({"status": "completed"})
 

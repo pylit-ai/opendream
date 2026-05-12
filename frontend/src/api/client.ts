@@ -16,6 +16,7 @@ import type {
   GraphParams,
   GraphPayload,
   HealthPayload,
+  LearnedContextReopenRequest,
   LearnedContextRestoreRequest,
   MemoryLineage,
   MemoryListParams,
@@ -34,6 +35,7 @@ import type {
   SemanticChangeReview,
   SemanticDreamConfig,
   SemanticDreamModeRequest,
+  SemanticRetentionPreview,
   ServiceControlRequest,
   ShowcaseResponse,
   SessionDiagnostics,
@@ -118,6 +120,10 @@ export const getHealth = () => api<HealthPayload>('/api/health');
 export const getOverview = () => api<OverviewPayload>('/api/overview');
 export const getSettings = () => api<SettingsPayload>('/api/settings');
 export const getSemanticConfig = () => api<SemanticDreamConfig>('/api/semantic-config');
+export const previewSemanticRetention = (days: number, contexts: number) =>
+  api<SemanticRetentionPreview>(
+    `/api/semantic-retention-preview?days=${encodeURIComponent(String(days))}&contexts=${encodeURIComponent(String(contexts))}`
+  );
 export const updateSemanticConfig = (payload: Partial<SemanticDreamConfig>) =>
   api<SettingsPayload>('/api/semantic-config', { method: 'POST', body: JSON.stringify(payload) });
 
@@ -248,6 +254,9 @@ export const setSemanticDreamMode = (payload: SemanticDreamModeRequest) =>
 export const restoreLearnedContext = (payload: LearnedContextRestoreRequest) =>
   api<unknown>('/api/learned-context/restore', { method: 'POST', body: JSON.stringify(payload) });
 
+export const reopenLearnedContext = (payload: LearnedContextReopenRequest) =>
+  api<unknown>('/api/learned-context/reopen', { method: 'POST', body: JSON.stringify(payload) });
+
 export const controlService = (payload: ServiceControlRequest) =>
   api<unknown>('/api/service/control', { method: 'POST', body: JSON.stringify(payload) });
 
@@ -258,6 +267,12 @@ export interface DreamRunResult {
   duration_ms?: number;
   appended_events?: number;
   gathered_rows?: number;
+  signal_row_count?: number;
+  latest_signal_source?: string;
+  latest_signal_timestamp?: string;
+  proposals_generated?: number;
+  proposals_approved?: number;
+  learned_context_created?: number;
   run_id?: string;
   trigger_class?: string;
   mode?: string;

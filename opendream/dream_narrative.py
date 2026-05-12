@@ -37,10 +37,16 @@ def synthesize_dream_narrative(summary: dict[str, Any]) -> str:
     rejected = _int(summary.get("proposals_rejected"))
     appended = _int(summary.get("appended_events"))
     gathered = _int(summary.get("gathered_rows") or summary.get("signal_row_count"))
+    signal_source = str(summary.get("latest_signal_source") or "").strip()
     if generated or approved or created:
         return (
             f"{_label_mode(mode)} dream reviewed {generated} proposal(s), approved {approved}, "
             f"created {created} learned-context record(s), and rejected {rejected}."
+        )
+    if mode in {"semantic", "hybrid"}:
+        return (
+            f"{_label_mode(mode)} dream scanned {gathered} {_signal_label(signal_source)} row(s), "
+            "generated 0 learned-context proposals, and created 0 learned-context records."
         )
     if appended or gathered:
         return (
@@ -62,3 +68,11 @@ def _label_mode(mode: str) -> str:
     if normalized in {"", "dream"}:
         return "Deterministic"
     return normalized.capitalize()
+
+
+def _signal_label(source: str) -> str:
+    if source == "explicit_events":
+        return "explicit-event"
+    if source == "transcript_episodes":
+        return "transcript"
+    return "signal"

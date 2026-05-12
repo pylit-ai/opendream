@@ -1,16 +1,18 @@
-import { createResource, createSignal, For, onMount, Show, type JSX } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, For, onMount, Show, type JSX } from 'solid-js';
 import { useSearchParams } from '@solidjs/router';
 import { Tabs as KTabs } from '@kobalte/core/tabs';
 import { Tabs } from '~/components/Tabs';
 import { Collapsible } from '@kobalte/core/collapsible';
-import { ChevronDown } from 'lucide-solid';
-import { getAutoReviewerStats, getSettings, getUiMeta, ingestTranscripts, runAutoReviewerDryRun, runDream, setSemanticDreamMode, updateAutoReviewerConfig, updateSemanticConfig } from '~/api/client';
+import { Tooltip } from '@kobalte/core/tooltip';
+import { ArchiveRestore, BarChart3, ChevronDown, Info } from 'lucide-solid';
+import { getAutoReviewerStats, getSettings, getUiMeta, ingestTranscripts, previewSemanticRetention, reopenLearnedContext, runAutoReviewerDryRun, runDream, setSemanticDreamMode, updateAutoReviewerConfig, updateSemanticConfig } from '~/api/client';
 import type { DreamRunResult, TranscriptsIngestResult } from '~/api/client';
-import type { AutoReviewerDryRun, AutoReviewerRule, AutoReviewerStats, OverviewPayload, SettingsPayload, UiMeta } from '~/api/types';
+import type { AutoReviewerDryRun, AutoReviewerRule, AutoReviewerStats, OverviewPayload, SemanticRetentionProjection, SettingsPayload, UiMeta } from '~/api/types';
 import { Page } from '~/components/Page';
 import { Chip } from '~/components/Chip';
 import { LoadingPage } from '~/components/Loading';
 import { ErrorState } from '~/components/ErrorState';
+import { formatDateLong } from '~/lib/format';
 
 type ReadinessLike = {
   mode?: string;
@@ -120,12 +122,119 @@ function ReadinessSection(props: { overview: OverviewPayload | undefined }): JSX
   );
 }
 
+const RETENTION_PRESETS = [
+  {
+    id: 'time_only',
+    label: 'Time only',
+    days: 7,
+    contexts: 0,
+    note: 'Calendar age only; archive once records are older than 7 days.',
+  },
+  {
+    id: 'balanced',
+    label: 'Balanced',
+    days: 14,
+    contexts: 2,
+    note: 'Wait for two newer context builds after the age window.',
+  },
+  {
+    id: 'bursty',
+    label: 'Bursty project',
+    days: 30,
+    contexts: 4,
+    note: 'Best for repos with quiet weeks and clustered work.',
+  },
+  {
+    id: 'fast_churn',
+    label: 'Fast churn',
+    days: 7,
+    contexts: 5,
+    note: 'Short calendar window, but requires stronger evidence of new work.',
+  },
+] as const;
+
+function retentionNumber(raw: string, fallback: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.floor(parsed));
+}
+
+function retentionTone(value: number): 'ok' | 'warn' | 'danger' | 'neutral' {
+  if (value <= 0) return 'ok';
+  if (value <= 5) return 'warn';
+  return 'danger';
+}
+
+function RetentionMetric(props: {
+  label: string;
+  value: number | string;
+  tone?: 'ok' | 'warn' | 'danger' | 'neutral';
+}): JSX.Element {
+  return (
+    <span class="inline-flex items-center gap-1.5 text-[11px] text-text-muted">
+      <span>{props.label}</span>
+      <Chip variant={props.tone ?? 'neutral'}>{String(props.value)}</Chip>
+    </span>
+  );
+}
+
+function dreamRunProof(r: DreamRunResult): string {
+  const source =
+    r.latest_signal_source === 'explicit_events'
+      ? 'explicit events'
+      : r.latest_signal_source === 'transcript_episodes'
+        ? 'transcripts'
+        : 'signal';
+  const rows = r.signal_row_count ?? r.gathered_rows ?? 0;
+  const proposals = r.proposals_generated ?? 0;
+  const learned = r.learned_context_created ?? 0;
+  const latest = r.latest_signal_timestamp ? ` · latest ${formatDateLong(r.latest_signal_timestamp)}` : '';
+  const prefix = learned > 0 ? 'Materialized' : proposals > 0 ? 'Ran, no promotion yet' : 'Ran, no learned context yet';
+  return `${prefix}: ${source} ${rows}${latest} · proposals ${proposals} · learned ${learned}.`;
+}
+
 function RetentionSettings(props: { overview: SettingsPayload | undefined; onAfter: () => void }): JSX.Element {
   const retention = () => props.overview?.semantic_config?.retention ?? {};
   const [days, setDays] = createSignal(String(retention().learned_context_archive_grace_days ?? 7));
   const [contexts, setContexts] = createSignal(String(retention().learned_context_archive_grace_contexts ?? 0));
   const [saving, setSaving] = createSignal(false);
+  const [reopening, setReopening] = createSignal(false);
   const [msg, setMsg] = createSignal('');
+  const draftDays = () => retentionNumber(days(), 7);
+  const draftContexts = () => retentionNumber(contexts(), 0);
+  const previewKey = createMemo(() => `${draftDays()}:${draftContexts()}`);
+  const [preview] = createResource(previewKey, async (key) => {
+    const [nextDays, nextContexts] = key.split(':').map((part) => Number(part));
+    return previewSemanticRetention(nextDays, nextContexts);
+  });
+  const selectedPreview = (): SemanticRetentionProjection | undefined =>
+    preview()?.selected ?? props.overview?.retention_preview?.selected;
+  const activePreset = () =>
+    RETENTION_PRESETS.find((preset) => preset.days === draftDays() && preset.contexts === draftContexts())?.id;
+  const immediateEffectLabel = (projection: SemanticRetentionProjection | undefined): string => {
+    if (!projection) return 'Checking current effect';
+    if (projection.future_only) return 'Future-only: archived records stay archived';
+    if (projection.would_archive_now > 0) return `${projection.would_archive_now} active record(s) would archive now`;
+    if (projection.held_by_activity > 0) return `${projection.held_by_activity} expired record(s) held by activity`;
+    return 'No active records would change now';
+  };
+  let loadedKey = '';
+
+  createEffect(() => {
+    const nextDays = String(retention().learned_context_archive_grace_days ?? 7);
+    const nextContexts = String(retention().learned_context_archive_grace_contexts ?? 0);
+    const nextKey = `${nextDays}:${nextContexts}`;
+    if (nextKey && nextKey !== loadedKey && !saving()) {
+      loadedKey = nextKey;
+      setDays(nextDays);
+      setContexts(nextContexts);
+    }
+  });
+
+  function applyPreset(preset: (typeof RETENTION_PRESETS)[number]) {
+    setDays(String(preset.days));
+    setContexts(String(preset.contexts));
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -133,8 +242,8 @@ function RetentionSettings(props: { overview: SettingsPayload | undefined; onAft
     try {
       await updateSemanticConfig({
         retention: {
-          learned_context_archive_grace_days: Math.max(0, Number(days()) || 0),
-          learned_context_archive_grace_contexts: Math.max(0, Number(contexts()) || 0),
+          learned_context_archive_grace_days: draftDays(),
+          learned_context_archive_grace_contexts: draftContexts(),
         },
       });
       setMsg('Saved.');
@@ -146,49 +255,220 @@ function RetentionSettings(props: { overview: SettingsPayload | undefined; onAft
     }
   }
 
+  async function handleReopenArchived() {
+    setReopening(true);
+    setMsg('');
+    try {
+      const response = (await reopenLearnedContext({ limit: 25 })) as { result?: { reopened?: number } };
+      const reopened = response.result?.reopened ?? 0;
+      setMsg(reopened > 0 ? `Reopened ${reopened} archived record(s) for review.` : 'No archived records reopened.');
+      props.onAfter();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReopening(false);
+    }
+  }
+
   return (
     <div class="rounded-md hairline bg-surface p-4">
-      <div class="flex flex-col gap-3">
-        <div>
-          <h3 class="text-sm font-medium text-text">Learned-context retention</h3>
-          <p class="mt-1 max-w-3xl text-[11.5px] leading-5 text-text-muted">
-            Archive stale learned context after the calendar grace has elapsed, and optionally
-            after enough new context assemblies prove the workspace has been active.
-          </p>
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-medium text-text">Learned-context retention</h3>
+            <p class="mt-1 max-w-3xl text-[11.5px] leading-5 text-text-muted">
+              Decide when active learned context becomes stale. Calendar age handles old records;
+              newer prepared contexts prevent quiet weeks from looking like real project movement.
+            </p>
+          </div>
+          <Show when={selectedPreview()}>
+            {(p) => (
+              <div class="flex items-center gap-1.5 rounded-md bg-surface-elevated px-2.5 py-1.5 text-[11px] text-text-muted">
+                <BarChart3 size={13} />
+                <span>{immediateEffectLabel(p())}</span>
+                <Chip variant={retentionTone(p().would_archive_now)}>
+                  {String(p().would_archive_now)}
+                </Chip>
+              </div>
+            )}
+          </Show>
         </div>
-        <div class="grid gap-3 md:grid-cols-2">
-          <label class="flex flex-col gap-1 text-[11px] text-text-muted">
-            Calendar grace · days
-            <input
-              type="number"
-              min="0"
-              value={days()}
-              onInput={(e) => setDays(e.currentTarget.value)}
-              class="h-9 rounded-md border border-border bg-surface-elevated px-2 text-sm text-text focus:border-accent focus:outline-none"
-            />
-          </label>
-          <label class="flex flex-col gap-1 text-[11px] text-text-muted">
-            Activity grace · contexts
-            <input
-              type="number"
-              min="0"
-              value={contexts()}
-              onInput={(e) => setContexts(e.currentTarget.value)}
-              class="h-9 rounded-md border border-border bg-surface-elevated px-2 text-sm text-text focus:border-accent focus:outline-none"
-            />
-          </label>
+
+        <div class="flex flex-col gap-2">
+          <div class="text-[11px] font-medium text-text-muted">Presets</div>
+          <div class="flex flex-wrap gap-2">
+            <For each={RETENTION_PRESETS}>
+              {(preset) => (
+                <button
+                  type="button"
+                  onClick={() => applyPreset(preset)}
+                  title={preset.note}
+                  class={`rounded-md px-3 py-2 text-left text-[11.5px] transition-colors ${
+                    activePreset() === preset.id
+                      ? 'bg-accent text-accent-fg'
+                      : 'hairline text-text hover:bg-surface-elevated'
+                  }`}
+                >
+                  <span class="block font-medium">{preset.label}</span>
+                  <span class="block text-[10.5px] opacity-75">
+                    {preset.days}d · {preset.contexts} newer contexts
+                  </span>
+                </button>
+              )}
+            </For>
+          </div>
         </div>
-        <div class="flex items-center gap-2">
+
+        <div class="grid gap-3 md:grid-cols-[7rem_16rem_auto] md:items-start">
+          <label class="flex w-28 flex-col gap-1 text-[11px] text-text-muted">
+            Calendar age
+            <div class="flex h-9 items-center rounded-md border border-border bg-surface-elevated focus-within:border-accent">
+              <input
+                type="number"
+                min="0"
+                value={days()}
+                onInput={(e) => setDays(e.currentTarget.value)}
+                class="h-full w-full min-w-0 bg-transparent px-2 text-sm text-text focus:outline-none"
+              />
+              <span class="pr-2 text-[10.5px] text-text-subtle">days</span>
+            </div>
+          </label>
+          <label class="flex w-full flex-col gap-1 text-[11px] text-text-muted">
+            <span class="inline-flex items-center gap-1">
+              New prepared contexts before pruning
+              <Tooltip openDelay={250} closeDelay={0}>
+                <Tooltip.Trigger
+                  as="button"
+                  type="button"
+                  class="inline-flex h-4 w-4 items-center justify-center rounded-sm text-text-subtle hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                  aria-label="What counts as a prepared context"
+                >
+                  <Info size={12} />
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Content class="z-50 max-w-xs rounded-md bg-surface-elevated px-2 py-1 text-[11px] leading-4 text-text shadow-[var(--shadow-elevated)] hairline">
+                    A prepared context is recorded when OpenDream assembles memory for an agent
+                    query or retrieval. It is not a git build or commit.
+                  </Tooltip.Content>
+                </Tooltip.Portal>
+              </Tooltip>
+            </span>
+            <div class="flex h-9 items-center rounded-md border border-border bg-surface-elevated focus-within:border-accent">
+              <input
+                type="number"
+                min="0"
+                value={contexts()}
+                onInput={(e) => setContexts(e.currentTarget.value)}
+                class="h-full w-full min-w-0 bg-transparent px-2 text-sm text-text focus:outline-none"
+              />
+              <span class="pr-2 text-[10.5px] text-text-subtle">contexts</span>
+            </div>
+            <span class="text-[10.5px] leading-4 text-text-subtle">
+              Created when OpenDream prepares memory for an agent query/retrieval.
+            </span>
+          </label>
           <button
             type="button"
             onClick={handleSave}
             disabled={saving()}
-            class="rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-accent-fg transition-all duration-150 hover:opacity-90 disabled:opacity-50"
+            class="h-9 rounded-md bg-accent px-3.5 text-xs font-medium text-accent-fg transition-all duration-150 hover:opacity-90 disabled:opacity-50 md:mt-5"
           >
             {saving() ? 'Saving…' : 'Save retention'}
           </button>
           <Show when={msg()}>
-            <span class="text-xs text-text-muted">{msg()}</span>
+            <span class="pb-2 text-xs text-text-muted">{msg()}</span>
+          </Show>
+        </div>
+
+        <Show when={selectedPreview()}>
+          {(p) => (
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md bg-surface-elevated px-3 py-2">
+              <RetentionMetric
+                label="Would archive"
+                value={p().would_archive_now}
+                tone={retentionTone(p().would_archive_now)}
+              />
+              <RetentionMetric label="Held for contexts" value={p().held_by_activity} />
+              <RetentionMetric label="Active now" value={p().active_total} />
+              <RetentionMetric label="Archived" value={p().archived_total} />
+            </div>
+          )}
+        </Show>
+        <Show when={preview.loading}>
+          <span class="text-[11px] text-text-subtle">Refreshing preview…</span>
+        </Show>
+
+        <div class="flex flex-col gap-2">
+          <Collapsible>
+            <Collapsible.Trigger class="flex items-center gap-1 text-xs text-text-muted hover:text-text">
+              <ChevronDown size={12} class="ui-expanded:rotate-180 transition-transform" />
+              How to choose
+            </Collapsible.Trigger>
+            <Collapsible.Content>
+              <div class="mt-2 rounded-md bg-surface-elevated px-3 py-2 text-[11.5px] leading-5 text-text-muted">
+                Prepared contexts are created when OpenDream assembles memory for an agent query or
+                retrieval. Use 0 for pure calendar time. Use 2-5 when development is sporadic so
+                quiet weeks do not age out context before the codebase has actually moved.
+              </div>
+            </Collapsible.Content>
+          </Collapsible>
+          <Collapsible>
+            <Collapsible.Trigger class="flex items-center gap-1 text-xs text-text-muted hover:text-text">
+              <ChevronDown size={12} class="ui-expanded:rotate-180 transition-transform" />
+              How to judge impact
+            </Collapsible.Trigger>
+            <Collapsible.Content>
+              <div class="mt-2 rounded-md bg-surface-elevated px-3 py-2 text-[11.5px] leading-5 text-text-muted">
+                Compare the preview before saving, then watch Active now, Would archive, and
+                Retrievals after the next few context builds. Positive change means relevant learned
+                context remains active through quiet periods without stale records being selected.
+              </div>
+            </Collapsible.Content>
+          </Collapsible>
+          <Show when={selectedPreview()?.archived_total}>
+            <Collapsible>
+              <Collapsible.Trigger class="flex items-center gap-1 text-xs text-text-muted hover:text-text">
+                <ChevronDown size={12} class="ui-expanded:rotate-180 transition-transform" />
+                Archived learned context
+              </Collapsible.Trigger>
+              <Collapsible.Content>
+                <div class="mt-2 flex flex-col gap-3 rounded-md bg-surface-elevated px-3 py-3">
+                  <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <RetentionMetric label="Archived" value={selectedPreview()?.archived_total ?? 0} />
+                    <RetentionMetric
+                      label="Direct restore"
+                      value={selectedPreview()?.directly_restorable_total ?? 0}
+                    />
+                    <RetentionMetric
+                      label="Review reopen"
+                      value={selectedPreview()?.reopenable_archived_total ?? 0}
+                    />
+                  </div>
+                  <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <p class="text-[11.5px] leading-5 text-text-muted">
+                      Retention policy protects future active records. To bring old archived records
+                      back, reopen a small batch for review so stale context is visible before it is
+                      trusted again.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleReopenArchived}
+                      disabled={reopening() || !(selectedPreview()?.reopenable_archived_total ?? 0)}
+                      class="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-text transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <ArchiveRestore size={14} />
+                      {reopening() ? 'Reopening…' : 'Reopen 25 for review'}
+                    </button>
+                  </div>
+                </div>
+              </Collapsible.Content>
+            </Collapsible>
+          </Show>
+          <Show when={selectedPreview()?.active_total === 0 && selectedPreview()?.archived_total}>
+            <div class="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-[11.5px] leading-5 text-text">
+              No active learned context right now. Presets change future pruning only; archived
+              records need restore/reopen action before they can materialize again.
+            </div>
           </Show>
         </div>
       </div>
@@ -413,6 +693,13 @@ function DreamControls(props: { onAfter: () => void }): JSX.Element {
               <Show when={explainer}>
                 <p class="text-[11px] leading-snug text-text-muted">{explainer}</p>
               </Show>
+              <p
+                class={`text-[11px] leading-snug ${
+                  (r().learned_context_created ?? 0) > 0 ? 'text-success' : 'text-text-muted'
+                }`}
+              >
+                {dreamRunProof(r())}
+              </p>
             </div>
           );
         }}

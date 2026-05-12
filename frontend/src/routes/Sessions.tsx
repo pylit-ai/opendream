@@ -21,7 +21,17 @@ interface TimelineEvent {
   kind?: string;
   label?: string;
   object_id?: string;
-  payload?: { created_at?: string; assembled_text?: string; [k: string]: unknown };
+  payload?: {
+    created_at?: string;
+    assembled_text?: string;
+    display_name?: string;
+    query?: string;
+    request?: string;
+    prompt?: string;
+    context_id?: string;
+    event_id?: string;
+    [k: string]: unknown;
+  };
   [k: string]: unknown;
 }
 
@@ -54,6 +64,53 @@ function isLikelyOrphan(r: { session_id: string; event_count?: number; context_c
 function sessionLabel(r: SessionRecord): string {
   const label = (r as { display_name?: string }).display_name;
   return label && label !== r.session_id ? label : r.session_id;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function compactLabel(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const oneLine = value.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 96 ? `${oneLine.slice(0, 93)}...` : oneLine;
+}
+
+function queryFromAssembledText(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  for (const line of text.split('\n').slice(0, 24)) {
+    const [key, ...rest] = line.split(':');
+    if (key.trim().toLowerCase() === 'query') {
+      return stringValue(rest.join(':'));
+    }
+  }
+  return undefined;
+}
+
+function timelineEventLabel(ev: TimelineEvent): string {
+  const payload = ev.payload ?? {};
+  const payloadLabel =
+    stringValue(payload.display_name) ??
+    stringValue(payload.query) ??
+    stringValue(payload.request) ??
+    stringValue(payload.prompt) ??
+    queryFromAssembledText(stringValue(payload.assembled_text));
+  const fallback = ev.label ?? ev.kind ?? 'event';
+  if (payloadLabel && payloadLabel !== ev.object_id && payloadLabel !== fallback) {
+    return compactLabel(payloadLabel, fallback);
+  }
+  return fallback;
+}
+
+function timelineObjectPreview(ev: TimelineEvent): string | undefined {
+  const payload = ev.payload ?? {};
+  return (
+    stringValue(payload.display_name) ??
+    stringValue(payload.query) ??
+    stringValue(payload.request) ??
+    stringValue(payload.prompt) ??
+    queryFromAssembledText(stringValue(payload.assembled_text))
+  );
 }
 
 export default function SessionsRoute(): JSX.Element {
@@ -305,6 +362,8 @@ export default function SessionsRoute(): JSX.Element {
           const ts =
             (ev.payload as { created_at?: string } | undefined)?.created_at ??
             (ev as { timestamp?: string }).timestamp;
+          const label = timelineEventLabel(ev);
+          const objectPreview = timelineObjectPreview(ev);
           const isExpanded = () => expandedEvent() === i();
           return (
             <li class="hairline-b">
@@ -318,18 +377,18 @@ export default function SessionsRoute(): JSX.Element {
                 </div>
                 <div class="flex flex-1 flex-col gap-0.5 min-w-0">
                   <span class="text-[12.5px] font-medium text-text">
-                    {ev.label ?? ev.kind ?? 'event'}
+                    {label}
                   </span>
                   <Show when={ts}>
                     <span class="text-[11px] text-text-muted">
                       {formatDateLong(ts as string)}
                     </span>
                   </Show>
-                  <Show when={ev.kind && ev.kind !== ev.label}>
+                  <Show when={ev.kind && ev.kind !== label}>
                     <span class="font-mono text-[10.5px] text-text-subtle">{ev.kind}</span>
                   </Show>
                   <Show when={ev.object_id}>
-                    <IdLink id={ev.object_id ?? null} />
+                    <IdLink id={ev.object_id ?? null} preview={objectPreview} />
                   </Show>
                 </div>
                 <span class="self-center text-[11px] text-text-subtle">

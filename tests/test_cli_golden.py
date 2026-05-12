@@ -29,6 +29,19 @@ class CliGoldenTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout.strip(), r"^opendream \d+\.\d+\.\d+")
 
+    def test_cli_import_does_not_load_observe_webapp(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; import opendream.cli; raise SystemExit('opendream.webapp' in sys.modules)",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_invalid_command_has_actionable_error(self) -> None:
         result = self.run_cli("does-not-exist")
         self.assertNotEqual(result.returncode, 0)

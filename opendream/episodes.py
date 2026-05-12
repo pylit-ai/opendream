@@ -93,9 +93,13 @@ def looks_memory_worthy(text: str, orientation_tokens: set[str]) -> bool:
     return bool(semantic_tokens(text) & orientation_tokens)
 
 
+def row_text(row: dict[str, Any]) -> str:
+    return str(row.get("text") or row.get("message") or row.get("content") or "").strip()
+
+
 def row_to_event(row: dict[str, Any], *, scope: str = "project") -> MemoryEvent | None:
     timestamp = str(row.get("timestamp") or "")
-    content = str(row.get("text") or row.get("message") or row.get("content") or "").strip()
+    content = row_text(row)
     if not timestamp or not content:
         return None
     normalized_content = normalize_relative_dates(content, timestamp)

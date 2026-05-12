@@ -18,9 +18,13 @@ from typing import Any
 
 from .dream import _gather_recent_signal, _orient, _rows_to_events, dream_run
 from .dream_narrative import synthesize_dream_narrative
-from .episodes import latest_episode_timestamp, load_episode_rows
+from .episodes import latest_episode_timestamp, load_episode_rows, row_text
 from .integration import maintain
-from .memory_quality import derive_semantic_product_state, next_action_for_semantic_state
+from .memory_quality import (
+    LEARNING_EVIDENCE_MISSING_REASON,
+    derive_semantic_product_state,
+    next_action_for_semantic_state,
+)
 from .models import SemanticDreamReport
 from .provider_registry import semantic_mode_available
 from .query_families import plan_anticipation
@@ -381,7 +385,7 @@ def _synthesize_proposals(
         relevant_rows: list[dict[str, Any]] = []
         best_overlap = 0.0
         for row in gathered_rows:
-            text = str(row.get("text") or row.get("message") or "")
+            text = row_text(row)
             row_tokens = semantic_tokens(text)
             if row_tokens and family_tokens:
                 overlap = len(row_tokens & family_tokens) / max(1, len(row_tokens | family_tokens))
@@ -493,7 +497,7 @@ def _proposal_from_rows(
     relevant_rows: list[dict[str, Any]],
     now: str,
 ) -> dict[str, Any] | None:
-    content_parts = [str(r.get("text") or r.get("message") or "") for r in relevant_rows[:10]]
+    content_parts = [row_text(r) for r in relevant_rows[:10]]
     combined_content = " ".join(part for part in content_parts if part.strip())
     summary = _extract_summary(combined_content, family)
     if not summary:
@@ -865,6 +869,70 @@ def _strategy_trust_boundary(strategy: str) -> str:
     return mapping.get(strategy, "unknown")
 
 
+def _summary_int(summary: dict[str, Any], key: str) -> int:
+    try:
+        return int(summary.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _learned_context_materialization_diagnostics(
+    *,
+    dream_state: dict[str, Any],
+    learned_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    active_total = sum(1 for record in learned_records if record.get("status") == "active")
+    archived_total = sum(1 for record in learned_records if record.get("status") == "archived")
+    last_summary = dream_state.get("last_run_summary")
+    if not isinstance(last_summary, dict):
+        last_summary = {}
+    last_mode = str(last_summary.get("mode") or dream_state.get("semantic_mode") or "")
+    last_status = str(last_summary.get("status") or dream_state.get("last_result") or "")
+    proposals_generated = _summary_int(last_summary, "proposals_generated")
+    learned_context_created = _summary_int(last_summary, "learned_context_created")
+    diagnostic: dict[str, Any] = {
+        "state": "active" if active_total > 0 else "not_materialized",
+        "active": active_total,
+        "archived": archived_total,
+        "total": len(learned_records),
+        "last_run_id": last_summary.get("run_id") or dream_state.get("run_id"),
+        "last_run_at": last_summary.get("ended_at") or dream_state.get("last_ran_at"),
+        "last_run_status": last_status or None,
+        "last_run_mode": last_mode or None,
+        "last_proposals_generated": proposals_generated,
+        "last_learned_context_created": learned_context_created,
+    }
+    semantic_completed = last_mode in {"semantic", "hybrid"} and last_status == "completed"
+    if active_total > 0:
+        diagnostic["reason"] = None
+        diagnostic["next_action"] = "none"
+    elif archived_total > 0:
+        diagnostic["state"] = "all_archived"
+        reason = f"learned context exists, but all {archived_total} record(s) are archived"
+        if semantic_completed and proposals_generated == 0:
+            reason = f"{reason}; latest semantic dream created 0 proposals"
+        diagnostic["reason"] = reason
+        diagnostic["next_action"] = (
+            "adjust retention or restore relevant learned context, then run a semantic dream"
+        )
+    elif semantic_completed and proposals_generated == 0:
+        diagnostic["state"] = "ran_no_proposals"
+        diagnostic["reason"] = (
+            "semantic cycles are running, but recent signal produced 0 learned-context proposals"
+        )
+        diagnostic["next_action"] = (
+            "inspect semantic dream signal quality or query families, then run semantic dream again"
+        )
+    elif semantic_completed and proposals_generated > 0 and learned_context_created == 0:
+        diagnostic["state"] = "proposals_not_promoted"
+        diagnostic["reason"] = "semantic cycles are running, but proposals are not being promoted"
+        diagnostic["next_action"] = "review semantic verifier output and promotion policy"
+    else:
+        diagnostic["reason"] = LEARNING_EVIDENCE_MISSING_REASON
+        diagnostic["next_action"] = "run a semantic dream cycle so learned-context starts materializing"
+    return diagnostic
+
+
 def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
     """Get semantic dream status metadata."""
     config = store.load_semantic_config()
@@ -912,6 +980,18 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
         availability,
         active_learned_context_count=len(active_learned),
     )
+    materialization = _learned_context_materialization_diagnostics(
+        dream_state=dream_state,
+        learned_records=learned_records,
+    )
+    next_action = next_action_for_semantic_state(capability_state, reason, availability)
+    if (
+        capability_state == "degraded"
+        and reason == LEARNING_EVIDENCE_MISSING_REASON
+        and materialization.get("state") != "not_materialized"
+    ):
+        reason = str(materialization.get("reason") or reason)
+        next_action = str(materialization.get("next_action") or next_action)
 
     return {
         "mode": config.get("mode", "deterministic"),
@@ -926,7 +1006,8 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
         "candidate_strategies": availability.get("candidate_strategies", candidate_strategies),
         "recommended_strategy": availability.get("recommended_strategy"),
         "detected_tools": availability.get("detected_tools", []),
-        "next_action": next_action_for_semantic_state(capability_state, reason, availability),
+        "next_action": next_action,
+        "materialization": materialization,
         "learned_context": {
             "total": len(learned_records),
             "active": len(active_learned),

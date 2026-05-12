@@ -393,18 +393,19 @@ export default function OverviewRoute(): JSX.Element {
               </div>
               <ul class="flex flex-col gap-1">
                 <For each={highlights()}>
-                  {(h) => (
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          h.memory_id &&
-                          navigate(`/memories?id=${encodeURIComponent(h.memory_id)}`)
-                        }
-                        class="row-hover flex w-full items-center gap-3 rounded-md hairline px-2.5 py-1.5 text-left transition-colors hover:bg-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                        title={`Open memory ${h.memory_id ?? ''}`}
-                      >
-                        <span class="font-mono text-[11px] text-text-muted">{h.memory_id}</span>
+                  {(h) => {
+                    const label = memoryPreview(asPreview(h.summary), asPreview(h.title), h.type) ?? 'Memory';
+                    return (
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            h.memory_id &&
+                            navigate(`/memories?id=${encodeURIComponent(h.memory_id)}`)
+                          }
+                          class="row-hover flex w-full items-center gap-3 rounded-md hairline px-2.5 py-1.5 text-left transition-colors hover:bg-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                          title={h.memory_id ? `Open ${label}\n${h.memory_id}` : `Open ${label}`}
+                        >
                         <Show when={h.type}>
                           <span
                             role="button"
@@ -425,16 +426,20 @@ export default function OverviewRoute(): JSX.Element {
                           </span>
                         </Show>
                         <span class="line-clamp-1 flex-1 text-[12.5px] text-text">
-                          {memoryPreview(asPreview(h.summary), asPreview(h.title), h.type) ?? '—'}
+                          {label}
+                        </span>
+                        <span class="max-w-28 truncate font-mono text-[11px] text-text-muted">
+                          {h.memory_id}
                         </span>
                         <Show when={h.updated_at}>
                           <span class="font-mono text-[11px] text-text-subtle">
                             {formatDate(h.updated_at!)}
                           </span>
                         </Show>
-                      </button>
-                    </li>
-                  )}
+                        </button>
+                      </li>
+                    );
+                  }}
                 </For>
               </ul>
             </section>

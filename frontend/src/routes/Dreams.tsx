@@ -201,7 +201,44 @@ function signalBucket(r: DreamCycle): string {
 
 function signalLabel(r: DreamCycle): string {
   const count = typeof r.signal_row_count === 'number' ? r.signal_row_count : 0;
-  return `${formatNumber(count)} transcripts`;
+  const source = String(r.signal_source ?? r.summary?.latest_signal_source ?? '');
+  if (source === 'explicit_events') return `${formatNumber(count)} explicit-event rows`;
+  if (source === 'transcript_episodes') return `${formatNumber(count)} transcript rows`;
+  return `${formatNumber(count)} signal rows`;
+}
+
+function latestSignalTimestamp(r: DreamCycle): string | undefined {
+  return (
+    r.latest_signal_timestamp ??
+    (r.summary as { latest_signal_timestamp?: string } | undefined)?.latest_signal_timestamp
+  );
+}
+
+function dreamProofParts(r: DreamCycle): string[] {
+  const count = typeof r.signal_row_count === 'number' ? r.signal_row_count : 0;
+  const source = String(r.signal_source ?? r.summary?.latest_signal_source ?? '');
+  const unit =
+    source === 'explicit_events'
+      ? 'explicit-event rows'
+      : source === 'transcript_episodes'
+        ? 'transcript rows'
+        : 'signal rows';
+  const parts = [
+    `scanned ${formatNumber(count)} ${unit}`,
+  ];
+  const ts = latestSignalTimestamp(r);
+  if (ts) parts.push(`latest ${formatDateLong(ts)}`);
+  parts.push(`proposals ${funnelValue(r, 'generated')}`);
+  parts.push(`learned ${funnelValue(r, 'created')}`);
+  return parts;
+}
+
+function dreamProofSentence(r: DreamCycle): string {
+  const generated = funnelValue(r, 'generated');
+  const created = funnelValue(r, 'created');
+  if (created > 0) return `Materialized: ${dreamProofParts(r).join(' · ')}.`;
+  if (generated > 0) return `Ran but did not promote learned context: ${dreamProofParts(r).join(' · ')}.`;
+  return `Ran but did not learn yet: ${dreamProofParts(r).join(' · ')}.`;
 }
 
 function phaseSignature(r: DreamCycle): string {
@@ -336,6 +373,7 @@ export default function DreamsRoute(): JSX.Element {
     label: string;
     mode: string;
     signal: string;
+    proof: string;
     latestRunId: string | undefined;
     oldestRunId: string | undefined;
     firstTs: string | undefined;
@@ -418,6 +456,7 @@ export default function DreamsRoute(): JSX.Element {
           label: noopLabel(c),
           mode: cycleMode(c),
           signal: signalLabel(c),
+          proof: dreamProofSentence(c),
           latestRunId: first.run_id,
           oldestRunId: last.run_id,
           firstTs: last.started_at,
@@ -544,9 +583,9 @@ export default function DreamsRoute(): JSX.Element {
         if (row.kind === 'effect-group') {
           return (
             <div class="flex flex-col gap-0.5 text-[11px] text-text-muted">
-              <span class="text-text">No change detected across {row.cycles.length} equivalent cycles.</span>
+              <span class="text-text">No material memory change across {row.cycles.length} equivalent cycles.</span>
               <span class="line-clamp-1">
-                {row.label} Same signature: {row.mode}, {row.signal}, same phases.
+                {row.mode} · {row.signal} · same phases · {row.proof}
               </span>
             </div>
           );
@@ -778,6 +817,13 @@ export default function DreamsRoute(): JSX.Element {
                     {reasonExplainer(r().reason)}
                   </p>
                 </Show>
+                <p
+                  class={`text-[11px] leading-snug ${
+                    funnelValue(r(), 'created') > 0 ? 'text-success' : 'text-text-muted'
+                  }`}
+                >
+                  {dreamProofSentence(r())}
+                </p>
               </div>
             );
           }}

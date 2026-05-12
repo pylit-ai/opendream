@@ -8,7 +8,8 @@ import unittest
 import urllib.request
 from pathlib import Path
 
-from opendream.integration import emit_event, maintain, prepare_context
+from opendream.integration import archive_stale_learned_context, emit_event, maintain, prepare_context
+from opendream.models import ContextAssembly
 from opendream.observability import index_observability
 from opendream.storage import MemoryStore
 from opendream.util import read_json, write_json
@@ -354,16 +355,149 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertEqual(context_session["display_name"], "package manager and redis")
         timeline = self.get_json(f"/api/sessions/{context_session_id}/timeline")
         self.assertEqual(timeline["display_name"], "package manager and redis")
+        context_event = next(
+            item
+            for item in timeline["timeline"]
+            if item.get("kind") == "memory.context.assembled"
+        )
+        self.assertEqual(context_event["label"], "package manager and redis")
+        self.assertEqual(context_event["payload"]["display_name"], "package manager and redis")
 
     def test_settings_api_returns_fast_semantic_config_payload(self) -> None:
         payload = self.get_json("/api/settings")
         self.assertIn("semantic_config", payload)
         self.assertIn("retention", payload["semantic_config"])
+        self.assertIn("retention_preview", payload)
         self.assertIn("readiness", payload)
         self.assertEqual(
             payload["semantic_config"]["retention"]["learned_context_archive_grace_days"],
             7,
         )
+        self.assertIn("selected", payload["retention_preview"])
+
+    def test_semantic_retention_preview_counts_activity_gate(self) -> None:
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-preview-1",
+                    "workspace_id": str(self.workspace),
+                    "source_event_ids": ["obs-msg-1"],
+                    "query_family_tags": ["dependencies"],
+                    "summary": "Use pnpm for workspace dependencies.",
+                    "details": "Project setup relies on pnpm.",
+                    "assumptions": "Workspace keeps the same package manager.",
+                    "provider_id": "builtin",
+                    "model_id": "heuristic-v1",
+                    "prompt_version": "1",
+                    "created_at": "2026-03-20T12:00:00Z",
+                    "fresh_until": "2026-03-21T12:00:00Z",
+                    "confidence": 0.9,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "status": "active",
+                }
+            ]
+        )
+        self.store.write_context_assembly(
+            ContextAssembly(
+                context_id="context-preview-1",
+                session_id="session-preview",
+                turn_id="turn-preview-1",
+                retrieval_run_id="retrieve-preview-1",
+                startup_index_snapshot=[],
+                selected_memory_ids=[],
+                omitted_memory_ids=[],
+                omission_reasons=[],
+                assembled_text="# OpenDream Memory Context\nQuery: preview",
+                character_count=42,
+                token_estimate=6,
+                created_at="2026-03-22T12:00:00Z",
+            )
+        )
+
+        archived = self.get_json("/api/semantic-retention-preview?days=1&contexts=1")
+        held = self.get_json("/api/semantic-retention-preview?days=1&contexts=99")
+
+        self.assertEqual(archived["selected"]["would_archive_now"], 1)
+        self.assertEqual(held["selected"]["would_archive_now"], 0)
+        self.assertEqual(held["selected"]["held_by_activity"], 1)
+
+    def test_semantic_retention_preview_explains_archived_recovery(self) -> None:
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-archived-direct",
+                    "summary": "Recently archived context.",
+                    "details": "Still inside restore window.",
+                    "fresh_until": "2026-03-01T12:00:00Z",
+                    "status": "archived",
+                    "restorable_until": "2100-01-01T00:00:00Z",
+                },
+                {
+                    "record_id": "lc-archived-old",
+                    "summary": "Older archived context.",
+                    "details": "No restore window was recorded.",
+                    "fresh_until": "2026-03-01T12:00:00Z",
+                    "status": "archived",
+                },
+            ]
+        )
+
+        payload = self.get_json("/api/semantic-retention-preview?days=30&contexts=4")
+
+        selected = payload["selected"]
+        self.assertEqual(selected["active_total"], 0)
+        self.assertEqual(selected["archived_total"], 2)
+        self.assertEqual(selected["directly_restorable_total"], 1)
+        self.assertEqual(selected["reopenable_archived_total"], 1)
+        self.assertTrue(selected["future_only"])
+        self.assertEqual(selected["immediate_effect"], "future_only")
+
+    def test_reopen_archived_learned_context_marks_review_required(self) -> None:
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-archived-reopen",
+                    "summary": "Archived context to inspect.",
+                    "details": "Needs review before trust.",
+                    "fresh_until": "2026-03-01T12:00:00Z",
+                    "status": "archived",
+                    "verifier_status": "approved",
+                    "archived_at": "2026-03-20T12:00:00Z",
+                    "archive_reason": "stale_after_grace",
+                }
+            ]
+        )
+
+        payload = self.post_json("/api/learned-context/reopen", {"limit": 25, "now": FIXED_NOW})
+
+        self.assertEqual(payload["result"]["reopened"], 1)
+        [record] = self.store.load_learned_context_records()
+        self.assertEqual(record["status"], "active")
+        self.assertEqual(record["verifier_status"], "review_required")
+        self.assertEqual(record["restored_from_status"], "archived")
+        self.assertNotIn("archived_at", record)
+
+    def test_retention_archive_sets_restore_window_for_future_recovery(self) -> None:
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-active-expired",
+                    "summary": "Expired context.",
+                    "details": "Should archive with a recovery window.",
+                    "fresh_until": "2026-03-01T12:00:00Z",
+                    "status": "active",
+                    "verifier_status": "approved",
+                }
+            ]
+        )
+
+        result = archive_stale_learned_context(self.store, now=FIXED_NOW, grace_days=1)
+
+        self.assertEqual(result["archived"], 1)
+        [record] = self.store.load_learned_context_records()
+        self.assertEqual(record["status"], "archived")
+        self.assertEqual(record["restorable_until"], "2026-03-28T12:00:00Z")
 
     def test_retrievals_api_pagination_and_total(self) -> None:
         r0 = self.get_json("/api/retrievals?limit=1&offset=0&sort=id&sort_dir=asc")
@@ -424,6 +558,7 @@ class ObservabilityIntegrationTests(unittest.TestCase):
                     "learned_context_created": 1,
                     "signal_row_count": 8,
                     "latest_signal_source": "explicit_events",
+                    "latest_signal_timestamp": FIXED_NOW,
                     "semantic_trace": {
                         "signal": {
                             "source": "explicit_events",
@@ -466,6 +601,8 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(cycles["total"], 1)
         row = next(item for item in cycles["items"] if item["run_id"] == "semantic-dream-viz")
         self.assertEqual(row["funnel"]["generated"], 2)
+        self.assertEqual(row["signal_source"], "explicit_events")
+        self.assertEqual(row["latest_signal_timestamp"], FIXED_NOW)
         self.assertIn("narrative", row)
         self.assertEqual(row["trace_summary"]["rows_scanned"], 8)
         self.assertEqual(row["trace_summary"]["families_selected"], 3)

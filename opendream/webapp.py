@@ -5,6 +5,7 @@ import os
 import sys
 import time
 from collections import deque
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -37,12 +38,15 @@ from .observability import (
     query_retrievals,
     query_runs,
 )
-from .semantic_verifier import restore_record as restore_learned_context_record
+from .semantic_verifier import (
+    reopen_archived_records_for_review,
+    restore_record as restore_learned_context_record,
+)
 from .semantic_dreamer import dream_status_semantic
 from .service import disable_background_runtime, enable_background_runtime, restart_service, service_status, start_service, stop_service
 from .showcase import load_showcase_report
 from .storage import MemoryStore
-from .util import CLI_JSON_VERSION, to_iso, utc_now
+from .util import CLI_JSON_VERSION, parse_timestamp, to_iso, utc_now
 from . import auto_reviewer as _auto_reviewer
 from .validation import SchemaValidationError, validate_document
 
@@ -51,6 +55,12 @@ from .validation import SchemaValidationError, validate_document
 # /api/_perf is excluded from self-recording to avoid noise.
 _PERF_TIMINGS: deque[dict[str, Any]] = deque(maxlen=200)
 _OPENDREAM_DEV = os.environ.get("OPENDREAM_DEV") == "1"
+_RETENTION_PRESET_SPECS = (
+    ("time_only", "Time only", 7, 0),
+    ("balanced", "Balanced", 14, 2),
+    ("bursty", "Bursty project", 30, 4),
+    ("fast_churn", "Fast churn", 7, 5),
+)
 
 _STATIC_ROOT = (Path(__file__).parent / "static").resolve()
 
@@ -433,6 +443,26 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                     }
                 )
                 return
+            elif parsed.path == "/api/learned-context/reopen":
+                raw_ids = payload.get("record_ids")
+                record_ids = raw_ids if isinstance(raw_ids, list) else None
+                response = reopen_archived_records_for_review(
+                    self.store,
+                    limit=_nonnegative_int(payload.get("limit"), 25) or 25,
+                    record_ids=[str(record_id) for record_id in record_ids] if record_ids else None,
+                    now=payload.get("now"),
+                )
+                index_observability(self.store)
+                self._write_json(
+                    {
+                        "status": "ok",
+                        "result": response,
+                        "settings": _settings_payload(self.store),
+                        "overview": load_or_build_index(self.store)["overview"],
+                        "semantic_changes_latest": build_semantic_change_review(self.store),
+                    }
+                )
+                return
             elif parsed.path == "/api/service/control":
                 action = str(payload.get("action", "")).strip()
                 if action == "enable":
@@ -594,6 +624,18 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/settings":
             self._write_json(_settings_payload(self.store))
+            _finish()
+            return
+        if parsed.path == "/api/semantic-retention-preview":
+            self._write_json(
+                _semantic_retention_preview_payload(
+                    self.store,
+                    grace_days=_parse_query_int(query.get("days"), 7, minimum=0, maximum=3650),
+                    grace_contexts=_parse_query_int(
+                        query.get("contexts"), 0, minimum=0, maximum=100000
+                    ),
+                )
+            )
             _finish()
             return
         if parsed.path == "/api/semantic-config":
@@ -1051,8 +1093,142 @@ def _apply_semantic_config_update(store: MemoryStore, payload: dict[str, Any]) -
     return _settings_payload(store)
 
 
+def _parse_optional_timestamp(raw: Any) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return parse_timestamp(str(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _nonnegative_int(raw: Any, default: int) -> int:
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return default
+
+
+def _semantic_retention_projection(
+    store: MemoryStore,
+    *,
+    grace_days: int,
+    grace_contexts: int,
+    now: str | None = None,
+) -> dict[str, Any]:
+    timestamp = now or to_iso(utc_now())
+    current_time = parse_timestamp(timestamp)
+    cutoff = current_time - timedelta(days=max(0, grace_days))
+    context_times = [
+        parsed
+        for row in store.load_context_assemblies()
+        for parsed in [_parse_optional_timestamp(row.get("created_at"))]
+        if parsed is not None
+    ]
+    context_times.sort()
+    records = store.load_learned_context_records()
+    active_records = [record for record in records if record.get("status") == "active"]
+    archived_records = [record for record in records if record.get("status") == "archived"]
+    archived_total = len(archived_records)
+    directly_restorable_total = 0
+    restore_window_expired_total = 0
+    restore_window_missing_total = 0
+    for record in archived_records:
+        restorable_until = str(record.get("restorable_until") or "").strip()
+        if not restorable_until:
+            restore_window_missing_total += 1
+            continue
+        restorable_until_at = _parse_optional_timestamp(restorable_until)
+        if restorable_until_at is not None and restorable_until_at >= current_time:
+            directly_restorable_total += 1
+        else:
+            restore_window_expired_total += 1
+    would_archive = 0
+    held_by_activity = 0
+    expired_within_calendar_grace = 0
+    oldest_active_fresh_until = None
+    for record in active_records:
+        expired_at = _parse_optional_timestamp(record.get("fresh_until"))
+        if expired_at is None:
+            continue
+        if oldest_active_fresh_until is None or expired_at < oldest_active_fresh_until:
+            oldest_active_fresh_until = expired_at
+        if expired_at >= current_time:
+            continue
+        if expired_at >= cutoff:
+            expired_within_calendar_grace += 1
+            continue
+        contexts_after_expiry = sum(1 for created_at in context_times if created_at > expired_at)
+        if grace_contexts > 0 and contexts_after_expiry < grace_contexts:
+            held_by_activity += 1
+            continue
+        would_archive += 1
+    return {
+        "grace_days": max(0, grace_days),
+        "grace_contexts": max(0, grace_contexts),
+        "would_archive_now": would_archive,
+        "held_by_activity": held_by_activity,
+        "expired_within_calendar_grace": expired_within_calendar_grace,
+        "active_total": len(active_records),
+        "archived_total": archived_total,
+        "directly_restorable_total": directly_restorable_total,
+        "reopenable_archived_total": max(0, archived_total - directly_restorable_total),
+        "restore_window_expired_total": restore_window_expired_total,
+        "restore_window_missing_total": restore_window_missing_total,
+        "learned_context_total": len(records),
+        "context_assembly_total": len(context_times),
+        "latest_context_created_at": to_iso(context_times[-1]) if context_times else None,
+        "oldest_active_fresh_until": (
+            to_iso(oldest_active_fresh_until) if oldest_active_fresh_until else None
+        ),
+        "future_only": len(active_records) == 0 and archived_total > 0,
+        "immediate_effect": (
+            "future_only"
+            if len(active_records) == 0 and archived_total > 0
+            else "would_archive" if would_archive > 0 else "no_active_change"
+        ),
+    }
+
+
+def _semantic_retention_preview_payload(
+    store: MemoryStore,
+    *,
+    grace_days: int,
+    grace_contexts: int,
+    now: str | None = None,
+) -> dict[str, Any]:
+    timestamp = now or to_iso(utc_now())
+    selected = _semantic_retention_projection(
+        store,
+        grace_days=grace_days,
+        grace_contexts=grace_contexts,
+        now=timestamp,
+    )
+    presets = [
+        {
+            "id": preset_id,
+            "label": label,
+            **_semantic_retention_projection(
+                store,
+                grace_days=days,
+                grace_contexts=contexts,
+                now=timestamp,
+            ),
+        }
+        for preset_id, label, days, contexts in _RETENTION_PRESET_SPECS
+    ]
+    return {
+        "generated_at": timestamp,
+        "selected": selected,
+        "presets": presets,
+    }
+
+
 def _settings_payload(store: MemoryStore) -> dict[str, Any]:
     config = _semantic_config_payload(store)
+    retention = config.get("retention", {})
+    if not isinstance(retention, dict):
+        retention = {}
     semantic_status = dream_status_semantic(store)
     mode = str(config.get("mode") or semantic_status.get("mode") or "deterministic")
     posture = "semantic-first" if mode in {"semantic", "hybrid"} else "deterministic"
@@ -1067,6 +1243,11 @@ def _settings_payload(store: MemoryStore) -> dict[str, Any]:
         "next_action": next_action,
         "semantic_status": semantic_status,
         "semantic_config": config,
+        "retention_preview": _semantic_retention_preview_payload(
+            store,
+            grace_days=_nonnegative_int(retention.get("learned_context_archive_grace_days"), 7),
+            grace_contexts=_nonnegative_int(retention.get("learned_context_archive_grace_contexts"), 0),
+        ),
         "readiness": {
             "mode": mode,
             "posture": posture,

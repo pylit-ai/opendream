@@ -1109,13 +1109,13 @@ def _hook_script(adapter: str, phase: str) -> str:
                 "",
                 'if [ -n "$GLOBAL" ]; then',
                 (
-                    "  opendream prepare-context --workspace "
+                    '  "${OPENDREAM_BIN:-opendream}" prepare-context --workspace '
                     f'"$WORKSPACE" --query "$QUERY" --output compact-json '
                     f'--include-global --global-workspace "$GLOBAL" {agent_args}'
                 ).rstrip(),
                 "else",
                 (
-                    '  opendream prepare-context --workspace "$WORKSPACE" '
+                    '  "${OPENDREAM_BIN:-opendream}" prepare-context --workspace "$WORKSPACE" '
                     f'--query "$QUERY" --output compact-json {agent_args}'
                 ).rstrip(),
                 "fi",
@@ -1134,10 +1134,10 @@ def _hook_script(adapter: str, phase: str) -> str:
             "",
             *agent_lines,
             "",
-            "opendream emit-event --workspace "
+            '"${OPENDREAM_BIN:-opendream}" emit-event --workspace '
             f'"$WORKSPACE" --kind task_outcome --content "$SUMMARY" --message-ref "$MESSAGE_REF" {agent_args}'.rstrip(),
-            'opendream maintain --workspace "$WORKSPACE"',
-            'opendream dream worker --workspace "$WORKSPACE" --once',
+            '"${OPENDREAM_BIN:-opendream}" maintain --workspace "$WORKSPACE"',
+            '"${OPENDREAM_BIN:-opendream}" dream worker --workspace "$WORKSPACE" --once',
             "",
         ]
     )
@@ -1156,19 +1156,20 @@ def _openclaw_hook_script() -> str:
             "",
             'if [ "$MODE" = "pre-plan" ]; then',
             '  if [ -n "$GLOBAL" ]; then',
-            "    opendream prepare-context --workspace "
+            '    "${OPENDREAM_BIN:-opendream}" prepare-context --workspace '
             '"$WORKSPACE" --query "$PAYLOAD" --output compact-json --include-global --global-workspace "$GLOBAL"',
             "  else",
-            '    opendream prepare-context --workspace "$WORKSPACE" --query "$PAYLOAD" --output compact-json',
+            '    "${OPENDREAM_BIN:-opendream}" prepare-context --workspace "$WORKSPACE" '
+            '--query "$PAYLOAD" --output compact-json',
             "  fi",
             "  exit 0",
             "fi",
             "",
-            "opendream emit-event --workspace "
+            '"${OPENDREAM_BIN:-opendream}" emit-event --workspace '
             '"$WORKSPACE" --kind task_outcome --content "$PAYLOAD" '
             '--message-ref "${OPENCLAW_REF:-openclaw-post-task}"',
-            'opendream maintain --workspace "$WORKSPACE"',
-            'opendream dream worker --workspace "$WORKSPACE" --once',
+            '"${OPENDREAM_BIN:-opendream}" maintain --workspace "$WORKSPACE"',
+            '"${OPENDREAM_BIN:-opendream}" dream worker --workspace "$WORKSPACE" --once',
             "",
         ]
     )

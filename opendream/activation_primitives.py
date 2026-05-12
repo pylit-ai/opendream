@@ -37,7 +37,7 @@ LEGACY_CODEX_BLOCK_END = "<!-- OPENDREAM:CODEX END -->"
 
 def opendream_command(store: MemoryStore, command: str) -> str:
     flags = [
-        "opendream",
+        '"${OPENDREAM_BIN:-opendream}"',
         *command.split(),
         "--workspace",
         '"$WORKSPACE"',

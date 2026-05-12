@@ -279,17 +279,24 @@ export default function GraphRoute(): JSX.Element {
       if (v == null) return '';
       try { return JSON.stringify(v); } catch { return ''; }
     };
+    const compact = (v: unknown, fallback: string): string => {
+      const text = stringify(v).replace(/\s+/g, ' ').trim();
+      const label = text || fallback;
+      return label.length > 48 ? `${label.slice(0, 45)}...` : label;
+    };
+    const withShortId = (label: string, id: string): string => `${label} · ${id.slice(0, 12)}`;
     for (const r of runs.slice(0, 8)) {
+      const label = compact(r.summary ?? r.status, r.run_id);
       out.push({
         id: r.run_id,
-        label: `${r.run_id.slice(0, 12)} · ${stringify(r.summary).slice(0, 40) || r.status || ''}`,
+        label: withShortId(label, r.run_id),
         group: 'Recent runs',
       });
     }
     const ov = overviewSnapshot() as
       | (OverviewPayload & {
           memory_surface?: { recent_highlights?: Array<{ memory_id?: string; title?: string }> };
-          recent_sessions?: Array<{ session_id?: string }>;
+          recent_sessions?: Array<{ session_id?: string; display_name?: string; event_count?: number }>;
         })
       | undefined;
     const highlights = ov?.memory_surface?.recent_highlights ?? [];
@@ -297,7 +304,7 @@ export default function GraphRoute(): JSX.Element {
       if (h.memory_id) {
         out.push({
           id: h.memory_id,
-          label: `${h.memory_id.slice(0, 12)} · ${stringify(h.title).slice(0, 40)}`,
+          label: withShortId(compact(h.title, h.memory_id), h.memory_id),
           group: 'Recent memories',
         });
       }
@@ -307,7 +314,17 @@ export default function GraphRoute(): JSX.Element {
       if (s.session_id) {
         out.push({
           id: s.session_id,
-          label: s.session_id,
+          label: withShortId(
+            compact(
+              s.display_name ?? (
+                typeof s.event_count === 'number'
+                  ? `${s.event_count} event${s.event_count === 1 ? '' : 's'}`
+                  : undefined
+              ),
+              s.session_id,
+            ),
+            s.session_id,
+          ),
           group: 'Recent sessions',
         });
       }

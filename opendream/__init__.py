@@ -24,10 +24,13 @@ def _fallback_version_from_pyproject() -> str:
 
 
 def _resolve_version() -> str:
+    pyproject_version = _fallback_version_from_pyproject()
+    if pyproject_version != "0.0.0+unknown":
+        return pyproject_version
     try:
         return version("opendream")
     except PackageNotFoundError:
-        return _fallback_version_from_pyproject()
+        return pyproject_version
 
 
 __version__ = _resolve_version()

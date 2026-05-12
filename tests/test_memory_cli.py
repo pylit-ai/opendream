@@ -2620,6 +2620,8 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(first["status"], "configured")
         self.assertTrue((self.workspace / ".opendream" / "hooks" / "claude-pre-task.sh").exists())
         self.assertTrue((self.workspace / ".opendream" / "hooks" / "codex-post-task.sh").exists())
+        codex_post_hook = (self.workspace / ".opendream" / "hooks" / "codex-post-task.sh").read_text(encoding="utf-8")
+        self.assertIn('"${OPENDREAM_BIN:-opendream}"', codex_post_hook)
 
         second = run_cli("service", "autowire", "--workspace", str(self.workspace), "--target", "all", "--force")
         self.assertEqual(second["status"], "configured")
@@ -2847,6 +2849,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             **os.environ,
             "PATH": f"{shim_path.parent}{os.pathsep}{os.environ.get('PATH', '')}",
             "PYTHONPATH": str(REPO_ROOT),
+            "OPENDREAM_BIN": str(shim_path),
             "OPENDREAM_WORKSPACE": str(self.workspace),
             "OPENDREAM_QUERY": "verify wrapper path",
             "OPENDREAM_SUMMARY": "wrapper completed",

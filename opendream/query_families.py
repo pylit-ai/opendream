@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from .episodes import row_text
 from .storage import MemoryStore
 from .util import semantic_tokens, stable_id
 
@@ -114,7 +115,7 @@ def infer_families_from_transcripts(
     # Extract question-like content from rows
     questions: list[str] = []
     for row in rows:
-        text = str(row.get("text") or row.get("message") or "")
+        text = row_text(row)
         if not text.strip():
             continue
         # Look for question patterns

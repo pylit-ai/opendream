@@ -48,6 +48,7 @@ _TASK_PROFILE_TERMS = {
 }
 _MAX_PERSISTED_LEARNED_CONTEXT_COMPARE_ITEMS = 12
 _LEARNED_CONTEXT_ARCHIVE_GRACE_DAYS = 7
+_LEARNED_CONTEXT_RESTORE_WINDOW_HOURS = 24
 _LEARNED_CONTEXT_REASON_LABELS = {
     "selected_for_context": "Kept active in this context",
     "inactive_learned_context": "Already removed from active learned context",
@@ -129,6 +130,9 @@ def archive_stale_learned_context(
                 next_record["archived_at"] = timestamp
                 next_record["archive_reason"] = "stale_after_grace"
                 next_record["status_changed_at"] = timestamp
+                next_record["restorable_until"] = to_iso(
+                    parse_timestamp(timestamp) + timedelta(hours=_LEARNED_CONTEXT_RESTORE_WINDOW_HOURS)
+                )
                 archived_ids.append(str(record.get("record_id") or ""))
         updated.append(next_record)
     if archived_ids:

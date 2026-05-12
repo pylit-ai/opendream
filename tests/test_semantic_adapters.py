@@ -589,6 +589,85 @@ class TestSemanticStatus(unittest.TestCase):
         )
         self.assertEqual(status["active_adapter"], "codex-account")
 
+    def test_status_explains_archived_materialization_after_semantic_runs(self) -> None:
+        from opendream.semantic_dreamer import dream_status_semantic
+
+        scaffold_adapter(self.workspace, "codex-account")
+        self.store.save_semantic_config(
+            {
+                **self.store.load_semantic_config(),
+                "mode": "semantic",
+                "execution_strategy": "codex-account",
+                "active_adapter": "codex-account",
+                "candidate_strategies": ["codex-account", "deterministic"],
+                "preferred_auth_mode": "no-extra-key",
+            }
+        )
+        self.store.save_dream_state(
+            {
+                "last_result": "completed",
+                "last_ran_at": FIXED_NOW,
+                "semantic_mode": "semantic",
+                "run_id": "semantic-dream-test",
+                "last_run_summary": {
+                    "run_id": "semantic-dream-test",
+                    "mode": "semantic",
+                    "status": "completed",
+                    "ended_at": FIXED_NOW,
+                    "proposals_generated": 0,
+                    "learned_context_created": 0,
+                },
+            }
+        )
+        self.store.save_learned_context_records(
+            [
+                {
+                    "record_id": "lc-archived",
+                    "workspace_id": str(self.workspace),
+                    "source_event_ids": [],
+                    "query_family_tags": [],
+                    "summary": "Old learned context.",
+                    "details": "Archived by retention.",
+                    "assumptions": "",
+                    "provider_id": "builtin",
+                    "model_id": "heuristic-v1",
+                    "prompt_version": "1",
+                    "created_at": "2026-03-01T12:00:00Z",
+                    "fresh_until": "2026-03-08T12:00:00Z",
+                    "confidence": 0.7,
+                    "verifier_status": "approved",
+                    "conflict_state": "none",
+                    "status": "archived",
+                }
+            ]
+        )
+
+        with (
+            patch("opendream.semantic_setup._is_trusted_environment", return_value=True),
+            patch(
+                "opendream.semantic_setup.detect_all_tools",
+                return_value={
+                    "detected_tools": ["codex"],
+                    "details": [
+                        {
+                            "tool": "codex",
+                            "detected": True,
+                            "binary_found": True,
+                            "config_found": True,
+                        }
+                    ],
+                },
+            ),
+        ):
+            status = dream_status_semantic(self.store)
+
+        self.assertEqual(status["materialization"]["state"], "all_archived")
+        self.assertIn("all 1 record(s) are archived", status["availability_reason"])
+        self.assertEqual(
+            status["next_action"],
+            "adjust retention or restore relevant learned context, then run a semantic dream",
+        )
+
     def test_semantic_dream_run_uses_recent_events_when_no_transcript_episodes_exist(self) -> None:
         from opendream.integration import emit_event
         from opendream.semantic_dreamer import semantic_dream_run
@@ -708,6 +787,41 @@ class TestSemanticStatus(unittest.TestCase):
         self.assertEqual(result["no_materialization_reason"], "gather_recent_signal:no-signal-rows")
         self.assertEqual(result["semantic_trace"]["signal"]["rows_gathered"], 0)
         self.assertEqual(result["semantic_trace"]["materialization"]["retention_status"], "no-new-records")
+
+    def test_semantic_synthesis_falls_back_when_family_overlap_is_weak(self) -> None:
+        from opendream.semantic_dreamer import _synthesize_proposals
+
+        rows = [
+            {
+                "event_id": f"event-{idx}",
+                "timestamp": f"2026-03-31T11:{idx:02d}:00Z",
+                "text": (
+                    "Committed Research Engine work, promoted GLD TSMOM to paper review, "
+                    "and closed the associated implementation ticket."
+                ),
+            }
+            for idx in range(3)
+        ]
+        proposals = _synthesize_proposals(
+            self.store,
+            gathered_rows=rows,
+            selected_families=[
+                {
+                    "family_id": "unrelated",
+                    "title": "Unrelated onboarding taxonomy",
+                    "description": "Authentication billing invoice portal setup",
+                    "examples": [],
+                    "freshness_window_hours": 168,
+                }
+            ],
+            budgets={"max_proposals_per_run": 20},
+            now=FIXED_NOW,
+        )
+
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["query_family_tags"], ["recent-project-activity"])
+        self.assertEqual(len(proposals[0]["source_event_ids"]), 3)
+        self.assertIn("Recent project activity", proposals[0]["summary"])
 
 
 class TestSecurityPolicy(unittest.TestCase):

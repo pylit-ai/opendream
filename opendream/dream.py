@@ -7,7 +7,7 @@ from typing import Any
 
 from .boundaries import boundary_enforcement_report, default_allowed_write_roots, verify_no_code_writes
 from .dream_narrative import synthesize_dream_narrative
-from .episodes import latest_episode_timestamp, load_episode_rows, looks_memory_worthy, row_to_event
+from .episodes import latest_episode_timestamp, load_episode_rows, looks_memory_worthy, row_text, row_to_event
 from .integration import maintain
 from .storage import LockError, MemoryStore
 from .util import CLI_JSON_VERSION, parse_timestamp, prune_recent_failures, semantic_tokens, stable_id, to_iso, utc_now
@@ -506,7 +506,7 @@ def _gather_recent_signal(rows: list[dict[str, Any]], orientation_tokens: set[st
         row
         for row in recent_rows
         if looks_memory_worthy(
-            str(row.get("text") or row.get("message") or ""),
+            row_text(row),
             orientation_tokens,
         )
     ]

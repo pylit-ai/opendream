@@ -88,7 +88,6 @@ from .showcase import (
 from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, store_sort_key
 from .util import FIXTURE_ROOT, json_dumps, read_json, stable_id, to_iso, utc_now, write_json
 from .validation import validate_document
-from .webapp import build_server
 
 COMPACT_CONTEXT_BUDGET_BYTES = 32768
 
@@ -97,6 +96,12 @@ ACTIVATION_TARGETS_HELP = (
     f"(built-in ids: {', '.join(SUPPORTED_TARGETS)}; "
     "workspace adapters: .opendream/adapters/*.json)"
 )
+
+
+def build_server(*args: Any, **kwargs: Any) -> Any:
+    from .webapp import build_server as _build_server
+
+    return _build_server(*args, **kwargs)
 
 TOP_LEVEL_EXAMPLES = """Examples:
   opendream init --workspace "$PWD" --activate-configured

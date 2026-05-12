@@ -191,6 +191,14 @@ def _context_query_text(row: dict[str, Any] | None) -> str | None:
     return None
 
 
+def _compact_display_label(value: str | None, fallback: str) -> str:
+    if value:
+        label = " ".join(value.split())
+        if label:
+            return label[:77] + "..." if len(label) > 80 else label
+    return fallback
+
+
 def _compact_run_row(row: dict[str, Any]) -> dict[str, Any]:
     out = {key: value for key, value in row.items() if key not in _RUN_LIST_STRIP}
     out.pop("target_paths", None)
@@ -1089,7 +1097,13 @@ def _build_dream_cycle_projection(run: dict[str, Any], *, include_detail: bool) 
         for trace in phase_traces
     }
     narrative = str(run.get("narrative") or summary.get("narrative") or "").strip()
-    if not narrative:
+    stale_semantic_noop_narrative = (
+        str(summary.get("mode") or run.get("mode") or run.get("type")) in {"semantic", "hybrid"}
+        and _int(summary.get("proposals_generated")) == 0
+        and _int(summary.get("learned_context_created")) == 0
+        and "deterministic memory maintenance" in narrative
+    )
+    if not narrative or stale_semantic_noop_narrative:
         narrative = synthesize_dream_narrative({**summary, "status": run.get("status"), "type": run.get("type")})
     projection: dict[str, Any] = {
         "id": run.get("id") or run.get("run_id"),
@@ -1105,6 +1119,7 @@ def _build_dream_cycle_projection(run: dict[str, Any], *, include_detail: bool) 
         "cost_usd": summary.get("cost_usd"),
         "tokens_used": summary.get("tokens_used"),
         "signal_source": summary.get("latest_signal_source") or summary.get("trigger_class"),
+        "latest_signal_timestamp": summary.get("latest_signal_timestamp"),
         "signal_row_count": _int(summary.get("signal_row_count") or summary.get("gathered_rows")),
         "appended_events": _int(summary.get("appended_events") or summary.get("staged_events")),
         "funnel": _dream_funnel_counts(summary),
@@ -2609,13 +2624,16 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
                 }
             )
         for context in grouped_contexts.get(session_id, []):
+            context_id = str(context.get("context_id") or "")
+            context_query = _context_query_text(context)
+            context_label = _compact_display_label(context_query, context_id or "context")
             timeline.append(
                 {
                     "timestamp": context.get("created_at"),
                     "kind": "memory.context.assembled",
-                    "label": context.get("context_id"),
-                    "object_id": context.get("context_id"),
-                    "payload": context,
+                    "label": context_label,
+                    "object_id": context_id,
+                    "payload": {**context, "display_name": context_label},
                 }
             )
         timeline.sort(key=lambda item: str(item.get("timestamp", "")))
@@ -2631,10 +2649,12 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
         )
         latest_context = latest_contexts[0] if latest_contexts else None
         latest_context_query = _context_query_text(latest_context)
+        session_display_name = _compact_display_label(latest_context_query, session_id)
         sessions.append(
             {
                 "id": session_id,
                 "session_id": session_id,
+                "display_name": session_display_name,
                 "event_count": len(grouped_events.get(session_id, [])),
                 "context_count": len(grouped_contexts.get(session_id, [])),
                 "started_at": started_at,
@@ -2932,6 +2952,7 @@ def _recent_sessions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         sessions.append(
             {
                 "session_id": session_id,
+                "display_name": _compact_display_label(None, session_id),
                 "event_count": len(rows),
                 "started_at": rows[0].get("timestamp"),
                 "ended_at": rows[-1].get("timestamp"),

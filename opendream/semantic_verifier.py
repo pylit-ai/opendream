@@ -390,6 +390,54 @@ def restore_record(
     return {"status": "not_found", "record_id": record_id}
 
 
+def reopen_archived_records_for_review(
+    store: MemoryStore,
+    *,
+    limit: int = 25,
+    record_ids: list[str] | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Reactivate archived learned context as review-required, not silently approved."""
+    timestamp = now or to_iso(utc_now())
+    limit = max(1, min(int(limit), 500))
+    requested_ids = {str(record_id) for record_id in record_ids or [] if str(record_id).strip()}
+    records = store.load_learned_context_records()
+    reopened: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for record in records:
+        record_id = str(record.get("record_id") or "")
+        if requested_ids and record_id not in requested_ids:
+            continue
+        if len(reopened) >= limit:
+            break
+        current_status = str(record.get("status") or "")
+        if current_status != "archived":
+            if requested_ids:
+                skipped.append({"record_id": record_id, "reason": f"status {current_status or 'unknown'}"})
+            continue
+        record["restored_from_status"] = current_status
+        record["restored_at"] = timestamp
+        record["status"] = "active"
+        record["status_changed_at"] = timestamp
+        record["verifier_status"] = "review_required"
+        record["reopen_reason"] = "manual_review"
+        record.pop("archived_at", None)
+        record.pop("archive_reason", None)
+        record.pop("restorable_until", None)
+        reopened.append(record_id)
+    if reopened:
+        store.save_learned_context_records(records)
+    missing = sorted(requested_ids - {str(record.get("record_id") or "") for record in records})
+    skipped.extend({"record_id": record_id, "reason": "not_found"} for record_id in missing)
+    return {
+        "status": "reopened" if reopened else "none_reopened",
+        "reopened": len(reopened),
+        "reopened_record_ids": reopened,
+        "skipped": skipped,
+        "limit": limit,
+    }
+
+
 def distill_to_durable_candidate(
     learned_record: dict[str, Any],
     *,

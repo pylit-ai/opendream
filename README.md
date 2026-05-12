@@ -54,6 +54,21 @@ Full demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
 </details>
 
 <details>
+<summary><strong>More short CLI demos</strong></summary>
+
+OpenDream's first-run path is intentionally small. These clips show the next decisions without making the README front-load every advanced feature.
+
+| Demo | What it shows |
+|------|---------------|
+| ![Agent context retrieval](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/02-agent-context-retrieval.gif) | `prepare-context` turns durable repo memory into prompt-ready agent context. |
+| ![Memory safety abstention](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/03-memory-safety-abstention.gif) | Unrelated prompts return an explicit no-match instead of injecting stale or irrelevant memory. |
+| ![Showcase evaluation proof](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
+
+Full demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
+
+</details>
+
+<details>
 <summary><strong>Install options</strong> (venv, editable checkout, PEP 668)</summary>
 
 **PyPI (recommended once published)** — use an isolated tool env to avoid system Python restrictions (PEP 668):
