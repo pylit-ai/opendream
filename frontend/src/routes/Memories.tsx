@@ -634,7 +634,7 @@ export function MemoriesExplorer(): JSX.Element {
 
 export function MemoriesChanges(): JSX.Element {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const [showDreamDeltas, setShowDreamDeltas] = createSignal(false);
   const [cycles, { refetch }] = createResource(() =>
     cachedFetch('dream-cycles', () => getDreamCycles({ limit: 200 }), 15_000),
@@ -642,8 +642,6 @@ export function MemoriesChanges(): JSX.Element {
   const semanticSourceId = (): string | null =>
     typeof searchParams.id === 'string' && searchParams.id ? searchParams.id : null;
   const semanticResourceKey = (): string => semanticSourceId() ?? 'latest';
-  const semanticItemId = (): string | null =>
-    typeof searchParams.item === 'string' && searchParams.item ? searchParams.item : null;
   const [semanticChange, { refetch: refetchSemanticChange }] = createResource<
     SemanticChangeReview,
     string
@@ -682,22 +680,6 @@ export function MemoriesChanges(): JSX.Element {
   const semanticContextId = (item?: SemanticChangeItem | null): string => {
     const itemContext = typeof item?.source_context_id === 'string' ? item.source_context_id : '';
     return itemContext || semanticChange()?.source_id || '';
-  };
-  const selectedSemanticItem = (): SemanticChangeItem | null => {
-    const selected = semanticItemId();
-    if (!selected) return null;
-    return (
-      semanticItems().find((item) => item.record_id === selected || item.change_id === selected) ??
-      null
-    );
-  };
-  const selectSemanticItem = (item: SemanticChangeItem): void => {
-    const sourceId = semanticContextId(item);
-    if (!sourceId) return;
-    const itemId = item.record_id ?? item.change_id;
-    setSearchParams(itemId ? { id: sourceId, item: itemId } : { id: sourceId }, {
-      replace: false,
-    });
   };
   const openSemanticContext = (item?: SemanticChangeItem | null): void => {
     const id = semanticContextId(item);
@@ -906,14 +888,7 @@ export function MemoriesChanges(): JSX.Element {
                   rowKey={(item) =>
                     item.change_id ?? `${item.record_id ?? 'record'}:${item.change_class ?? 'change'}`
                   }
-                  onRowClick={selectSemanticItem}
-                  rowClass={(item) =>
-                    selectedSemanticItem() &&
-                    (item.record_id === selectedSemanticItem()?.record_id ||
-                      item.change_id === selectedSemanticItem()?.change_id)
-                      ? 'bg-[color-mix(in_oklab,rgb(var(--c-accent))_9%,transparent)]'
-                      : undefined
-                  }
+                  onRowClick={(item) => openSemanticContext(item)}
                   empty={
                     <EmptyState
                       icon={Database}
@@ -922,41 +897,7 @@ export function MemoriesChanges(): JSX.Element {
                     />
                   }
                 />
-                <Show when={selectedSemanticItem()}>
-                  {(item) => (
-                    <section class="hairline-t pt-3">
-                      <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                        <dl class="grid flex-1 grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-[12px]">
-                          <dt class="text-text-muted">Record</dt>
-                          <dd class="font-mono text-text">{item().record_id ?? item().change_id}</dd>
-                          <dt class="text-text-muted">Change</dt>
-                          <dd class="text-text">{item().change_class ?? 'unknown'}</dd>
-                          <dt class="text-text-muted">Reason</dt>
-                          <dd class="text-text">{item().reason_code ?? 'none'}</dd>
-                          <dt class="text-text-muted">Source context</dt>
-                          <dd class="font-mono text-text">{semanticContextId(item()) || 'unknown'}</dd>
-                          <Show when={item().summary}>
-                            <dt class="text-text-muted">Summary</dt>
-                            <dd class="text-text">{item().summary}</dd>
-                          </Show>
-                          <Show when={asPreview(item().operator_summary)}>
-                            <dt class="text-text-muted">Operator note</dt>
-                            <dd class="text-text">{asPreview(item().operator_summary)}</dd>
-                          </Show>
-                        </dl>
-                        <button
-                          type="button"
-                          onClick={() => openSemanticContext(item())}
-                          disabled={!semanticContextId(item())}
-                          class="rounded-md border border-border px-3 py-1.5 text-[12px] text-text hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Open source context
-                        </button>
-                      </div>
-                    </section>
-                  )}
-                </Show>
-            </section>
+              </section>
 
             <div>
               <button
