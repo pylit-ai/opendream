@@ -6,12 +6,13 @@ project-lead review-response verification pass.
 ## Candidate
 
 - Package: `opendream`
-- Version: `0.3.7`
-- Tag: `v0.3.7`
-- Published release: <https://github.com/pylit-ai/opendream/releases/tag/v0.3.7>
+- Version: `0.3.8`
+- Tag: `v0.3.8`
+- Published release: <https://github.com/pylit-ai/opendream/releases/tag/v0.3.8>
 - Review-response commit: `21ab1d4`
-- Release commit: `c82b959a722073d2efed73ebca68ded250782746`
-- Evidence generated: `2026-05-12T23:36:25Z`
+- Review-polish commit: `94e4b6e`
+- Release commit: `b7b05d22b011c39e99536d28892d5501160d7001`
+- Evidence generated: `2026-05-13T02:20:24Z`
 - Python: `3.12.11`
 - Platform: `macOS-26.4.1-arm64-arm-64bit`
 
@@ -26,25 +27,25 @@ project-lead review-response verification pass.
 | Release manifest | PASS | `.tmp/release-check/release_manifest.json`, 29 stages, 0 failures |
 | Dream fidelity boundary JSON | PASS | Passing report has `violations: []`, `blocked_code_writes: []`, and allowed memory writes separated |
 | Semantic benchmark empty tier | PASS | Empty MemoryAgentBench-style tier reports `skipped_no_fixture`; overall status is `passed_with_skips` |
-| Clean build/install smoke | PASS | Release automation built and installed `opendream 0.3.7` locally before tagging |
+| Clean build/install smoke | PASS | Release automation built and installed `opendream 0.3.8` locally before tagging |
 
 ## Remote Release Gates
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
-| Remote tag check | PASS | `refs/tags/v0.3.7` exists on `origin` |
-| GitHub release, authenticated | PASS | Non-draft, non-prerelease `v0.3.7`, published `2026-05-12T23:36:08Z` |
-| Required CI on release commit | PASS | CI run `25768566639`, conclusion `success`, head SHA `c82b959a722073d2efed73ebca68ded250782746` |
-| PyPI trusted publishing | PASS | Publish run `25768567321`, conclusion `success`, head SHA `c82b959a722073d2efed73ebca68ded250782746` |
-| PyPI package smoke | PASS | PyPI latest version is `0.3.7`; Python 3.12 clean install reports `opendream 0.3.7` and `import opendream` succeeds |
+| Remote tag check | PASS | `refs/tags/v0.3.8` exists on `origin` |
+| GitHub release, authenticated | PASS | Non-draft, non-prerelease `v0.3.8`, published `2026-05-13T02:14:56Z` |
+| Required CI on release commit | PASS | CI run `25774060612`, conclusion `success`, head SHA `b7b05d22b011c39e99536d28892d5501160d7001` |
+| PyPI trusted publishing | PASS | Publish run `25774060977`, conclusion `success`, head SHA `b7b05d22b011c39e99536d28892d5501160d7001` |
+| PyPI package smoke | PASS | PyPI latest version is `0.3.8`; Python 3.12 clean install from `https://pypi.org/simple` reports `opendream 0.3.8` and `import opendream` succeeds |
 | External GitHub visibility | PENDING | Requires the operator visibility flip for `pylit-ai/opendream`; re-check repo, release, CI badge, raw demo media, and Git install after the repo is public |
 
 ## Artifact Hashes
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `opendream-0.3.7-py3-none-any.whl` | `4c27124f401f86144fa167fcb068c79272b3f7e181d6142b1e6c6877fd084db8` |
-| `opendream-0.3.7.tar.gz` | `7854538ece1813b778ac6153af0fbca01c75518fd1cec643f18fc256d4f7cf90` |
+| `opendream-0.3.8-py3-none-any.whl` | `93092c08f5a76360d165fd6a7f45a7cc492587ed4baccaec735f7506db8d5689` |
+| `opendream-0.3.8.tar.gz` | `54846babf2f943182f8284011d73cb3995f45387aab1b2a51561b931468a5b89` |
 
 ## Known Waivers
 
