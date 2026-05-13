@@ -1,5 +1,5 @@
 import { createEffect, createResource, createSignal, For, Show, type JSX } from 'solid-js';
-import { useSearchParams } from '@solidjs/router';
+import { useNavigate, useSearchParams } from '@solidjs/router';
 import { FileText } from 'lucide-solid';
 import { getContext, getContexts } from '~/api/client';
 import { cachedFetch } from '~/lib/cache';
@@ -47,6 +47,7 @@ function SelectionMetric(props: {
 }
 
 export default function ContextRoute(): JSX.Element {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialId = typeof searchParams.id === 'string' ? searchParams.id : null;
   const [selectedId, setSelectedId] = createSignal<string | null>(initialId);
@@ -73,6 +74,11 @@ export default function ContextRoute(): JSX.Element {
   const selectContext = (id: string): void => {
     setSelectedId(id);
     setSearchParams({ id }, { replace: false });
+  };
+
+  const openMemory = (id: string): void => {
+    if (!id || id === '?') return;
+    navigate(`/memories/explorer?id=${encodeURIComponent(id)}`);
   };
 
   const [contextDetail] = createResource<ContextRecord | null, string | null>(
@@ -266,7 +272,7 @@ export default function ContextRoute(): JSX.Element {
                                       {(id) => (
                                         <button
                                           type="button"
-                                          onClick={() => navigate(`/memories/explorer?id=${encodeURIComponent(id)}`)}
+                                          onClick={() => openMemory(id)}
                                           class="rounded-md hairline bg-surface-elevated px-3 py-1.5 text-[12px] text-left w-full hover:bg-surface transition-colors"
                                           title={`Open memory ${id} in Explorer`}
                                         >
@@ -285,10 +291,16 @@ export default function ContextRoute(): JSX.Element {
                                   <div class="flex flex-col gap-1">
                                     <For each={omissionEntries}>
                                       {(o) => (
-                                        <div class="flex items-center justify-between gap-2 rounded-md hairline bg-surface-elevated px-3 py-1.5 text-[12px]">
-                                          <span class="font-mono text-text">{o.id}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => openMemory(o.id)}
+                                          disabled={!o.id || o.id === '?'}
+                                          class="group flex w-full items-center justify-between gap-2 rounded-md hairline bg-surface-elevated px-3 py-1.5 text-left text-[12px] transition-colors enabled:hover:bg-surface disabled:cursor-default"
+                                          title={o.id && o.id !== '?' ? `Open memory ${o.id} in Explorer` : undefined}
+                                        >
+                                          <span class="font-mono text-accent group-hover:underline">{o.id}</span>
                                           <span class="text-text-subtle">{o.reason || '—'}</span>
-                                        </div>
+                                        </button>
                                       )}
                                     </For>
                                   </div>
