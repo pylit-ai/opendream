@@ -18,7 +18,8 @@ uv tool install opendream
 opendream --version
 ```
 
-If flags like `activate` or `semantic` are missing, upgrade per the [README quick start](../../README.md#quick-start) (PyPI can lag).
+If flags like `activate`, `deactivate`, `semantic`, or `eval` are missing,
+upgrade per the [README quick start](../../README.md#quick-start).
 
 ## Commands executed
 

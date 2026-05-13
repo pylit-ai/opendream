@@ -29,7 +29,11 @@ opendream activate --workspace "$PWD" --repair
 opendream deactivate --workspace "$PWD"
 ```
 
-**PyPI can lag the README.** If `opendream init -h` does not list `--activate-configured`, or `opendream --help` has no `activate` / `deactivate` commands, upgrade from **Git** (below) or use a **local editable install** from this repository. `uv tool install opendream` only updates when a newer wheel is published. After upgrading, `opendream semantic --help` and `opendream eval --help` are quick checks that your install matches the docs for semantic sleep-time and evaluation commands.
+If your installed CLI does not show `activate`, `deactivate`, `semantic`, or
+`eval`, upgrade with `uv tool upgrade opendream` or reinstall from Git. After
+upgrading, `opendream semantic --help` and `opendream eval --help` are quick
+checks that your install matches the docs for semantic sleep-time and
+evaluation commands.
 
 Bleeding-edge from Git (overwrites the tool env): `uv tool install --force "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
 
@@ -48,21 +52,6 @@ OpenDream's first-run path is intentionally small. These clips show the next dec
 | ![Agent context retrieval](./docs/assets/demos/02-agent-context-retrieval.gif) | `prepare-context` turns durable repo memory into prompt-ready agent context. |
 | ![Memory safety abstention](./docs/assets/demos/03-memory-safety-abstention.gif) | Unrelated prompts return an explicit no-match instead of injecting stale or irrelevant memory. |
 | ![Showcase evaluation proof](./docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
-
-Full demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
-
-</details>
-
-<details>
-<summary><strong>More short CLI demos</strong></summary>
-
-OpenDream's first-run path is intentionally small. These clips show the next decisions without making the README front-load every advanced feature.
-
-| Demo | What it shows |
-|------|---------------|
-| ![Agent context retrieval](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/02-agent-context-retrieval.gif) | `prepare-context` turns durable repo memory into prompt-ready agent context. |
-| ![Memory safety abstention](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/03-memory-safety-abstention.gif) | Unrelated prompts return an explicit no-match instead of injecting stale or irrelevant memory. |
-| ![Showcase evaluation proof](https://raw.githubusercontent.com/pylit-ai/opendream/main/docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
 
 Full demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
 

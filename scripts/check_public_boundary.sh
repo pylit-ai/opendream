@@ -2,8 +2,12 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(git -C "$script_dir/.." rev-parse --show-toplevel)"
+repo_root="$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null || (cd "$script_dir/.." && pwd))"
 cd "$repo_root"
+is_git_checkout=0
+if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  is_git_checkout=1
+fi
 
 strict_local=0
 for arg in "$@"; do
@@ -34,20 +38,31 @@ content_filtered="$(mktemp)"
 tracked_codex_goal="$(mktemp)"
 trap 'rm -f "$tracked_or_new" "$existing_paths" "$blocked_hits" "$agent_doc_hits" "$content_hits" "$content_filtered" "$tracked_codex_goal"' EXIT
 
-git ls-files --cached -- .codex-goal >"$tracked_codex_goal"
+if [ "$is_git_checkout" = "1" ]; then
+  git ls-files --cached -- .codex-goal >"$tracked_codex_goal"
+elif [ -e .codex-goal ]; then
+  find .codex-goal -print | sed 's#^\./##' >"$tracked_codex_goal"
+fi
 if [ -s "$tracked_codex_goal" ]; then
   echo "Public repo tracks or stages local launch metadata:"
   cat "$tracked_codex_goal"
   exit 1
 fi
 
-{
-  git ls-files
-  git ls-files --others --exclude-standard
-  if [ "$strict_local" = "1" ]; then
-    git ls-files --others --ignored --exclude-standard | grep -Ev '^(\.mypy_cache/|\.pytest_cache/|\.ruff_cache/|\.tmp/|tmp/|htmlcov/|frontend/node_modules/|node_modules/|\.coverage$)' || true
-  fi
-} | grep -Ev '^\.codex-goal(/|$)' | sort -u >"$tracked_or_new"
+if [ "$is_git_checkout" = "1" ]; then
+  {
+    git ls-files
+    git ls-files --others --exclude-standard
+    if [ "$strict_local" = "1" ]; then
+      git ls-files --others --ignored --exclude-standard | grep -Ev '^(\.mypy_cache/|\.pytest_cache/|\.ruff_cache/|\.tmp/|tmp/|htmlcov/|frontend/node_modules/|node_modules/|\.coverage$)' || true
+    fi
+  } | grep -Ev '^\.codex-goal(/|$)' | sort -u >"$tracked_or_new"
+else
+  find . -mindepth 1 -print \
+    | sed 's#^\./##' \
+    | grep -Ev '^(\.git(/|$)|\.codex-goal(/|$))' \
+    | sort -u >"$tracked_or_new"
+fi
 
 while IFS= read -r path; do
   [ -e "$path" ] && printf '%s\n' "$path"

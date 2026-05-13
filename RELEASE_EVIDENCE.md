@@ -33,10 +33,11 @@ project-lead review-response verification pass.
 | Gate | Result | Evidence |
 | --- | --- | --- |
 | Remote tag check | PASS | `refs/tags/v0.3.7` exists on `origin` |
-| GitHub release | PASS | Non-draft, non-prerelease `v0.3.7`, published `2026-05-12T23:36:08Z` |
+| GitHub release, authenticated | PASS | Non-draft, non-prerelease `v0.3.7`, published `2026-05-12T23:36:08Z` |
 | Required CI on release commit | PASS | CI run `25768566639`, conclusion `success`, head SHA `c82b959a722073d2efed73ebca68ded250782746` |
 | PyPI trusted publishing | PASS | Publish run `25768567321`, conclusion `success`, head SHA `c82b959a722073d2efed73ebca68ded250782746` |
 | PyPI package smoke | PASS | PyPI latest version is `0.3.7`; Python 3.12 clean install reports `opendream 0.3.7` and `import opendream` succeeds |
+| External GitHub visibility | PENDING | Requires the operator visibility flip for `pylit-ai/opendream`; re-check repo, release, CI badge, raw demo media, and Git install after the repo is public |
 
 ## Artifact Hashes
 
@@ -47,9 +48,12 @@ project-lead review-response verification pass.
 
 ## Known Waivers
 
-- Branch protection and ruleset API checks returned unavailable while the GitHub
-  repository is private on the current plan. Configure branch protection or
-  rulesets after repository visibility or plan supports that feature.
+- Branch protection and ruleset API checks returned HTTP 403 while the GitHub
+  repository is private on the current plan: "Upgrade to GitHub Pro or make
+  this repository public to enable this feature." Configure branch protection
+  or rulesets after repository visibility or plan supports that feature, then
+  replace the `External GitHub visibility` row with the final verification
+  result.
 - This release is an alpha / technical preview. Public copy should describe
   OpenDream as local-first, auditable memory for coding agents, not as SOTA or
   AutoDream parity.
