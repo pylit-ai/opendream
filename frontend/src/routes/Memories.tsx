@@ -641,15 +641,16 @@ export function MemoriesChanges(): JSX.Element {
   );
   const semanticSourceId = (): string | null =>
     typeof searchParams.id === 'string' && searchParams.id ? searchParams.id : null;
+  const semanticResourceKey = (): string => semanticSourceId() ?? 'latest';
   const semanticItemId = (): string | null =>
     typeof searchParams.item === 'string' && searchParams.item ? searchParams.item : null;
   const [semanticChange, { refetch: refetchSemanticChange }] = createResource<
     SemanticChangeReview,
-    string | null
-  >(semanticSourceId, (sourceId) =>
-    sourceId
-      ? cachedFetch(`semantic-change:${sourceId}`, () => getSemanticChange(sourceId), 15_000)
-      : cachedFetch('semantic-change-latest', getLatestSemanticChange, 15_000),
+    string
+  >(semanticResourceKey, (sourceId) =>
+    sourceId === 'latest'
+      ? cachedFetch('semantic-change-latest', getLatestSemanticChange, 15_000)
+      : cachedFetch(`semantic-change:${sourceId}`, () => getSemanticChange(sourceId), 15_000),
   );
   const [memorySummary] = createResource<MemoryListResponse>(() =>
     cachedFetch(
