@@ -18,6 +18,9 @@ import { GROUP_LABELS, GROUP_ORDER, ROUTES, type RouteDef, type RouteGroup } fro
 import { useTheme, type ThemeMode } from './ThemeProvider';
 import { Kbd } from '~/components/Kbd';
 import { prefetch } from '~/lib/cache';
+import logoMark from '../../assets/logo/mark/vector/opendream_mark_gradient.svg?url';
+import wordmarkDark from '../../assets/logo/wordmark/vector/opendream_wordmark_primary_ink_dark.svg?url';
+import wordmarkLight from '../../assets/logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg?url';
 import {
   getEvals,
   getExports,
@@ -123,8 +126,10 @@ function Sidebar(): JSX.Element {
   const [pinned, setPinned] = createSignal(readPinned());
   const [hoverExpand, setHoverExpand] = createSignal(readHoverExpand());
   const [hover, setHover] = createSignal(false);
+  const { resolved } = useTheme();
   const location = useLocation();
   const expanded = () => pinned() || (hoverExpand() && hover());
+  const wordmark = () => (resolved() === 'dark' ? wordmarkDark : wordmarkLight);
 
   createEffect(() => {
     try {
@@ -162,10 +167,22 @@ function Sidebar(): JSX.Element {
       }}
       class="hairline-r fixed inset-y-0 left-0 z-30 flex flex-col bg-surface transition-[width] duration-200 ease-[var(--ease-apple)]"
     >
-      <div class="flex h-14 items-center justify-center">
-        <div class="flex h-8 w-8 items-center justify-center rounded-md bg-accent text-[11px] font-semibold tracking-tight text-accent-fg">
-          OD
-        </div>
+      <div class={cn('flex h-14 items-center', expanded() ? 'justify-start px-3' : 'justify-center')}>
+        <A
+          href="/"
+          aria-label="OpenDream overview"
+          class={cn(
+            'flex h-10 items-center overflow-hidden rounded-md transition-[width,background-color] duration-200 ease-[var(--ease-apple)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
+            expanded() ? 'w-[164px] justify-start px-1.5 hover:bg-surface-elevated' : 'w-10 justify-center',
+          )}
+        >
+          <Show
+            when={expanded()}
+            fallback={<img src={logoMark} alt="" aria-hidden="true" class="h-8 w-8 shrink-0" />}
+          >
+            <img src={wordmark()} alt="" aria-hidden="true" class="h-7 w-[148px] object-contain object-left" />
+          </Show>
+        </A>
       </div>
       <nav class="flex-1 overflow-y-auto py-1 scrollbar-thin">
         <For each={GROUPED}>

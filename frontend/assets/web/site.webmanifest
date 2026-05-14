@@ -1,0 +1,25 @@
+{
+  "name": "OpenDream",
+  "short_name": "OpenDream",
+  "icons": [
+    {
+      "src": "icons/192/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/512/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/512/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable any"
+    }
+  ],
+  "theme_color": "#121826",
+  "background_color": "#121826",
+  "display": "standalone"
+}

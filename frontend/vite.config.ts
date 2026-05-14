@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   base: '/static/dist/',
+  publicDir: 'assets/web',
   plugins: [solid()],
   resolve: {
     alias: {

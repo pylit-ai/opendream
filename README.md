@@ -1,5 +1,13 @@
 # OpenDream
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./frontend/assets/logo/wordmark/vector/opendream_wordmark_primary_ink_dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./frontend/assets/logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg">
+    <img alt="OpenDream" src="./frontend/assets/logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg" width="520">
+  </picture>
+</p>
+
 [![CI](https://github.com/pylit-ai/opendream/actions/workflows/ci.yml/badge.svg)](https://github.com/pylit-ai/opendream/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/opendream?label=PyPI)](https://pypi.org/project/opendream/)
 [![Python versions](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
@@ -54,6 +62,7 @@ OpenDream's first-run path is intentionally small. These clips show the next dec
 | ![Showcase evaluation proof](./docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
 
 Full demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
+Brand motion assets: [`frontend/assets/animation/README.md`](./frontend/assets/animation/README.md).
 
 </details>
 

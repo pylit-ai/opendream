@@ -1,5 +1,13 @@
 # OpenDream Memory Showcase
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../frontend/assets/logo/wordmark/vector/opendream_wordmark_primary_ink_dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="../../frontend/assets/logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg">
+    <img alt="OpenDream" src="../../frontend/assets/logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg" width="420">
+  </picture>
+</p>
+
 This walkthrough creates a disposable, synthetic coding-agent history and then demonstrates the full memory loop on the next task: objective → prompt context → selected memories → source evidence → dream/maintenance effects. It is meant for first-run demos, skeptical evaluation, and release checks.
 
 ![OpenDream memory showcase eval](../assets/demos/04-eval-proof.gif)

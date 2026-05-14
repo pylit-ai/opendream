@@ -1,5 +1,13 @@
 # OpenDream CLI demos
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../frontend/assets/logo/wordmark/vector/opendream_wordmark_primary_ink_dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="../../frontend/assets/logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg">
+    <img alt="OpenDream" src="../../frontend/assets/logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg" width="420">
+  </picture>
+</p>
+
 Short recorded demos for README, docs, launch notes, and walkthroughs. Each demo is rendered from the same deterministic fixture path used by the public CLI tests and showcase docs.
 
 ## First-run path
@@ -38,6 +46,20 @@ Shows the versioned machine-readable CLI contract for agents that need stable co
 
 Scaffolds a recurring feature-radar dream job while keeping projections separate from canonical durable memory.
 
+## Brand motion
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../frontend/assets/animation/video/opendream_splash_wordmark_dark_preview.gif">
+    <source media="(prefers-color-scheme: light)" srcset="../../frontend/assets/animation/video/opendream_splash_wordmark_light_preview.gif">
+    <img alt="OpenDream wordmark reveal" src="../../frontend/assets/animation/video/opendream_splash_wordmark_light_preview.gif" width="720">
+  </picture>
+</p>
+
+The rolling-wave SVG loop is used in the web app loading state. The full-resolution MP4 splash files are better suited for launch videos, release notes, and social cuts:
+[`dark MP4`](../../frontend/assets/animation/video/opendream_splash_wordmark_dark_1920x1080.mp4),
+[`light MP4`](../../frontend/assets/animation/video/opendream_splash_wordmark_light_1920x1080.mp4).
+
 ## Source media
 
-GIFs are embedded above for broad README/docs compatibility. MP4 and WebM variants live beside them under `docs/assets/demos/` for websites and release assets.
+GIFs are embedded above for broad README/docs compatibility. MP4 and WebM variants live beside them under `docs/assets/demos/` for websites and release assets. Brand motion sources live under `frontend/assets/animation/`.
