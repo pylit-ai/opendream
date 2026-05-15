@@ -4,7 +4,7 @@ import type { MemoryLineage, MemoryRecord } from '~/api/types';
 import { cachedFetch, invalidate } from '~/lib/cache';
 import { Chip, type ChipVariant } from './Chip';
 import { CopyButton } from './CopyButton';
-import { SkeletonStats } from './Skeleton';
+import { LoadingPage } from './Loading';
 import { formatDateLong } from '~/lib/format';
 import { RawFormattedView } from './RawFormattedView';
 import { MemoryTypeChip } from './MemoryTypeChip';
@@ -58,26 +58,30 @@ function asLineageList(value: unknown): LineageEntry[] {
 
 /**
  * Full-fidelity memory inspector for the SlideOver / Reviews / Memories surfaces.
- * Resolves /api/memories/<id> + /api/memories/<id>/lineage in parallel via
- * cachedFetch so navigating ancestors/descendants is near-instant on revisit.
+ * Resolves the memory record first, then lets slower lineage data fill in
+ * progressively so a heavy graph query does not hide the core memory.
  */
 export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
-  const [data, { refetch }] = createResource<
-    { memory: MemoryRecord; lineage: MemoryLineage | null } | null,
-    string
-  >(
+  const [memory, { refetch: refetchMemory }] = createResource<MemoryRecord | null, string>(
     () => props.memoryId,
     async (id) => {
       if (!id) return null;
-      const [memory, lineage] = await Promise.all([
-        cachedFetch(`memory:${id}`, () => getMemory(id), 60_000),
-        cachedFetch(`memory-lineage:${id}`, () => getMemoryLineage(id), 60_000).catch(
-          () => null,
-        ),
-      ]);
-      return { memory, lineage: lineage as MemoryLineage | null };
+      return cachedFetch(`memory:${id}`, () => getMemory(id), 60_000);
     },
   );
+  const [lineage, { refetch: refetchLineage }] = createResource<MemoryLineage | null, string>(
+    () => props.memoryId,
+    async (id) => {
+      if (!id) return null;
+      return cachedFetch(`memory-lineage:${id}`, () => getMemoryLineage(id), 60_000).catch(
+        () => null,
+      );
+    },
+  );
+  const refetchAll = (): void => {
+    void refetchMemory();
+    void refetchLineage();
+  };
 
   return (
     <div class="flex flex-col gap-5 p-5">
@@ -94,16 +98,25 @@ export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
         <Show when={props.headerActions}>{props.headerActions}</Show>
       </header>
 
-      <Show when={!data.loading} fallback={<SkeletonStats />}>
-        <Show when={data.error}>
+      <Show
+        when={!memory.loading || memory()}
+        fallback={
+          <LoadingPage
+            compact
+            label="Loading memory"
+            detail={props.memoryId}
+          />
+        }
+      >
+        <Show when={memory.error}>
           <p class="text-[12.5px] text-danger">
-            {data.error instanceof Error ? data.error.message : 'Failed to load memory.'}
+            {memory.error instanceof Error ? memory.error.message : 'Failed to load memory.'}
           </p>
         </Show>
-        <Show when={data()}>
+        <Show when={memory()}>
           {(d) => {
-            const m = d().memory;
-            const lin = d().lineage;
+            const m = d();
+            const lin = lineage();
             const supersedes = asLineageList(
               (m as { supersedes?: unknown }).supersedes ?? lin?.supersedes,
             );
@@ -282,7 +295,8 @@ export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
                     memoryId={props.memoryId}
                     onCreated={() => {
                       invalidate(`memory:${props.memoryId}`);
-                      void refetch();
+                      invalidate(`memory-lineage:${props.memoryId}`);
+                      refetchAll();
                     }}
                   />
                 </section>
@@ -309,6 +323,35 @@ export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
                       storageKey="memory-reviews"
                     />
                   </section>
+                </Show>
+
+                <Show when={lineage.loading}>
+                  <section class="flex flex-col gap-2">
+                    <h4 class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">
+                      Lineage
+                    </h4>
+                    <LoadingPage
+                      compact
+                      label={
+                        supersedes.length +
+                          conflictsWith.length +
+                          supersededBy.length +
+                          ancestors.length +
+                          descendants.length >
+                        0
+                          ? 'Refreshing lineage'
+                          : 'Loading lineage'
+                      }
+                      detail="Checking ancestor, descendant, and conflict links."
+                    />
+                  </section>
+                </Show>
+
+                <Show when={lineage.error}>
+                  <p class="text-[12.5px] text-text-muted">
+                    Lineage unavailable:{' '}
+                    {lineage.error instanceof Error ? lineage.error.message : 'request failed'}
+                  </p>
                 </Show>
 
                 <Show
@@ -368,7 +411,7 @@ export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
             );
           }}
         </Show>
-        <Show when={!data() && !data.loading && !data.error}>
+        <Show when={!memory() && !memory.loading && !memory.error}>
           <p class="text-[12.5px] text-text-muted">Memory not found.</p>
         </Show>
       </Show>

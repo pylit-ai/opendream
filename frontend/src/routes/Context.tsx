@@ -102,7 +102,15 @@ export default function ContextRoute(): JSX.Element {
 
   return (
     <Page title="Context" subtitle="Assembled memory context records">
-      <Show when={!contextsData.loading} fallback={<LoadingPage />}>
+      <Show
+        when={!contextsData.loading}
+        fallback={
+          <LoadingPage
+            label="Loading contexts"
+            detail="Reading persisted context assemblies from the workspace."
+          />
+        }
+      >
         <Show
           when={!contextsData.error}
           fallback={
@@ -176,7 +184,10 @@ export default function ContextRoute(): JSX.Element {
                   }
                 >
                   <Show when={contextDetail.loading}>
-                    <LoadingPage />
+                    <LoadingPage
+                      label="Loading context detail"
+                      detail={selectedId() ?? 'Fetching assembled prompt context.'}
+                    />
                   </Show>
                   <Show when={!contextDetail.loading && contextDetail()}>
                     {(d) => (

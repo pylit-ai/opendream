@@ -497,7 +497,10 @@ export default function GraphRoute(): JSX.Element {
       <div class="relative flex-1 overflow-hidden bg-bg">
         <Show when={graph.loading}>
           <div class="absolute inset-0 flex items-center justify-center">
-            <LoadingPage />
+            <LoadingPage
+              label="Loading graph"
+              detail="Building memory, run, retrieval, and context links."
+            />
           </div>
         </Show>
         <Show when={graph.error}>

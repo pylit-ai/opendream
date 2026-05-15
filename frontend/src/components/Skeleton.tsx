@@ -1,5 +1,6 @@
 import { For, type JSX } from 'solid-js';
 import { cn } from '~/lib/cn';
+import { ProgressiveLoading } from './Loading';
 
 export interface SkeletonProps {
   class?: string;
@@ -19,10 +20,15 @@ export function Skeleton(props: SkeletonProps): JSX.Element {
   );
 }
 
-export function SkeletonRows(props: { rows?: number; class?: string }): JSX.Element {
+export function SkeletonRows(props: { rows?: number; class?: string; label?: string }): JSX.Element {
   const rows = () => Array.from({ length: props.rows ?? 4 });
   return (
-    <div class={cn('flex flex-col', props.class)}>
+    <div class={cn('flex flex-col gap-3', props.class)}>
+      <ProgressiveLoading
+        compact
+        label={props.label ?? 'Loading rows'}
+        detail="Waiting for records from the workspace."
+      />
       <For each={rows()}>
         {(_, i) => (
           <div
@@ -41,17 +47,24 @@ export function SkeletonRows(props: { rows?: number; class?: string }): JSX.Elem
   );
 }
 
-export function SkeletonStats(): JSX.Element {
+export function SkeletonStats(props: { label?: string } = {}): JSX.Element {
   return (
-    <div class="flex flex-wrap items-baseline gap-x-8 gap-y-3">
-      <For each={[0, 1, 2, 3]}>
-        {() => (
-          <div class="flex flex-col gap-2">
-            <Skeleton width="56px" height="9px" />
-            <Skeleton width="44px" height="22px" />
-          </div>
-        )}
-      </For>
+    <div class="flex flex-col gap-3">
+      <ProgressiveLoading
+        compact
+        label={props.label ?? 'Loading summary'}
+        detail="Waiting for workspace summary data."
+      />
+      <div class="flex flex-wrap items-baseline gap-x-8 gap-y-3">
+        <For each={[0, 1, 2, 3]}>
+          {() => (
+            <div class="flex flex-col gap-2">
+              <Skeleton width="56px" height="9px" />
+              <Skeleton width="44px" height="22px" />
+            </div>
+          )}
+        </For>
+      </div>
     </div>
   );
 }

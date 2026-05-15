@@ -19,6 +19,44 @@ export interface HealthPayload {
   [key: string]: unknown;
 }
 
+export interface StatusSnapshot {
+  workspace?: string;
+  store_id?: string;
+  store_kind?: string;
+  initialized?: boolean;
+  state?: string;
+  pending_events?: number;
+  pending_candidates?: number;
+  next_eligible_reason?: string;
+  next_eligible_at?: string | null;
+  dream?: {
+    state?: string;
+    queue_depth?: number;
+    worker?: {
+      state?: string;
+      active_phase?: string;
+      processed_jobs?: number;
+      [key: string]: unknown;
+    };
+    worker_health?: {
+      health?: string;
+      active_phase?: string;
+      active_job_id?: string;
+      queue_backlog?: number;
+      last_success_at?: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
+  automation?: {
+    job_count?: number;
+    enabled_jobs?: number;
+    due_job_ids?: string[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
 export interface ShowcaseSourceRef {
   memory_id?: string;
   title?: string;

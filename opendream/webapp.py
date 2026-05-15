@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
+from . import auto_reviewer as _auto_reviewer
 from . import workspace_catalog
 from .dream import dream_worker
 from .integration import emit_event
@@ -21,15 +22,15 @@ from .observability import (
     build_dream_coverage,
     build_dream_funnel,
     build_graph,
-    build_semantic_change_unavailable,
     build_semantic_change_review,
+    build_semantic_change_unavailable,
     create_annotation,
     create_export,
     create_review_decision,
     get_dream_cycle,
     index_observability,
-    load_or_build_list_index,
     load_or_build_index,
+    load_or_build_list_index,
     project_retrieval_list_row,
     project_run_list_row,
     project_session_list_row,
@@ -38,16 +39,24 @@ from .observability import (
     query_retrievals,
     query_runs,
 )
+from .semantic_dreamer import dream_status_semantic
 from .semantic_verifier import (
     reopen_archived_records_for_review,
+)
+from .semantic_verifier import (
     restore_record as restore_learned_context_record,
 )
-from .semantic_dreamer import dream_status_semantic
-from .service import disable_background_runtime, enable_background_runtime, restart_service, service_status, start_service, stop_service
+from .service import (
+    disable_background_runtime,
+    enable_background_runtime,
+    restart_service,
+    service_status,
+    start_service,
+    stop_service,
+)
 from .showcase import load_showcase_report
 from .storage import MemoryStore
 from .util import CLI_JSON_VERSION, parse_timestamp, to_iso, utc_now
-from . import auto_reviewer as _auto_reviewer
 from .validation import SchemaValidationError, validate_document
 
 # 446-observability-perf Phase 3: request timing ring buffer.
@@ -151,10 +160,11 @@ def _resolve_graph_request(index: dict[str, Any], query: dict[str, str]) -> tupl
         wants_overview = explicit_limit is not None and int(explicit_limit) >= 50
     except ValueError:
         wants_overview = False
-    if explicit_focus is None and wants_overview:
-        focus = None
-    else:
-        focus = explicit_focus or _graph_default_focus(index)
+    focus = (
+        None
+        if explicit_focus is None and wants_overview
+        else explicit_focus or _graph_default_focus(index)
+    )
     if explicit_depth is not None:
         depth = _parse_query_int(explicit_depth, 1, minimum=0, maximum=3)
     else:
@@ -430,8 +440,19 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                     record_id,
                     now=payload.get("now"),
                 )
-                if response.get("status") in {"not_found", "not_restorable", "restore_window_missing", "restore_window_expired"}:
-                    self._write_json({"error": response.get("reason") or response.get("status"), "result": response}, status=HTTPStatus.BAD_REQUEST)
+                if response.get("status") in {
+                    "not_found",
+                    "not_restorable",
+                    "restore_window_missing",
+                    "restore_window_expired",
+                }:
+                    self._write_json(
+                        {
+                            "error": response.get("reason") or response.get("status"),
+                            "result": response,
+                        },
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
                     return
                 index_observability(self.store)
                 self._write_json(
@@ -616,6 +637,10 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/health":
             self._write_json(_health_payload(self.store))
+            _finish()
+            return
+        if parsed.path == "/api/status":
+            self._write_json(self.store.status_snapshot())
             _finish()
             return
         if parsed.path == "/api/overview/lite":
@@ -833,7 +858,10 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 now=str(index.get("generated_at") or ""),
             )
             if payload is None:
-                self._write_json({"error": f"semantic change review not found: {source_id}"}, status=HTTPStatus.NOT_FOUND)
+                self._write_json(
+                    {"error": f"semantic change review not found: {source_id}"},
+                    status=HTTPStatus.NOT_FOUND,
+                )
                 return
             self._write_json(payload)
             return
@@ -930,8 +958,18 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             # decisions_total added so clients can detect truncation without a separate call.
             all_decisions = self.store.load_review_decisions()
             decisions_total = len(all_decisions)
-            decisions_sorted = sorted(all_decisions, key=lambda d: str(d.get("created_at") or ""), reverse=True)[:50]
-            self._write_json({"items": entities["reviews"], "decisions": decisions_sorted, "decisions_total": decisions_total})
+            decisions_sorted = sorted(
+                all_decisions,
+                key=lambda d: str(d.get("created_at") or ""),
+                reverse=True,
+            )[:50]
+            self._write_json(
+                {
+                    "items": entities["reviews"],
+                    "decisions": decisions_sorted,
+                    "decisions_total": decisions_total,
+                }
+            )
             return
         if parsed.path == "/api/evals":
             self._write_json({"health": entities["health"], "evals": entities["evals"]})
@@ -1009,7 +1047,7 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             f"data: {json.dumps(snapshot['status'])}\n\n"
             "event: overview\n"
             f"data: {json.dumps(snapshot['overview'])}\n\n"
-        ).encode("utf-8")
+        ).encode()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")

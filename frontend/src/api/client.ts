@@ -16,6 +16,7 @@ import type {
   GraphParams,
   GraphPayload,
   HealthPayload,
+  StatusSnapshot,
   LearnedContextReopenRequest,
   LearnedContextRestoreRequest,
   MemoryLineage,
@@ -117,6 +118,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export const getUiMeta = () => api<UiMeta>('/api/ui-meta');
 export const getUiContext = () => api<UiContext>('/api/ui-context');
 export const getHealth = () => api<HealthPayload>('/api/health');
+export const getStatus = () => api<StatusSnapshot>('/api/status');
 export const getOverview = () => api<OverviewPayload>('/api/overview');
 export const getSettings = () => api<SettingsPayload>('/api/settings');
 export const getSemanticConfig = () => api<SemanticDreamConfig>('/api/semantic-config');

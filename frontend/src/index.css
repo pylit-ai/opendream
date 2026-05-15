@@ -149,6 +149,19 @@ h3 {
   }
 }
 
+@keyframes loadingProgressSweep {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(220%);
+  }
+}
+
+.loading-progress-sweep {
+  animation: loadingProgressSweep 1450ms var(--ease-out-soft) infinite;
+}
+
 @keyframes overlayFade {
   from {
     opacity: 0;

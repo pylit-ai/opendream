@@ -124,6 +124,15 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         self.assertTrue(payload["live_check"]["supported"])
         self.assertIsNone(payload["live_check"]["last_probe_at"])
 
+    def test_status_api_returns_lightweight_workspace_snapshot(self) -> None:
+        payload = self.get_json("/api/status")
+        self.assertEqual(payload["workspace"], str(self.workspace))
+        self.assertTrue(payload["initialized"])
+        self.assertIn(payload["state"], {"idle", "pending", "locked"})
+        self.assertIn("pending_events", payload)
+        self.assertIn("pending_candidates", payload)
+        self.assertIn("dream", payload)
+
     def test_showcase_api_returns_persisted_report(self) -> None:
         report_path = self.store.memory_root / "state" / "showcase_report.json"
         write_json(

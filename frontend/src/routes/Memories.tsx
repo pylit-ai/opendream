@@ -217,7 +217,7 @@ function SurfaceDashboard(): JSX.Element {
   const recent = (): Highlight[] => (surface().recent_highlights ?? []) as Highlight[];
 
   return (
-    <Show when={!ov.loading} fallback={<SkeletonStats />}>
+        <Show when={!ov.loading} fallback={<SkeletonStats label="Loading memory surface" />}>
       <Show
         when={!ov.error}
         fallback={
@@ -471,7 +471,10 @@ function MemoriesTable(props: {
 
   return (
     <>
-      <Show when={!resp.loading} fallback={<SkeletonRows rows={6} />}>
+      <Show
+        when={!resp.loading}
+        fallback={<SkeletonRows rows={6} label="Loading memories" />}
+      >
         <Show
           when={!resp.error}
           fallback={
@@ -819,7 +822,10 @@ export function MemoriesChanges(): JSX.Element {
 
   return (
     <MemoriesShell>
-      <Show when={!cycles.loading && !semanticChange.loading} fallback={<SkeletonRows rows={6} />}>
+      <Show
+        when={!cycles.loading && !semanticChange.loading}
+        fallback={<SkeletonRows rows={6} label="Loading memory changes" />}
+      >
         <Show
           when={!cycles.error && !semanticChange.error}
           fallback={

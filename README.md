@@ -245,7 +245,7 @@ opendream observe serve --workspace "$PWD" --port 8000
 ```
 
 Then open `http://127.0.0.1:8000/overview` on the same machine. `observe serve` blocks until Ctrl+C.
-The observe server also exposes `GET /api/health` for startup/readiness/liveness evidence and `POST /api/health/live-check` for a synthetic end-to-end probe that verifies append plus index refresh without creating durable memory.
+The observe server also exposes `GET /api/status` for lightweight workspace progress, `GET /api/health` for startup/readiness/liveness evidence, and `POST /api/health/live-check` for a synthetic end-to-end probe that verifies append plus index refresh without creating durable memory.
 For semantic-first workspaces, `/overview` and `/settings` should expose the same truth as CLI status: readiness, setup-required vs degraded state, state reason, next action, memory-quality warnings, and pruning evidence, with raw JSON still available behind disclosure.
 The same UI also exposes background-runtime controls and digestible summaries of
 the current memory surface plus the latest runtime mutation effects, so you can
@@ -258,7 +258,7 @@ Built from the same on-disk artifacts as the runtime (read model is derived; fil
 
 - Index at `.opendream/memory/state/observability_index.json` (under your configured memory root)
 - Read APIs: overview, memories, runs, retrievals, sessions, context, graph, reviews, evals, exports
-- Health APIs: `/api/health` and `/api/health/live-check`
+- Health APIs: `/api/status`, `/api/health`, and `/api/health/live-check`
 - Audited writes: annotations, review decisions, exports
 - SSE at `/api/stream/status`
 - Desktop-first routes: `/overview`, `/memories`, `/runs`, `/retrievals`, `/sessions`, `/reviews`, `/graph`, `/evals`, `/exports`
