@@ -58,7 +58,7 @@ The runtime supported typed scopes in schemas, but storage and retrieval were ef
 - conflict rules become inconsistent if precedence is not explicit
 
 ## Links
-- `../../PRD.md`
+- `../../README.md`
 - `../../specs/403-runtime-integration-layer/spec.md`
 - `../../docs/adr/ADR-002-layered-memory-store-precedence.md`
 - `../../README.md`

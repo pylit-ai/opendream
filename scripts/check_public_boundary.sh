@@ -26,7 +26,7 @@ if [ "${STRICT_LOCAL:-0}" = "1" ]; then
 fi
 
 blocked_paths='^(CLAUDE\.md|GEMINI\.md|CODEX\.md|AGENTS\.local\.md|CLAUDE\.local\.md|GEMINI\.local\.md|metactl\.yaml|metactl\.lock\.json|\.claudeignore|\.codexignore|\.cursorignore|\.geminiignore|\.mcp\.json|opencode\.json|\.metactl/|\.agents/|\.codex/|\.codex-goal/|\.claude/|\.cursor/|\.gemini/|(.*/)?\.omc/|(.*/)?\.opendream/|\.ruler/|\.aider/|\.windsurf/|\.superpowers/|docs/superpowers/|(.*/)?memory/|(.*/)?notepads/|(.*/)?scratch/|\.tmp/|tmp/|frontend/node_modules/|node_modules/|\.mypy_cache/|\.pytest_cache|\.ruff_cache/|htmlcov/|\.coverage|skills/|Modelfile\.|.*\.code-workspace$|.*\.zip$)'
-allowed_agent_docs='^(AGENTS\.md|opendream/AGENTS\.md|openspec/AGENTS\.md|tests/AGENTS\.md|\.meta/spec-adapters/AGENTS\.md)$'
+allowed_agent_docs='^(AGENTS\.md|opendream/AGENTS\.md|tests/AGENTS\.md|\.meta/spec-adapters/AGENTS\.md)$'
 agent_doc_paths='(^|/)(AGENTS|CLAUDE|GEMINI|CODEX)\.md$'
 
 tracked_or_new="$(mktemp)"
@@ -82,7 +82,7 @@ if [ -s "$agent_doc_hits" ]; then
   exit 1
 fi
 
-content_markers='/Users/[[:alnum:]_.-]+|/home/[[:alnum:]_.-]+|[A-Za-z]:\\Users\\|opendream-private|archived-public-agent-artifacts|customer/provider-specific|provider-specific private:|internal URL:|internal_url|https?://internal'
+content_markers='/Users/[[:alnum:]_.-]+|/home/[[:alnum:]_.-]+|[A-Za-z]:\\Users\\|opendream-private|archived-public-agent-artifacts|customer/provider-specific|provider-specific (private|non-public):|internal URL:|internal_url|https?://internal'
 while IFS= read -r path; do
   case "$path" in
     scripts/check_public_boundary.sh|scripts/check_provenance_risk.py|.gitignore|uv.lock|frontend/pnpm-lock.yaml)

@@ -103,10 +103,10 @@
     "SECURITY.md"
   ],
   "public_artifact_forbidden_markers": [
-    "private overlay checkout name",
-    "bootstrap agent artifact archive name",
-    "absolute private overlay checkout path",
-    "local agent notepad path",
+    "non-public companion checkout name",
+    "bootstrap artifact archive name",
+    "absolute non-public companion checkout path",
+    "local runtime notes path",
     "local agent runtime config path"
   ]
 }

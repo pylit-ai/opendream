@@ -45,4 +45,4 @@ Relevant memory that was excluded:
 
 ## Boundary Check
 
-- [ ] This issue removes secrets, private paths, private provider/account names, and non-public URLs.
+- [ ] This issue removes secrets, local machine paths, account/provider names, and non-public URLs.

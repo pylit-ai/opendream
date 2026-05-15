@@ -1,7 +1,7 @@
 # plan.md — 001-bootstrap
 
 ## Summary
-Implement <change> using <approach> while preserving the constraints in `CONSTITUTION.md`.
+Implement <change> using <approach> while preserving the constraints in `README.md`, `AGENTS.md`, and relevant docs.
 
 ## Architecture impact
 - touched components:

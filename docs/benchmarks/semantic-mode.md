@@ -1,6 +1,6 @@
 # Semantic-Mode Benchmark Expectations
 
-This document defines what OpenDream must prove before semantic-first claims are credible in benchmarks and release checks.
+This document defines what OpenDream must prove before semantic-first claims are credible in benchmarks and verification checks.
 
 ## Core rule
 
@@ -14,7 +14,7 @@ Semantic-first is a **posture**. Benchmark evidence must distinguish:
 
 ## Required benchmark slices
 
-Release evidence should include at least these slices:
+Benchmark reports should include at least these slices:
 
 1. **Unpruned baseline**: comparable retrieval without semantic-first progressive disclosure so prompt-bloat cost is visible.
 2. **Degraded semantic-first**: semantic posture requested, semantic path unavailable, deterministic fallback labeled truthfully.
@@ -44,20 +44,20 @@ Those are memory-quality warnings, not acceptable semantic-ready outcomes.
 
 ## Operator-facing interpretation
 
-When a benchmark lands in degraded semantic-first, the product story should be:
+When a benchmark lands in degraded semantic-first, the user-facing interpretation should be:
 
 - semantic-first posture is active
 - readiness is not yet achieved
 - deterministic fallback remained available
 - the degraded reason and next action were explicit
 
-When a benchmark lands in semantic-ready progressive mode, the story should be:
+When a benchmark lands in semantic-ready progressive mode, the user-facing interpretation should be:
 
 - the readiness claim was backed by a runnable semantic path
 - progressive disclosure pruned context in an inspectable way
 - repeated-task behavior stayed flat or improved
 
-## Release gate intent
+## Verification Intent
 
 `make release-check` should fail if OpenDream cannot show both of the following:
 

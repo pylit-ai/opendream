@@ -1,4 +1,4 @@
-# OpenDream Launch Readiness
+# OpenDream Release Readiness
 
 This checklist is the public release path for a one-install OpenDream user.
 
@@ -63,8 +63,6 @@ proof, and advanced runtime eval.
 
 ## Public Evidence
 
-- Release criteria: [`RELEASE_CRITERIA.md`](../RELEASE_CRITERIA.md)
-- Release evidence template: [`RELEASE_EVIDENCE_TEMPLATE.md`](../RELEASE_EVIDENCE_TEMPLATE.md)
 - Clean-room manifest: [`CLEAN_ROOM.md`](../CLEAN_ROOM.md)
 - Claims matrix: [`docs/claims.md`](./claims.md)
 - Known limitations: [`KNOWN_LIMITATIONS.md`](../KNOWN_LIMITATIONS.md)
@@ -91,4 +89,5 @@ Before a public tag, an operator must verify:
 | Release environment | Manual approval or maintainer-only access |
 | Tags | No local or remote collision for the candidate `vX.Y.Z` |
 
-The private release report records the exact verification date and result.
+Record the exact verification date, commit SHA, release tag, and command output
+in the release notes for the candidate version.

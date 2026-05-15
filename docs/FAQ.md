@@ -81,7 +81,7 @@ OpenDream's benchmark suite has three tiers:
 2. **MemoryAgentBench-style adapters**: Clean-room implementations measuring Accurate Retrieval (AR), Test-Time Learning (TTL), Long-Range Understanding (LRU), and Conflict Resolution (CR). Empty adapter tiers are reported as `skipped_no_fixture`, not external-benchmark success.
 3. **Coding-task evals**: Repeated task evaluations measuring pass rate, retrieval latency, irrelevant recall, contradiction recovery, procedural reuse, and memory-hurt rate.
 
-Run with `opendream eval semantic-benchmark --workspace .tmp/eval --mode hybrid`. The semantic-first contract is not just "LLM mode ran": release evidence is expected to compare degraded fallback, unpruned baseline behavior, and semantic-ready progressive disclosure. See [docs/benchmarks/semantic-mode.md](benchmarks/semantic-mode.md) for the pruning and repeated-task proof expectations, and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for provenance of benchmark concepts.
+Run with `opendream eval semantic-benchmark --workspace .tmp/eval --mode hybrid`. The semantic-first contract is not just "LLM mode ran": benchmark output should compare degraded fallback, unpruned baseline behavior, and semantic-ready progressive disclosure. See [docs/benchmarks/semantic-mode.md](benchmarks/semantic-mode.md) for the pruning and repeated-task proof expectations, and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for provenance of benchmark concepts.
 
 ## What does progressive disclosure mean in practice?
 

@@ -1,6 +1,6 @@
 # Claims Matrix
 
-This matrix maps prominent public claims to evidence and launch wording.
+This matrix maps prominent public claims to evidence and public wording.
 
 | Claim | Allowed wording | Evidence | Limit |
 | --- | --- | --- | --- |
@@ -11,7 +11,7 @@ This matrix maps prominent public claims to evidence and launch wording.
 | Semantic mode | "Semantic mode reports ready, degraded, or setup-required state." | `docs/benchmarks/semantic-mode.md`, `tests/test_release_check_semantic.py` | Direct-provider execution needs operator configuration. |
 | Clean-room posture | "Public code is maintained with explicit clean-room and vendored-asset provenance." | `CLEAN_ROOM.md`, `THIRD_PARTY_NOTICES.md`, `scripts/check_provenance_risk.py` | This is release hygiene, not legal advice. |
 
-## Forbidden Launch Wording
+## Forbidden Public Wording
 
 Do not add these terms to public docs unless the surrounding text is explicitly
 negative or scoped as a limitation:
@@ -21,8 +21,8 @@ negative or scoped as a limitation:
 - best
 - first
 - leak-derived
-- private provider
-- internal URL
+- undisclosed provider/account details
+- non-public URL
 - proprietary-system superiority claims unless backed by live, cited,
   independently reproducible evidence
 

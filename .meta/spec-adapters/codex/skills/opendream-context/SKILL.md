@@ -1,6 +1,6 @@
 # OpenDream Context
 
-Reference only. Canonical rules stay in `README.md`, `CONSTITUTION.md`, and `specs/403-406`.
+Reference only. Canonical rules stay in `README.md`, `AGENTS.md`, and `docs/`.
 
 Before planning:
 `opendream status --workspace "$OPENDREAM_WORKSPACE"`

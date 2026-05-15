@@ -230,10 +230,3 @@ def canonical_schema_path(schema_name: str) -> Path:
         for path in sorted(REPO_ROOT.glob(f"{pattern}/{schema_name}")):
             return path
     raise FileNotFoundError(schema_name)
-
-
-def proposal_schema_path(schema_name: str) -> Path:
-    for pattern in ("openspec/changes/*/schema", "openspec/changes/*/schemas"):
-        for path in sorted(REPO_ROOT.glob(f"{pattern}/{schema_name}")):
-            return path
-    raise FileNotFoundError(schema_name)

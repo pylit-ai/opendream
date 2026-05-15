@@ -24,7 +24,7 @@ The runtime and tests currently depend on schema assets and repo layout assumpti
 - The installed CLI should run a deterministic demo without depending on repo-relative schema lookup.
 
 ## Acceptance criteria
-- [x] AC-1: runtime schema lookup resolves from packaged assets rather than `openspec/...` paths
+- [x] AC-1: runtime schema lookup resolves from packaged assets rather than proposal-change paths
 - [x] AC-2: canonical schema files exist under `specs/401-autodream-style-memory-subsystem/schema/`
 - [x] AC-3: `pip install .` succeeds in a clean virtual environment and `opendream --help` works
 - [x] AC-4: install smoke test can run `opendream demo --workspace <path>` and produce memory artifacts

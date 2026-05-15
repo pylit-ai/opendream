@@ -1,20 +1,20 @@
 // API response types for the OpenDream Observe backend.
 // Shapes are derived from opendream/webapp.py + observability.py.
-// Many handlers return `unknown` deep payloads (raw store records) — those
-// are typed loosely with TODO markers; refine when the surface needs them.
+// Many handlers return `unknown` deep payloads (raw store records). These stay
+// loosely typed until a surface needs a stricter contract.
 
 export interface UiMeta {
-  // TODO: shape returned by _ui_meta_payload (webapp.py); contains UI version + capabilities.
+  // Shape returned by _ui_meta_payload (webapp.py); contains UI version + capabilities.
   [key: string]: unknown;
 }
 
 export interface UiContext {
-  // TODO: shape returned by _ui_context_payload (webapp.py).
+  // Shape returned by _ui_context_payload (webapp.py).
   [key: string]: unknown;
 }
 
 export interface HealthPayload {
-  // TODO: shape from _health_payload(store).
+  // Shape from _health_payload(store).
   status?: string;
   [key: string]: unknown;
 }
@@ -209,7 +209,7 @@ export interface ShowcaseResponse {
 }
 
 export interface OverviewPayload {
-  // TODO: shape from index["overview"] in observability.index_observability().
+  // Shape from index["overview"] in observability.index_observability().
   generated_at?: string;
   counts?: Record<string, number>;
   readiness?: unknown;
@@ -297,7 +297,7 @@ export interface SemanticChangeReview {
 }
 
 export interface WorkspaceEntry {
-  // TODO: workspace_catalog.inspect_entry() return shape.
+  // workspace_catalog.inspect_entry() return shape.
   path?: string;
   label?: string;
   [key: string]: unknown;
@@ -342,12 +342,12 @@ export interface MemoryListResponse {
   items: MemoryRecord[];
   total?: number;
   filters?: Record<string, unknown>;
-  // TODO: query_memories shape includes facets/aggregates; refine.
+  // query_memories shape includes facets/aggregates; refine when needed.
   [key: string]: unknown;
 }
 
 export interface MemoryLineage {
-  // TODO: lineage shape from observability.
+  // Lineage shape from observability.
   ancestors?: unknown[];
   descendants?: unknown[];
   [key: string]: unknown;
@@ -390,7 +390,7 @@ export interface SessionDiagnostics {
 }
 
 export interface SessionTimeline extends SessionRecord {
-  // TODO: timeline-specific fields (events, segments).
+  // Timeline-specific fields (events, segments).
   events?: unknown[];
   [key: string]: unknown;
 }
@@ -594,13 +594,13 @@ export interface GraphPayload {
 }
 
 export interface ReviewItem {
-  // TODO: review queue item shape.
+  // Review queue item shape.
   id?: string;
   [key: string]: unknown;
 }
 
 export interface ReviewDecision {
-  // TODO: store.load_review_decisions item shape.
+  // store.load_review_decisions item shape.
   [key: string]: unknown;
 }
 
@@ -615,7 +615,7 @@ export interface EvalsResponse {
 }
 
 export interface ExportItem {
-  // TODO: export item shape.
+  // Export item shape.
   id?: string;
   created_at?: string;
   [key: string]: unknown;
@@ -637,12 +637,12 @@ export interface AnnotationCreateRequest {
 }
 
 export interface ExportCreateRequest {
-  // TODO: shape consumed by create_export().
+  // Shape consumed by create_export().
   [key: string]: unknown;
 }
 
 export interface ReviewDecisionRequest {
-  // TODO: shape consumed by create_review_decision().
+  // Shape consumed by create_review_decision().
   [key: string]: unknown;
 }
 
@@ -653,7 +653,7 @@ export interface SemanticDreamModeRequest {
 }
 
 export interface LearnedContextRestoreRequest {
-  // TODO
+  // Empty request body accepted.
   [key: string]: unknown;
 }
 

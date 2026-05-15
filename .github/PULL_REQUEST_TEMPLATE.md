@@ -4,8 +4,8 @@
 
 # Public Boundary
 
-- [ ] No private overlay paths, secrets, local agent state, internal URLs, or account/provider-specific private details were added.
-- [ ] Public docs remain useful without private overlay context.
+- [ ] No secrets, local machine paths, generated runtime state, non-public URLs, or account/provider-specific details were added.
+- [ ] Public docs remain useful from a clean public checkout.
 
 # Verification
 
@@ -18,4 +18,4 @@ make verify
 # Release Impact
 
 - [ ] No package/release impact.
-- [ ] Package, CI, security, or release evidence changed and is described above.
+- [ ] Package, CI, security, or release notes changed and are described above.

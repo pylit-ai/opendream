@@ -8,7 +8,7 @@ The OpenDream **Python runtime is stdlib-only** and does not embed an MCP server
 
 ## Trust model
 
-- **Canonical docs** (`AGENTS.md`, `CONSTITUTION.md`, `docs/`) define policy. MCP tools are **capabilities**, not policy sources.
+- **Canonical docs** (`AGENTS.md`, `README.md`, `docs/`) define policy. MCP tools are **capabilities**, not policy sources.
 - Treat every MCP server as **operator-local configuration** unless the repo explicitly documents a first-party bundled server (none today).
 - **Revocation**: disable or remove the server entry in the operator’s MCP config; rotate tokens if the server had OAuth/API access.
 - **Human approval**: use server or client “approval required” settings for destructive tools (filesystem writes outside the workspace, network, shell).

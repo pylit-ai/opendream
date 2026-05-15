@@ -37,6 +37,5 @@ Status surfaces, contract export, and observability always show the active strat
 - **Vendor-specific API-key-only paths**: rejected because they force extra setup when account-backed paths exist.
 
 ## References
-- `openspec/changes/438-semantic-auth-adapters-release-bundle/design/01-auth-and-execution-matrix.md`
 - `opendream/schema/semantic-execution-policy.schema.json`
 - `opendream/schema/semantic-adapter-manifest.schema.json`

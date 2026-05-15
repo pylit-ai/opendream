@@ -30,7 +30,7 @@
 ### Semantic auth adapters release bundle (438)
 - **Execution strategy matrix**: semantic mode now classifies runs by execution strategy (`deterministic`, `direct-provider`, `codex-account`, `claude-scheduled-task`, `cursor-automation`) and auth source. Status surfaces, contract export, and observability show the active strategy.
 - **Setup wizard**: `opendream semantic setup --workspace . --prefer no-extra-key` detects installed tools and recommends the best no-extra-key execution path. Machine-readable setup report output.
-- **Codex account-auth adapter**: Uses Codex CLI as a local subprocess for semantic synthesis on trusted local/private infrastructure. No separate API key required.
+- **Codex account-auth adapter**: Uses Codex CLI as a local subprocess for semantic synthesis on a trusted local machine. No separate API key required.
 - **Claude scheduled-task adapter**: Delegates semantic refresh to Claude as a scheduled task. Results return via validated delegated semantic envelopes.
 - **Cursor automation adapter**: Delegates semantic refresh to a Cursor Automation. Results return via validated delegated semantic envelopes.
 - **Delegated envelope ingest**: `opendream semantic ingest --workspace . --scan-inbox` validates and ingests delegated envelopes through the standard verify-promote pipeline. Invalid envelopes are archived with failure reasons.

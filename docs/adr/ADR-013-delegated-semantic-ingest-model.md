@@ -31,5 +31,4 @@ The ingest command is `opendream semantic ingest --workspace <ws> [--path <envel
 - **API callback from vendor to OpenDream**: rejected because it requires a running OpenDream server, which is not required for local-first usage.
 
 ## References
-- `openspec/changes/438-semantic-auth-adapters-release-bundle/design/06-delegated-ingest-model.md`
 - `opendream/schema/delegated-semantic-envelope.schema.json`

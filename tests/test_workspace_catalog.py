@@ -1,6 +1,6 @@
 """Tests for the machine-local workspace catalog and dashboard.
 
-See ``openspec/changes/441-workspace-catalog-dashboard-bundle``.
+See ``docs/adr/ADR-017-machine-local-workspace-catalog.md``.
 """
 
 from __future__ import annotations

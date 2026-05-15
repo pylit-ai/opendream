@@ -4,7 +4,7 @@
 Bootstrap the first production-capable version of <product-name>
 
 ## Why
-This change creates the minimum implementation needed to validate the product thesis in `NORTHSTAR.md` and satisfy the current `PRD.md`.
+This change creates the minimum implementation needed to validate the public product behavior described in `README.md` and supporting docs.
 
 ## In scope
 - <feature or capability 1>
@@ -39,6 +39,6 @@ This change creates the minimum implementation needed to validate the product th
 - <risk>
 
 ## Links
-- `../../NORTHSTAR.md`
-- `../../CONSTITUTION.md`
-- `../../PRD.md`
+- `../../README.md`
+- `../../AGENTS.md`
+- `../../docs/architecture/overview.md`

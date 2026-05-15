@@ -26,4 +26,4 @@
 ## P1 — UI + cleanup
 - [ ] Sessions row: warning chip when `event_count == 0` with link to docs
 - [ ] `opendream sessions cleanup --orphans` with confirm prompt + dry-run
-- [ ] `CONSTITUTION.md` invariant: every emitted event resolves to a session record
+- [ ] Public architecture invariant: every emitted event resolves to a session record

@@ -21,7 +21,7 @@
 ## Phase 4 — UI surfaces + cleanup
 10. Sessions Timeline: when a session has `event_count == 0`, render a small warning chip linking to the diagnostics doc.
 11. Add `opendream sessions cleanup --orphans` to delete or merge orphan event/session records under operator confirmation.
-12. Document the invariant in `CONSTITUTION.md` (each emitted event must have a `session_id` resolvable to a session record).
+12. Document the invariant in public architecture docs (each emitted event must have a `session_id` resolvable to a session record).
 
 ## Verification
 - unit test: `current_session_id()` returns identical value across nested calls within a hook span

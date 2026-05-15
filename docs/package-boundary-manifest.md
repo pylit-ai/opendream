@@ -1,13 +1,13 @@
 # OpenDream Package Boundary Manifest
 
-OpenDream ships from the public repository. The private overlay may validate, audit, and produce reviewed candidate patches, but it is not part of the runtime, build, install, or release path.
+OpenDream ships from the public repository. The runtime, build, install, and release path must be reproducible from the public tree.
 
 The machine-readable manifest is `opendream/package_boundaries.json`. It records:
 
 - the one-install CLI entrypoint
 - current public package surfaces
 - release inclusion inventory
-- private-overlay markers that must not enter public artifacts
+- non-public local markers that must not enter public artifacts
 
 Public facade packages:
 
@@ -18,7 +18,7 @@ Public facade packages:
 - `opendream.evals`: public eval and benchmark entrypoints.
 - `opendream.ui`: local UI data contract.
 
-`scripts/check_package_boundaries.py` enforces manifest coverage and the first hard boundary: contract modules cannot import runtime, provider, CLI, service, or private-only modules. `scripts/check_public_artifacts.py` rejects stale backup/generated artifacts such as `.orig`, `.bak`, and `.DS_Store`.
+`scripts/check_package_boundaries.py` enforces manifest coverage and the first hard boundary: contract modules cannot import runtime, provider, CLI, service, or non-public modules. `scripts/check_public_artifacts.py` rejects stale backup/generated artifacts such as `.orig`, `.bak`, and `.DS_Store`.
 
 Reorg status:
 

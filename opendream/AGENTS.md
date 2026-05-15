@@ -8,7 +8,7 @@ Path-scoped guidance for the `opendream/` Python package (CLI implementation, me
 
 1. `docs/architecture/overview.md`
 2. Active spec in `specs/<id>/` and `specs/registry.yaml`
-3. `CONSTITUTION.md` for invariants
+3. `docs/architecture/overview.md` for invariants
 4. JSON schemas under `opendream/schema/` for machine-readable contracts
 
 ## Conventions

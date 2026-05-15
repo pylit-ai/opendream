@@ -1,10 +1,10 @@
 # Architecture overview
 
 ## Purpose
-Enduring technical structure of the system. Task-level implementation detail belongs in specs and plans.
+Enduring technical structure of the system. Task-level implementation detail belongs in issue threads, design notes, or change plans.
 
 ## Platform identity
-OpenDream is a **verified, bounded, relation-aware memory control plane** that accepts semantic work from multiple execution owners (direct-provider, Codex, Claude, Cursor, deterministic). It is not a note folder, a single-vendor wrapper, or a memory-agent monoculture. It exceeds note-oriented memory systems by offering typed canonical state, verify-before-assert patterns, contradiction/supersession relations, procedural memory, generated-only views, release scorecards, and cross-runtime execution support.
+OpenDream is a local-first memory control plane for coding-agent workspaces. It stores typed canonical state, keeps contradiction and supersession relations explicit, and can connect deterministic local workflows with optional provider or agent-runtime integrations.
 
 ## High-level components
 - `opendream.cli` — operator-facing entrypoint for store initialization, event ingestion, extraction, dreaming, service lifecycle, retrieval, evaluation, contract export for agent integrations, and release-oriented verification hooks
@@ -50,9 +50,9 @@ OpenDream is a **verified, bounded, relation-aware memory control plane** that a
 
 ## Agent-ready platform (in progress)
 
-Workstream `436-agent-ready-platform-complete` (OpenSpec change `openspec/changes/agent-ready-platform-complete/`) extends the architecture with:
+The agent-ready platform work extends the architecture with:
 
-- **Path-scoped guidance** — subtree `AGENTS.md` files plus root routing (`opendream/`, `openspec/`, `.meta/spec-adapters/`, `tests/`).
+- **Path-scoped guidance** — subtree `AGENTS.md` files plus root routing (`opendream/`, `.meta/spec-adapters/`, `tests/`).
 - **Contract export** — `opendream contract export` emits schema-validated JSON (`opendream/schema/contract-export.schema.json`) describing CLI commands, schema inventory, and version maps.
 - **Distribution & engines (planned)** — thin vendor packages and an automation engine registry per ADR-003 and ADR-004.
 - **Guidance drift & isolated execution (planned)** — proposal-only drift loop (ADR-006) and worktree-isolated code mutation (ADR-005).
@@ -82,7 +82,7 @@ The semantic dreamer (`opendream.semantic_dreamer`) extends dreaming with a lear
 Semantic mode runs are classified by execution strategy and auth source:
 
 - **direct-provider**: OpenDream calls a model API using an explicit API key. Ingest is a direct run report.
-- **codex-account**: OpenDream invokes Codex CLI as a local subprocess using the operator's ChatGPT account auth. Trusted local/private infrastructure only. Ingest is a direct run report.
+- **codex-account**: OpenDream invokes Codex CLI as a local subprocess using the operator's ChatGPT account auth. Use only on a trusted local machine. Ingest is a direct run report.
 - **claude-scheduled-task**: Claude runs a scheduled task or command/skill. Results return via a delegated semantic envelope into `.opendream/inbox/semantic/claude-scheduled-task/`. Ingest is validated envelope-based.
 - **cursor-automation**: A Cursor automation writes a semantic envelope artifact into the repo. Results return via `.opendream/inbox/semantic/cursor-automation/`. Ingest is validated envelope-based.
 - **deterministic**: No model call. Always available as a fallback.
@@ -114,5 +114,5 @@ The setup wizard (`opendream semantic setup`) resolves a single recommended stra
 
 ## Out of scope for this doc
 - Per-change rollout, file lists, and verification steps → `specs/<id>/plan.md`
-- Product intent → `NORTHSTAR.md`, `PRD.md`
+- Product positioning and roadmap planning are outside this architecture overview.
 - Architectural decisions and rationale → `docs/adr/`

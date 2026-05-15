@@ -7,7 +7,7 @@ Proposed
 The agent-ready platform requires installable thin shims for Codex, Claude Code, Cursor, and GitHub Copilot without duplicating canonical policy.
 
 ## Decision
-TBD — promote when `openspec/changes/agent-ready-platform-complete` WS5 lands. Generated packages will reference canonical docs and carry provenance metadata only.
+Generated packages will reference canonical docs and carry provenance metadata only.
 
 ## Consequences
 Package generators and validation CLI become normative; adapters remain non-authoritative.
@@ -17,4 +17,4 @@ Package generators and validation CLI become normative; adapters remain non-auth
 - Single mega-adapter repo (rejected: conflicts with canonical precedence)
 
 ## References
-- `openspec/changes/agent-ready-platform-complete/design/01-plugin-distribution.md`
+- `docs/architecture/overview.md`

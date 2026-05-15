@@ -19,7 +19,6 @@ dist/
 memory/
 notepads/
 opencode.json
-openspec/changes/**/prompts/
 /.metactl/
 skills/
 .venv/

@@ -6,7 +6,7 @@
 - Do not mark complete unless the verifier for that item has passed.
 
 ## Tasks
-- [ ] T1: read `NORTHSTAR.md`, `CONSTITUTION.md`, `PRD.md`, `spec.md`, and `plan.md`
+- [ ] T1: read `README.md`, `AGENTS.md`, `spec.md`, and `plan.md`
 - [ ] T2: create or update contracts / schemas
 - [ ] T3: implement core domain logic
 - [ ] T4: implement boundary adapters and API handlers

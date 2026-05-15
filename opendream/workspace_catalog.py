@@ -5,8 +5,8 @@ this machine. It is NEVER canonical: per-workspace ``.opendream/`` state
 remains the source of truth. Catalog entries can be safely rebuilt from
 workspace-local state.
 
-See ``openspec/changes/441-workspace-catalog-dashboard-bundle`` for the
-proposal and ``docs/adr/ADR-017-machine-local-workspace-catalog.md``.
+See ``docs/adr/ADR-017-machine-local-workspace-catalog.md`` for the design
+rationale.
 """
 
 from __future__ import annotations

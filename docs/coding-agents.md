@@ -148,7 +148,7 @@ The payload validates against `opendream/schema/contract-export.schema.json`. **
 ## Direct-provider vs delegated execution
 
 - **Direct-provider**: Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, then run `opendream semantic setup --workspace . --prefer direct-provider --apply`
-- **Codex account**: Install Codex CLI and sign in. Run `opendream semantic setup --workspace . --prefer no-extra-key --apply` on trusted infrastructure.
+- **Codex account**: Install Codex CLI and sign in. Run `opendream semantic setup --workspace . --prefer no-extra-key --apply` only on a machine where you are comfortable letting local CLI tools use that account session.
 - **Claude scheduled-task**: Run `opendream semantic adapters scaffold --workspace . --adapter claude-scheduled-task` to generate task templates.
 - **Cursor automation**: Run `opendream semantic adapters scaffold --workspace . --adapter cursor-automation` to generate automation prompts.
 - **Deterministic**: Always available. No model call, no API key needed.

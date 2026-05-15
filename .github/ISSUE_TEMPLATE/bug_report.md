@@ -36,4 +36,4 @@ labels: bug
 
 ## Boundary Check
 
-- [ ] This issue does not include secrets, private provider/account names, non-public URLs, or private local paths.
+- [ ] This issue does not include secrets, account/provider names, non-public URLs, or local machine paths.

@@ -29,7 +29,6 @@ specs:
     conflicts_with: []
     supersedes: []
     promoted_outputs:
-      - docs/governance/DOCS_SYSTEM.md
       - AGENTS.md
     verification:
       - canonical docs exist
@@ -584,7 +583,6 @@ specs:
     conflicts_with: []
     supersedes: []
     promoted_outputs:
-      - openspec/changes/agent-ready-platform-complete/
       - docs/architecture/overview.md
       - docs/mcp/servers.md
       - opendream/schema/contract-export.schema.json

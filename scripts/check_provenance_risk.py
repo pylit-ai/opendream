@@ -13,7 +13,7 @@ ALLOWLIST = {
 }
 
 RISK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("private overlay marker", re.compile(r"opendream-private|archived-public-agent-artifacts")),
+    ("non-public workspace marker", re.compile(r"opendream-private|archived-public-agent-artifacts")),
     ("local absolute path", re.compile(r"/Users/(?!example|me)[A-Za-z0-9_.-]+|/home/(?!example)[A-Za-z0-9_.-]+")),
     (
         "secret-looking assignment",

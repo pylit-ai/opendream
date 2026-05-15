@@ -7,7 +7,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PATH_SCOPED_AGENTS = [
     REPO_ROOT / "opendream" / "AGENTS.md",
-    REPO_ROOT / "openspec" / "AGENTS.md",
     REPO_ROOT / ".meta" / "spec-adapters" / "AGENTS.md",
     REPO_ROOT / "tests" / "AGENTS.md",
 ]
@@ -21,6 +20,5 @@ class AgentReadyGuidanceTests(unittest.TestCase):
     def test_root_agents_references_path_scoped_files(self) -> None:
         root = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("opendream/AGENTS.md", root)
-        self.assertIn("openspec/AGENTS.md", root)
         self.assertIn(".meta/spec-adapters/AGENTS.md", root)
         self.assertIn("tests/AGENTS.md", root)

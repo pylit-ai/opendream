@@ -1,25 +1,23 @@
 # Clean-Room Provenance
 
 OpenDream is maintained as a public, publishable implementation. This file is
-the release-facing provenance manifest for code, docs, benchmarks, and vendored
-assets.
+the public provenance manifest for code, docs, benchmarks, and vendored assets.
 
 ## Provenance Classes
 
 | Class | Policy | Current sources |
 | --- | --- | --- |
 | Code reuse | Public code in this repository is written for OpenDream and licensed under Apache-2.0 unless a file says otherwise. | `opendream/**`, `scripts/**`, `tests/**` |
-| Concept inspiration | Public papers, blog posts, and project documentation may inform requirements and evaluation dimensions. They do not authorize copying code, prompts, private docs, or fixtures. | Sleep-time compute, Observational Memory, MemoryAgentBench, Meta-Harness |
+| Concept inspiration | Public papers, blog posts, and project documentation may inform requirements and evaluation dimensions. They do not authorize copying code, prompts, non-public docs, or fixtures. | Sleep-time compute, Observational Memory, MemoryAgentBench, Meta-Harness |
 | Benchmark-dimension inspiration | Benchmark dimensions are reimplemented against OpenDream APIs and fixtures. | `docs/benchmarks/**`, `opendream/benchmark_adapters.py` |
 | Vendored JS | Vendored browser assets are public MIT-licensed packages with pinned versions and checksums. | `opendream/static/vendor/**`, `THIRD_PARTY_NOTICES.md` |
-| No-reuse sources | Private overlays, private specs, generated local agent state, private provider/account docs, and non-public vendor internals are not sources for public code. | Excluded by `scripts/check_public_boundary.sh` |
+| No-reuse sources | Non-public workspace notes, generated local agent state, account-specific docs, and unpublished vendor internals are not sources for public code. | Excluded by `scripts/check_public_boundary.sh` |
 
 ## Explicit Non-Use Statement
 
-OpenDream does not use leaked Anthropic, Claude Code, AutoDream, or other
-non-public code, prompts, fixtures, datasets, private docs, or generated local
-agent artifacts. Any remaining compatibility names describe public behavior or
-legacy CLI flags, not copied internals.
+OpenDream does not use non-public vendor code, prompts, fixtures, datasets,
+internal docs, or generated local agent artifacts. Compatibility names describe
+public behavior or legacy CLI flags, not copied internals.
 
 ## Release Gate
 

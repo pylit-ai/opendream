@@ -87,8 +87,8 @@ codex-pre-task hook  ──┘  (workspace-local + contextvar)
 10. Add `opendream sessions cleanup --orphans [--dry-run]` to merge or delete
     orphan + zero-event records. Always require explicit confirmation.
 11. Sessions row UI: warning chip when `event_count == 0`; link to this doc.
-12. Add invariant to `CONSTITUTION.md`: every emitted event must have a
-    `session_id` resolvable to a session record.
+12. Document the invariant: every emitted event must have a `session_id`
+    resolvable to a session record.
 
 ## Verification
 - unit: `current_session_id()` is stable across nested calls within one hook span

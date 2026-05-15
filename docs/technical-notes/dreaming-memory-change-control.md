@@ -20,7 +20,7 @@ materialized as durable memory only when validation passes.
 | --- | --- |
 | Local storage | Memory is stored under the selected workspace unless the operator chooses another memory dir. |
 | Provider execution | Provider-backed semantic execution is explicit setup. Default release checks do not require API keys. |
-| Private overlay | Private release notes, Linear writeback, and account-specific evidence stay outside public artifacts. |
+| Release notes | Account-specific evidence, unpublished URLs, and issue-tracker writeback stay outside public artifacts. |
 | Vendored assets | Offline graph assets are pinned public packages with checksums and license notices. |
 
 ## Release Review
@@ -33,4 +33,4 @@ Release review should answer four questions:
 4. Do release artifacts include boundary, provenance, packaging, and no-network checks?
 
 The release gate records those answers in `.tmp/release-check/release_manifest.json`
-and the private go/no-go report.
+and the release notes for the candidate version.

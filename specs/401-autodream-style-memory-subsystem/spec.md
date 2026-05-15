@@ -47,5 +47,5 @@ The repo now contains a proposal-grade OpenSpec bundle for durable agent memory,
 - simplistic lexical retrieval can become noisy if scoring is not bounded and deterministic
 
 ## Links
-- `../../openspec/changes/401-autodream-style-memory-subsystem/spec.md`
-- `../../CONSTITUTION.md`
+- `../../docs/architecture/overview.md`
+- `../../README.md`

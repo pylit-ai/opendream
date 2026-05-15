@@ -20,10 +20,10 @@
 | If you want to… | Start here |
 |-----------------|------------|
 | Try it in a few commands | [Quick start](#quick-start) |
-| See memory value immediately | [90-second memory showcase](./docs/showcase/memory-showcase.md) |
+| Run the memory demo | [90-second memory showcase](./docs/showcase/memory-showcase.md) |
 | Wire it into an agent runtime | [Integration at a glance](#integration-at-a-glance) |
 | Browse memory in a browser | [Observability UI](#observability-ui) |
-| Hack on the repo | [Contributing](#contributing) (expandable) |
+| Contribute | [Contributing](#contributing) (expandable) |
 
 ---
 
@@ -45,8 +45,8 @@ evaluation commands.
 
 Bleeding-edge from Git (overwrites the tool env): `uv tool install --force "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
 
-Launch, upgrade, release-gate details, known limitations, and clean-room
-provenance live in [`docs/launch-readiness.md`](./docs/launch-readiness.md),
+Install checks, upgrade notes, known limitations, and clean-room provenance live
+in [`docs/launch-readiness.md`](./docs/launch-readiness.md),
 [`KNOWN_LIMITATIONS.md`](./KNOWN_LIMITATIONS.md), and
 [`CLEAN_ROOM.md`](./CLEAN_ROOM.md).
 
@@ -153,7 +153,7 @@ Corrections worth knowing:
 <details>
 <summary><strong>Agent / spec cross-references</strong> (optional reading)</summary>
 
-Human-facing behavior is described in this README and in [`AGENTS.md`](./AGENTS.md). Numbered trees under `specs/` and `openspec/changes/` (e.g. design bundles for the memory subsystem) are for **design traceability and tooling**, not required reading to use the CLI.
+Human-facing behavior is described in this README and in [`AGENTS.md`](./AGENTS.md). Numbered trees under `specs/` are for **design traceability and tooling**, not required reading to use the CLI.
 
 </details>
 
@@ -361,7 +361,7 @@ opendream semantic provider-health --workspace "$PWD"
 opendream dream run --workspace "$PWD" --mode hybrid --episodes tests/fixtures/transcript_only_dream.jsonl
 ```
 
-Semantic execution adapters — prefer no-extra-key when possible:
+Optional semantic execution adapters:
 
 ```bash
 opendream semantic setup --workspace "$PWD" --prefer no-extra-key --apply
@@ -371,22 +371,15 @@ opendream semantic adapters status --workspace "$PWD"
 opendream semantic ingest --workspace "$PWD" --scan-inbox
 ```
 
-Supported execution strategies: `deterministic` (always available), `direct-provider` (explicit API key), `codex-account` (ChatGPT account via Codex CLI, trusted local only), `claude-scheduled-task` (Claude-owned scheduled task, delegated envelope return), `cursor-automation` (Cursor-owned automation, delegated envelope return). Gemini OAuth reuse is **unsupported**.
+OpenDream always supports deterministic local execution. Provider and
+agent-runtime paths are optional integrations; OpenDream does not call external
+model providers unless you explicitly configure one. The detailed strategy
+matrix lives in [`docs/coding-agents.md`](./docs/coding-agents.md).
 
-### Execution strategies
-
-| Strategy | Execution owner | Auth source | Extra key needed? |
-|---|---|---|---|
-| `deterministic` | OpenDream | none | No |
-| `direct-provider` | OpenDream | API key (Anthropic/OpenAI) | Yes |
-| `codex-account` | OpenDream (via Codex CLI) | ChatGPT account | No |
-| `claude-scheduled-task` | Claude (vendor runtime) | Claude account | No |
-| `cursor-automation` | Cursor (vendor runtime) | Cursor account | No |
-
-Run `opendream semantic setup --workspace . --apply` to detect, apply, scaffold, and immediately validate the recommended path for your environment. If you need a manual nudge later, use `opendream dream worker --workspace . --once --mode auto`.
+Run `opendream semantic setup --workspace . --apply` to detect, apply, scaffold, and validate the recommended path for your environment. If you need a manual nudge later, use `opendream dream worker --workspace . --once --mode auto`.
 Gemini CLI OAuth reuse is explicitly unsupported.
 
-Semantic-first is the default **product posture**, not an automatic readiness claim. If semantic posture is selected but the recommended path has not been applied yet, OpenDream should report **setup required**. If a previously applied path stops being runnable, it should report **degraded** semantic-first, explain why, keep deterministic capture explicit, and recommend one concrete next action instead of implying that `mode=semantic` is already ready.
+Semantic-first is a configuration posture, not an automatic readiness claim. If semantic posture is selected but the recommended path has not been applied yet, OpenDream should report **setup required**. If a previously applied path stops being runnable, it should report **degraded** semantic-first, explain why, keep deterministic capture explicit, and recommend one concrete next action instead of implying that `mode=semantic` is already ready.
 
 **Feature / bug / fix radar** uses **`opendream automation`** (projection jobs), not `dream run`. Full walkthrough, file layouts, and how this differs from transcript dreaming: [`docs/automation/semantic-mode-and-feature-radar-setup.md`](./docs/automation/semantic-mode-and-feature-radar-setup.md).
 
@@ -439,15 +432,15 @@ Activation and compressed-status metadata (for the standard `init --activate-con
 
 | Doc | Purpose |
 |-----|---------|
-| [NORTHSTAR.md](./NORTHSTAR.md) | Product direction |
-| [PRD.md](./PRD.md) | Requirements |
-| [CONSTITUTION.md](./CONSTITUTION.md) | Governance |
-| [AGENTS.md](./AGENTS.md) | AI assistant / agent conventions |
-| [KNOWN_LIMITATIONS.md](./KNOWN_LIMITATIONS.md) | Truthful launch limits |
-| [docs/claims.md](./docs/claims.md) | Evidence-backed claims matrix |
-| [CLEAN_ROOM.md](./CLEAN_ROOM.md) | Provenance and no-reuse policy |
-| [docs/technical-notes/dreaming-memory-change-control.md](./docs/technical-notes/dreaming-memory-change-control.md) | Dreaming memory change control |
-| [docs/showcase/cli-demos.md](./docs/showcase/cli-demos.md) | Short recorded CLI demos for onboarding, agent context, safety, evals, observability, contracts, and automation |
+| [docs/showcase/memory-showcase.md](./docs/showcase/memory-showcase.md) | 90-second memory demo |
+| [docs/coding-agents.md](./docs/coding-agents.md) | Coding-agent integration guide |
+| [docs/automation/dream-task-playbook.md](./docs/automation/dream-task-playbook.md) | Automation and recurring memory tasks |
+| [docs/architecture/overview.md](./docs/architecture/overview.md) | Architecture overview |
+| [docs/benchmarks/methodology.md](./docs/benchmarks/methodology.md) | Benchmark methodology |
+| [docs/claims.md](./docs/claims.md) | Evidence-backed public claims |
+| [KNOWN_LIMITATIONS.md](./KNOWN_LIMITATIONS.md) | Known limitations |
+| [SECURITY.md](./SECURITY.md) | Security policy |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Contributor guide |
 
 OpenDream does not send telemetry by default. Provider/API-key paths are
 operator-configured execution paths and are separate from analytics or tracking.
@@ -583,7 +576,6 @@ opendream prepare-context --workspace "$PWD" --query "your task"
 | `opendream/` | Runtime: events, candidates, consolidation, retrieval, storage |
 | `tests/` | Fixture-driven integration and validation |
 | `specs/` | Canonical implementation spec tree |
-| `openspec/changes/` | Proposal bundle and design artifacts |
 | `docs/` | Architecture and governance |
 
 Optional, **non-normative** framework examples may live under `.meta/spec-adapters/` (see [`AGENTS.md`](./AGENTS.md)). They are not part of the packaged product API; `scripts/check_adapters.py` keeps example paths and documented CLI strings consistent.

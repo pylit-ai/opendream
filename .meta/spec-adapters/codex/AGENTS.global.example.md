@@ -1,6 +1,6 @@
 # Global AGENTS example
 
-Reference only. Canonical policy remains in repo `AGENTS.md`, `CONSTITUTION.md`, and `specs/403-406`.
+Reference only. Canonical policy remains in repo `AGENTS.md`, `README.md`, and `docs/`.
 
 Global durable preferences:
 `opendream init --workspace ~/.opendream-global --store-kind global`

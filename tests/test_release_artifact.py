@@ -9,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
-from opendream.util import SCHEMA_ROOT, canonical_schema_path, proposal_schema_path
+from opendream.util import SCHEMA_ROOT, canonical_schema_path
 from opendream.validation import required_schema_files
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -21,16 +21,12 @@ class ReleaseArtifactTests(unittest.TestCase):
         for schema_name in required_schema_files():
             package_schema = SCHEMA_ROOT / schema_name
             canonical_schema = canonical_schema_path(schema_name)
-            proposal_schema = proposal_schema_path(schema_name)
             self.assertTrue(package_schema.exists(), schema_name)
             self.assertTrue(canonical_schema.exists(), schema_name)
-            self.assertTrue(proposal_schema.exists(), schema_name)
 
             package_payload = json.loads(package_schema.read_text(encoding="utf-8"))
             canonical_payload = json.loads(canonical_schema.read_text(encoding="utf-8"))
-            proposal_payload = json.loads(proposal_schema.read_text(encoding="utf-8"))
             self.assertEqual(package_payload, canonical_payload, schema_name)
-            self.assertEqual(package_payload, proposal_payload, schema_name)
 
     def test_clean_venv_install_and_demo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -87,16 +87,11 @@ operator's real home catalog, but the skip must still be visible.
 - **Promote the catalog to canonical state.** Rejected: it would violate
   the workspace-scoped invariant and create drift any time a workspace
   is moved, deleted, or repaired outside OpenDream.
-- **Rely on ad hoc filesystem search only.** Rejected: the North Star
-  explicitly targets a multi-repo substrate and operators deserve
-  first-party ergonomics.
-- **Background scans of `$HOME` by default.** Rejected: violates the
-  Constitution's operator-control and no-silent-fallback rules and
-  would feel intrusive.
+- **Rely on ad hoc filesystem search only.** Rejected: multi-repo operators
+  deserve first-party ergonomics.
+- **Background scans of `$HOME` by default.** Rejected: violates
+  operator-control and no-silent-fallback rules and would feel intrusive.
 
 ## References
-- `openspec/changes/441-workspace-catalog-dashboard-bundle/`
-- `NORTHSTAR.md`
-- `CONSTITUTION.md`
 - `opendream/workspace_catalog.py`
 - `docs/architecture/overview.md`
