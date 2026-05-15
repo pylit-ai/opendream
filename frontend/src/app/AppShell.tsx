@@ -25,7 +25,6 @@ import {
   getEvals,
   getExports,
   getGraph,
-  getMemories,
   getOverview,
   getRetrievals,
   getReviews,
@@ -41,8 +40,7 @@ const ROUTE_PREFETCH: Record<string, () => void> = {
   '/overview': () => prefetch('overview', getOverview, 15_000),
   '/showcase': () => prefetch('showcase', getShowcase, 15_000),
   '/runs': () => prefetch('runs', () => getRuns(), 15_000),
-  '/memories': () =>
-    prefetch('memories:{"limit":20}', () => getMemories({ limit: 20 }), 15_000),
+  '/memories': () => prefetch('overview', getOverview, 15_000),
   '/dreams': () => prefetch('runs', () => getRuns(), 15_000),
   '/retrievals': () => prefetch('retrievals', () => getRetrievals(), 15_000),
   '/sessions': () => prefetch('sessions', getSessions, 15_000),
@@ -57,6 +55,28 @@ const ROUTE_PREFETCH: Record<string, () => void> = {
   '/evals': () => prefetch('evals', getEvals, 30_000),
   '/exports': () => prefetch('exports', getExports, 30_000),
 };
+
+const PREFETCH_DELAY_MS = 180;
+let routePrefetchTimer: ReturnType<typeof setTimeout> | undefined;
+let routePrefetchPath: string | undefined;
+
+function scheduleRoutePrefetch(path: string): void {
+  if (!ROUTE_PREFETCH[path]) return;
+  if (routePrefetchTimer) window.clearTimeout(routePrefetchTimer);
+  routePrefetchPath = path;
+  routePrefetchTimer = window.setTimeout(() => {
+    if (routePrefetchPath === path) ROUTE_PREFETCH[path]?.();
+    routePrefetchTimer = undefined;
+    routePrefetchPath = undefined;
+  }, PREFETCH_DELAY_MS);
+}
+
+function cancelRoutePrefetch(path?: string): void {
+  if (path && routePrefetchPath && routePrefetchPath !== path) return;
+  if (routePrefetchTimer) window.clearTimeout(routePrefetchTimer);
+  routePrefetchTimer = undefined;
+  routePrefetchPath = undefined;
+}
 
 const SIDEBAR_COLLAPSED = 60;
 const SIDEBAR_EXPANDED = 220;
@@ -217,8 +237,11 @@ function Sidebar(): JSX.Element {
                         <A
                           href={route.path}
                           title={expanded() ? undefined : route.name}
-                          onMouseEnter={() => ROUTE_PREFETCH[route.path]?.()}
-                          onFocus={() => ROUTE_PREFETCH[route.path]?.()}
+                          onMouseEnter={() => scheduleRoutePrefetch(route.path)}
+                          onMouseLeave={() => cancelRoutePrefetch(route.path)}
+                          onFocus={() => scheduleRoutePrefetch(route.path)}
+                          onBlur={() => cancelRoutePrefetch(route.path)}
+                          onClick={() => cancelRoutePrefetch(route.path)}
                           class={cn(
                             'group relative flex h-9 items-center gap-3 rounded-md pl-3 pr-2 text-[13px] text-text-muted transition-colors duration-150',
                             'hover:text-text',

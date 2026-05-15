@@ -24,13 +24,14 @@ from .util import parse_timestamp, read_json, sha256_path, stable_id, to_iso, ut
 # Fingerprint TTL is short enough to remain near-real-time but lets request
 # bursts skip redundant stat() calls.
 _INDEX_CACHE_DISABLED = bool(os.environ.get("OPENDREAM_DISABLE_INDEX_CACHE"))
-_FINGERPRINT_TTL_SECONDS = 0.0
+_FINGERPRINT_TTL_SECONDS = 2.0
+_COMPACT_INDEX_SCHEMA_VERSION = 2
 _INDEX_CACHE_MAX_ENTRIES = 16
 _index_cache_lock = threading.Lock()
 _index_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _compact_index_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
-# key -> (fingerprint, expires_at)
-_fingerprint_cache: dict[str, tuple[str, float]] = {}
+# key -> (fingerprint, expires_at, lightweight_source_hint)
+_fingerprint_cache: dict[str, tuple[str, float, str]] = {}
 
 
 def _store_cache_key(store: MemoryStore) -> str:
@@ -41,15 +42,16 @@ def _cached_fingerprint(store: MemoryStore) -> str:
     if _INDEX_CACHE_DISABLED:
         return _observability_source_fingerprint(store)
     key = _store_cache_key(store)
+    hint = _observability_source_hint(store)
     cached = _fingerprint_cache.get(key)
-    if cached and cached[1] > time.monotonic():
+    if cached and cached[1] > time.monotonic() and cached[2] == hint:
         return cached[0]
     fp = _observability_source_fingerprint(store)
     # Compute expiry AFTER the expensive call so the TTL window is measured
     # from when the cache was actually populated, not from when we entered
     # the function. Otherwise long fingerprint computations leave the cache
     # already-expired before the next caller arrives.
-    _fingerprint_cache[key] = (fp, time.monotonic() + _FINGERPRINT_TTL_SECONDS)
+    _fingerprint_cache[key] = (fp, time.monotonic() + _FINGERPRINT_TTL_SECONDS, hint)
     return fp
 
 
@@ -79,7 +81,11 @@ def _compact_cache_get(key: str, fingerprint: str) -> dict[str, Any] | None:
         return None
     with _index_cache_lock:
         entry = _compact_index_cache.get(key)
-        if entry is not None and entry.get("source_fingerprint") == fingerprint:
+        if (
+            entry is not None
+            and entry.get("source_fingerprint") == fingerprint
+            and _compact_index_schema_current(entry)
+        ):
             _compact_index_cache.move_to_end(key)
             return entry
         return None
@@ -135,6 +141,7 @@ def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[s
     _fingerprint_cache[_store_cache_key(store)] = (
         source_fingerprint,
         time.monotonic() + _FINGERPRINT_TTL_SECONDS,
+        _observability_source_hint(store),
     )
     return index
 
@@ -150,6 +157,16 @@ _RETRIEVAL_LIST_STRIP = frozenset({
     "lexical_only_selected_memory_ids",
 })
 _SESSION_LIST_STRIP = frozenset({"timeline", "events", "raw_events"})
+_MEMORY_LIST_STRIP = frozenset({
+    "annotations",
+    "manual_reviews",
+    "lineage",
+    "raw_json",
+    "source_paths",
+    "provenance",
+    "compare_candidates",
+})
+_MEMORY_LIST_BODY_LIMIT = 280
 
 
 def project_run_list_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -175,6 +192,43 @@ def project_retrieval_list_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def project_session_list_row(row: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in row.items() if key not in _SESSION_LIST_STRIP}
+
+
+def project_memory_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    out = {key: value for key, value in row.items() if key not in _MEMORY_LIST_STRIP}
+    body = out.get("body")
+    if isinstance(body, str) and len(body) > _MEMORY_LIST_BODY_LIMIT:
+        out["body"] = body[:_MEMORY_LIST_BODY_LIMIT].rstrip() + "..."
+    agents = out.get("reporting_agents")
+    if isinstance(agents, list):
+        out["reporting_agents"] = [
+            {
+                key: agent.get(key)
+                for key in ("agent_id", "agent_label", "runtime", "adapter_id")
+                if isinstance(agent, dict) and agent.get(key)
+            }
+            for agent in agents
+            if isinstance(agent, dict)
+        ]
+    return out
+
+
+def project_context_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    selected_ids = row.get("selected_memory_ids")
+    selected_count = len(selected_ids) if isinstance(selected_ids, list) else None
+    query = _context_query_text(row)
+    context_id = row.get("context_id")
+    out = {
+        "context_id": context_id,
+        "session_id": row.get("session_id"),
+        "created_at": row.get("created_at"),
+        "character_count": row.get("character_count"),
+        "token_estimate": row.get("token_estimate"),
+        "selected_memory_ids_count": selected_count,
+        "query": query,
+        "display_name": _compact_display_label(query, str(context_id or "context")),
+    }
+    return {key: value for key, value in out.items() if value is not None}
 
 
 def _context_query_text(row: dict[str, Any] | None) -> str | None:
@@ -228,15 +282,21 @@ def _build_compact_entities_from_full(entities: dict[str, Any]) -> dict[str, Any
     runs = [row for row in entities.get("runs", []) if isinstance(row, dict)]
     retrievals = [row for row in entities.get("retrievals", []) if isinstance(row, dict)]
     sessions = [row for row in entities.get("sessions", []) if isinstance(row, dict)]
+    contexts = [row for row in entities.get("contexts", []) if isinstance(row, dict)]
     dream_cycles = [
         _build_dream_cycle_projection(row, include_detail=False)
         for row in runs
         if _is_dream_run(row)
     ]
     return {
-        "memories": [row for row in entities.get("memories", []) if isinstance(row, dict)],
+        "memories": [
+            project_memory_list_row(row)
+            for row in entities.get("memories", [])
+            if isinstance(row, dict)
+        ],
         "runs": [_compact_run_row(row) for row in runs],
         "retrievals": [project_retrieval_list_row(row) for row in retrievals],
+        "contexts": [project_context_list_row(row) for row in contexts],
         "sessions": [project_session_list_row(row) for row in sessions],
         "dream_cycles": dream_cycles,
     }
@@ -248,10 +308,15 @@ def _build_compact_index_from_full(index: dict[str, Any]) -> dict[str, Any]:
     return {
         "generated_at": index.get("generated_at"),
         "source_fingerprint": index.get("source_fingerprint"),
+        "compact_schema_version": _COMPACT_INDEX_SCHEMA_VERSION,
         "store": index.get("store", {}),
         "overview": _project_overview_for_list(overview),
         "entities": _build_compact_entities_from_full(entities),
     }
+
+
+def _compact_index_schema_current(payload: dict[str, Any]) -> bool:
+    return payload.get("compact_schema_version") == _COMPACT_INDEX_SCHEMA_VERSION
 
 
 def index_observability_compact(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
@@ -265,11 +330,13 @@ def index_observability_compact(store: MemoryStore, *, now: str | None = None) -
         "memories": _build_memory_entities(store),
         "runs": runs,
         "retrievals": retrievals,
+        "contexts": contexts,
         "sessions": sessions,
     }
     compact = {
         "generated_at": timestamp,
         "source_fingerprint": source_fingerprint,
+        "compact_schema_version": _COMPACT_INDEX_SCHEMA_VERSION,
         "store": store.status_snapshot(now=timestamp),
         "overview": _project_overview_for_list(_build_overview(store, timestamp)),
         "entities": _build_compact_entities_from_full(full_like_entities),
@@ -279,6 +346,7 @@ def index_observability_compact(store: MemoryStore, *, now: str | None = None) -
     _fingerprint_cache[_store_cache_key(store)] = (
         source_fingerprint,
         time.monotonic() + _FINGERPRINT_TTL_SECONDS,
+        _observability_source_hint(store),
     )
     return compact
 
@@ -299,7 +367,11 @@ def load_or_build_list_index(
         return cached
     if store.observability_compact_index_path.exists():
         payload = store.load_observability_compact_index()
-        if payload.get("entities") and payload.get("source_fingerprint") == fingerprint:
+        if (
+            payload.get("entities")
+            and payload.get("source_fingerprint") == fingerprint
+            and _compact_index_schema_current(payload)
+        ):
             _compact_cache_put(key, payload)
             return payload
     return index_observability_compact(store, now=now)
@@ -428,6 +500,34 @@ def _observability_source_fingerprint(store: MemoryStore) -> str:
         except ValueError:
             label = str(path.resolve())
         digest.update(label.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(stat.st_mtime_ns).encode("ascii"))
+        digest.update(b":")
+        digest.update(str(stat.st_size).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _observability_source_hint(store: MemoryStore) -> str:
+    digest = hashlib.sha256()
+    paths = [
+        store.durable_records_path,
+        store.index_json_path,
+        store.memory_md_path,
+        store.relation_edges_path,
+        store.events_dir,
+        store.audit_retrieval_dir,
+        store.audit_context_dir,
+        store.audit_consolidation_dir,
+        store.audit_dream_dir,
+        store.annotations_dir,
+        store.reviews_dir,
+    ]
+    for path in paths:
+        if not path.exists():
+            continue
+        stat = path.stat()
+        digest.update(str(path).encode("utf-8"))
         digest.update(b"\0")
         digest.update(str(stat.st_mtime_ns).encode("ascii"))
         digest.update(b":")
@@ -2352,6 +2452,84 @@ def _build_memory_entities(store: MemoryStore) -> list[dict[str, Any]]:
             if memory_id in by_id
         ]
     return items
+
+
+def get_memory_detail(store: MemoryStore, memory_id: str) -> dict[str, Any] | None:
+    records = store.load_durable_records()
+    by_id = {
+        str(record.get("memory_id")): record
+        for record in records
+        if isinstance(record, dict) and record.get("memory_id")
+    }
+    record = by_id.get(memory_id)
+    if record is None:
+        return None
+    events_by_id = {str(event.get("event_id", "")): event for event in store.load_events()}
+    annotations = [
+        annotation
+        for annotation in store.load_annotations()
+        if str(annotation.get("object_id", "")) == memory_id
+    ]
+    reviews = [
+        review
+        for review in store.load_review_decisions()
+        if str(review.get("queue_item_id", "")) == memory_id
+    ]
+    source_event_ids = [str(event_id) for event_id in record.get("source_event_ids", [])]
+    reporting_agents = _agents_for_event_ids(events_by_id, source_event_ids)
+    item = {
+        **record,
+        "source_count": len(source_event_ids),
+        "reporting_agents": reporting_agents,
+        "reporting_agent_label": ", ".join(agent["agent_label"] for agent in reporting_agents),
+        "annotations": annotations,
+        "manual_reviews": reviews,
+        "superseded_by": [
+            candidate_id
+            for candidate_id, candidate in by_id.items()
+            if memory_id in candidate.get("supersedes", [])
+        ],
+        "lineage": {
+            "supersedes": record.get("supersedes", []),
+            "conflicts_with": record.get("conflicts_with", []),
+        },
+        "raw_json": record,
+        "source_paths": _find_source_paths(store, record),
+        "provenance": {
+            "source_event_ids": record.get("source_event_ids", []),
+            "topic_path": str(store.topics_dir / f"{memory_id}.md"),
+        },
+    }
+    item["contended"] = item.get("status") == "contested" or bool(item.get("conflicts_with"))
+    item["compare_candidates"] = [
+        by_id[candidate_id]
+        for candidate_id in item.get("conflicts_with", []) + item.get("supersedes", [])
+        if candidate_id in by_id
+    ]
+    return item
+
+
+def get_memory_lineage(store: MemoryStore, memory_id: str) -> dict[str, Any]:
+    memory = get_memory_detail(store, memory_id)
+    if memory is None:
+        return {}
+    lineage = dict(memory.get("lineage", {}))
+    if memory.get("superseded_by"):
+        lineage["superseded_by"] = memory.get("superseded_by")
+    return lineage
+
+
+def get_context_detail(store: MemoryStore, context_id: str) -> dict[str, Any] | None:
+    if not context_id or "/" in context_id or "\\" in context_id:
+        return None
+    path = store.audit_context_dir / f"{context_id}.json"
+    if not path.exists():
+        return None
+    context = read_json(path, {})
+    if not isinstance(context, dict):
+        return None
+    context.setdefault("source_path", str(path))
+    return {**context, "display_name": project_context_list_row(context).get("display_name")}
 
 
 def _normalize_event_reporting_agent(event: dict[str, Any]) -> dict[str, str]:

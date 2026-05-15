@@ -27,7 +27,10 @@ from .observability import (
     create_annotation,
     create_export,
     create_review_decision,
+    get_context_detail,
     get_dream_cycle,
+    get_memory_detail,
+    get_memory_lineage,
     index_observability,
     load_or_build_index,
     load_or_build_list_index,
@@ -838,66 +841,20 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             self._write_json(result)
             _finish()
             return
-        index = load_or_build_index(self.store)
-        entities = index["entities"]
-        if parsed.path.startswith("/api/dream/cycles/"):
-            run_id = parsed.path.split("/")[-1]
-            cycle = get_dream_cycle(index, run_id)
-            if cycle is None:
-                self._write_json({"error": f"dream cycle not found: {run_id}"}, status=HTTPStatus.NOT_FOUND)
-                _finish(404)
-                return
-            self._write_json(cycle)
-            _finish()
-            return
-        if parsed.path.startswith("/api/semantic-changes/"):
-            source_id = parsed.path.split("/")[-1]
-            payload = build_semantic_change_review(
-                self.store,
-                source_id=source_id,
-                now=str(index.get("generated_at") or ""),
-            )
-            if payload is None:
-                self._write_json(
-                    {"error": f"semantic change review not found: {source_id}"},
-                    status=HTTPStatus.NOT_FOUND,
-                )
-                return
-            self._write_json(payload)
-            return
         if parsed.path.startswith("/api/memories/") and parsed.path.endswith("/lineage"):
             memory_id = parsed.path.split("/")[-2]
-            memory = _find_by_id(entities["memories"], "memory_id", memory_id)
-            self._write_json(memory.get("lineage", {}) if memory else {})
+            self._write_json(get_memory_lineage(self.store, memory_id))
+            _finish()
             return
         if parsed.path.startswith("/api/memories/"):
             memory_id = parsed.path.split("/")[-1]
-            self._write_json(_find_by_id(entities["memories"], "memory_id", memory_id) or {})
-            return
-        if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/timeline"):
-            session_id = parsed.path.split("/")[-2]
-            session = _find_by_id(entities["sessions"], "session_id", session_id)
-            if session:
-                context_by_session = _latest_context_by_session(list(entities["contexts"]))
-                session = _session_display_name(session, context_by_session)
-            self._write_json(session or {})
+            self._write_json(get_memory_detail(self.store, memory_id) or {})
             _finish()
             return
-        if parsed.path.startswith("/api/runs/") and parsed.path.endswith("/diff"):
-            run_id = parsed.path.split("/")[-2]
-            run = _find_by_id(entities["runs"], "run_id", run_id)
-            self._write_json({"run_id": run_id, "diff_text": run.get("diff_text", "") if run else ""})
-            return
-        if parsed.path.startswith("/api/runs/"):
-            run_id = parsed.path.split("/")[-1]
-            self._write_json(_find_by_id(entities["runs"], "run_id", run_id) or {})
-            return
-        if parsed.path.startswith("/api/retrievals/"):
-            retrieval_id = parsed.path.split("/")[-1]
-            self._write_json(_find_by_id(entities["retrievals"], "id", retrieval_id) or {})
-            return
         if parsed.path == "/api/context":
-            rows = list(entities["contexts"])
+            list_index = load_or_build_list_index(self.store)
+            entities = list_index["entities"]
+            rows = list(entities.get("contexts", []))
             session_id = (query.get("session_id") or "").strip()
             if session_id:
                 rows = [row for row in rows if str(row.get("session_id") or "") == session_id]
@@ -924,10 +881,59 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             return
         if parsed.path.startswith("/api/context/"):
             context_id = parsed.path.split("/")[-1]
-            context = _find_by_id(entities["contexts"], "context_id", context_id)
-            if context:
-                context = {**context, "display_name": _context_list_row(context).get("display_name")}
-            self._write_json(context or {})
+            self._write_json(get_context_detail(self.store, context_id) or {})
+            _finish()
+            return
+        index = load_or_build_index(self.store)
+        entities = index["entities"]
+        if parsed.path.startswith("/api/dream/cycles/"):
+            run_id = parsed.path.split("/")[-1]
+            cycle = get_dream_cycle(index, run_id)
+            if cycle is None:
+                self._write_json({"error": f"dream cycle not found: {run_id}"}, status=HTTPStatus.NOT_FOUND)
+                _finish(404)
+                return
+            self._write_json(cycle)
+            _finish()
+            return
+        if parsed.path.startswith("/api/semantic-changes/"):
+            source_id = parsed.path.split("/")[-1]
+            payload = build_semantic_change_review(
+                self.store,
+                source_id=source_id,
+                now=str(index.get("generated_at") or ""),
+            )
+            if payload is None:
+                self._write_json(
+                    {"error": f"semantic change review not found: {source_id}"},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                _finish(404)
+                return
+            self._write_json(payload)
+            _finish()
+            return
+        if parsed.path.startswith("/api/sessions/") and parsed.path.endswith("/timeline"):
+            session_id = parsed.path.split("/")[-2]
+            session = _find_by_id(entities["sessions"], "session_id", session_id)
+            if session:
+                context_by_session = _latest_context_by_session(list(entities["contexts"]))
+                session = _session_display_name(session, context_by_session)
+            self._write_json(session or {})
+            _finish()
+            return
+        if parsed.path.startswith("/api/runs/") and parsed.path.endswith("/diff"):
+            run_id = parsed.path.split("/")[-2]
+            run = _find_by_id(entities["runs"], "run_id", run_id)
+            self._write_json({"run_id": run_id, "diff_text": run.get("diff_text", "") if run else ""})
+            return
+        if parsed.path.startswith("/api/runs/"):
+            run_id = parsed.path.split("/")[-1]
+            self._write_json(_find_by_id(entities["runs"], "run_id", run_id) or {})
+            return
+        if parsed.path.startswith("/api/retrievals/"):
+            retrieval_id = parsed.path.split("/")[-1]
+            self._write_json(_find_by_id(entities["retrievals"], "id", retrieval_id) or {})
             return
         if parsed.path == "/api/graph":
             index = load_or_build_index(self.store)
@@ -1511,6 +1517,10 @@ def _compact_label(text: str | None, fallback: str, *, limit: int = 84) -> str:
 
 
 def _context_query(row: dict[str, Any]) -> str | None:
+    for key in ("query", "request", "prompt"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     assembled = row.get("assembled_text")
     if isinstance(assembled, str):
         for line in assembled.splitlines():
@@ -1570,7 +1580,9 @@ def _session_display_name(row: dict[str, Any], context_by_session: dict[str, dic
 
 def _context_list_row(row: dict[str, Any]) -> dict[str, Any]:
     selected_ids = row.get("selected_memory_ids")
-    selected_count = len(selected_ids) if isinstance(selected_ids, list) else None
+    selected_count = row.get("selected_memory_ids_count")
+    if not isinstance(selected_count, int):
+        selected_count = len(selected_ids) if isinstance(selected_ids, list) else None
     query = _context_query(row)
     context_id = row.get("context_id")
     out = {

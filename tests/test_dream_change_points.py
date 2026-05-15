@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import unittest
 from pathlib import Path
 
@@ -235,3 +236,49 @@ class DreamChangePointTests(unittest.TestCase):
         change_point = scored[-1]["change_point"]
         assert isinstance(change_point, dict)
         self.assertNotEqual(change_point["kind"], "duration_anomaly")
+
+    def test_duration_anomaly_scoring_uses_cached_phase_baselines(self) -> None:
+        cycles = [
+            {
+                "run_id": f"cycle-{i:04d}",
+                "mode": "dream",
+                "status": "completed",
+                "signal_row_count": 88,
+                "phases": ["orient", "gather_recent_signal", "synthesize", "promote"],
+                "phase_durations": {
+                    "orient": 100 + (i % 3),
+                    "gather_recent_signal": 180 + (i % 4),
+                    "synthesize": 420 + (i % 5),
+                    "promote": 90 + (i % 2),
+                },
+                "funnel": {
+                    "considered": 88,
+                    "selected": 0,
+                    "generated": 0,
+                    "approved": 0,
+                    "created": 0,
+                },
+            }
+            for i in range(1_200)
+        ]
+        cycles.append(
+            {
+                **cycles[-1],
+                "run_id": "duration-spike",
+                "phase_durations": {
+                    "orient": 101,
+                    "gather_recent_signal": 181,
+                    "synthesize": 2_000,
+                    "promote": 91,
+                },
+            }
+        )
+
+        started = time.perf_counter()
+        scored = score_dream_change_points(cycles, newest_first=False)
+        elapsed = time.perf_counter() - started
+
+        change_point = scored[-1]["change_point"]
+        assert isinstance(change_point, dict)
+        self.assertEqual(change_point["kind"], "duration_anomaly")
+        self.assertLess(elapsed, 0.2)

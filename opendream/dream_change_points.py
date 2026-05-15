@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from statistics import median, pstdev
+from bisect import insort
+from math import sqrt
 from typing import Any, cast
 
 IDLE_REASONS = frozenset({"no-episodes", "insufficient-signal"})
@@ -19,14 +20,20 @@ def score_dream_change_points(
     """Return cycles annotated with deterministic change-point metadata."""
     chronological = list(reversed(cycles)) if newest_first else list(cycles)
     scored: list[dict[str, Any]] = []
+    duration_baselines: dict[str, _DurationPhaseBaseline] = {}
     for cycle in chronological:
         row = dict(cycle)
-        row["change_point"] = _score_cycle(row, scored)
+        row["change_point"] = _score_cycle(row, scored, duration_baselines)
         scored.append(row)
+        _add_duration_baseline(row, duration_baselines)
     return list(reversed(scored)) if newest_first else scored
 
 
-def _score_cycle(cycle: dict[str, Any], previous: list[dict[str, Any]]) -> dict[str, Any]:
+def _score_cycle(
+    cycle: dict[str, Any],
+    previous: list[dict[str, Any]],
+    duration_baselines: dict[str, _DurationPhaseBaseline],
+) -> dict[str, Any]:
     signature = effect_signature(cycle)
     contributors: list[dict[str, Any]] = []
 
@@ -91,7 +98,7 @@ def _score_cycle(cycle: dict[str, Any], previous: list[dict[str, Any]]) -> dict[
             is_noop=False,
         )
 
-    anomaly = _duration_anomaly_contributor(cycle, previous)
+    anomaly = _duration_anomaly_contributor(cycle, duration_baselines)
     if anomaly:
         return _change_point(
             score=60,
@@ -265,27 +272,72 @@ def _drift_label(contributors: list[dict[str, Any]]) -> str:
     return f"Dream drift: {key} changed from {first.get('from')} to {first.get('to')}."
 
 
-def _duration_anomaly_contributor(cycle: dict[str, Any], previous: list[dict[str, Any]]) -> dict[str, Any] | None:
+class _DurationPhaseBaseline:
+    def __init__(self) -> None:
+        self.values: list[int] = []
+        self.total = 0.0
+        self.total_squares = 0.0
+
+    def add(self, raw_duration: Any) -> None:
+        duration = _int(raw_duration)
+        if duration <= 0:
+            return
+        insort(self.values, duration)
+        self.total += duration
+        self.total_squares += duration * duration
+
+    @property
+    def count(self) -> int:
+        return len(self.values)
+
+    def median(self) -> float:
+        count = len(self.values)
+        midpoint = count // 2
+        if count % 2:
+            return float(self.values[midpoint])
+        return (self.values[midpoint - 1] + self.values[midpoint]) / 2
+
+    def pstdev(self) -> float:
+        count = len(self.values)
+        if count <= 0:
+            return 0.0
+        mean = self.total / count
+        variance = max(0.0, (self.total_squares / count) - (mean * mean))
+        return sqrt(variance)
+
+
+def _add_duration_baseline(
+    cycle: dict[str, Any],
+    baselines: dict[str, _DurationPhaseBaseline],
+) -> None:
+    durations = cycle.get("phase_durations")
+    if not isinstance(durations, dict):
+        return
+    for phase, raw_duration in durations.items():
+        baseline = baselines.setdefault(str(phase), _DurationPhaseBaseline())
+        baseline.add(raw_duration)
+
+
+def _duration_anomaly_contributor(
+    cycle: dict[str, Any],
+    baselines: dict[str, _DurationPhaseBaseline],
+) -> dict[str, Any] | None:
     current = cycle.get("phase_durations") if isinstance(cycle.get("phase_durations"), dict) else {}
     if not current:
         return None
     best: dict[str, Any] | None = None
     for phase, raw_duration in current.items():
         duration = _int(raw_duration)
-        baseline_values = [
-            _int(row.get("phase_durations", {}).get(phase))
-            for row in previous
-            if isinstance(row.get("phase_durations"), dict) and _int(row.get("phase_durations", {}).get(phase)) > 0
-        ]
-        if len(baseline_values) < MIN_DURATION_BASELINE:
+        baseline_stats = baselines.get(str(phase))
+        if baseline_stats is None or baseline_stats.count < MIN_DURATION_BASELINE:
             continue
-        baseline = median(baseline_values)
+        baseline = baseline_stats.median()
         if baseline <= 0:
             continue
         # Skip phases with naturally high variance — a 3x spike on a chaotic
         # baseline is noise, not a real anomaly. CV > 0.5 means the phase is
         # already swinging widely on its own.
-        if len(baseline_values) >= 2 and pstdev(baseline_values) / baseline > 0.5:
+        if baseline_stats.count >= 2 and baseline_stats.pstdev() / baseline > 0.5:
             continue
         ratio = duration / baseline
         if ratio < 3 or duration - baseline < 500:

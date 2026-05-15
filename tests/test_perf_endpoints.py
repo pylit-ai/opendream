@@ -53,6 +53,10 @@ class PerfEndpointTests(unittest.TestCase):
             now=FIXED_NOW,
             reporting_agent={"agent_id": "codex", "agent_label": "Codex"},
         )
+        records = self.store.load_durable_records()
+        contexts = self.store.load_context_assemblies()
+        self.memory_id = str(records[0]["memory_id"])
+        self.context_id = str(contexts[0]["context_id"])
         index_observability(self.store, now=FIXED_NOW)
 
         self.server = build_server(self.store, host="127.0.0.1", port=0)
@@ -151,6 +155,8 @@ class PerfEndpointTests(unittest.TestCase):
         list_paths = [
             "/api/overview",
             "/api/dream/cycles?limit=50",
+            "/api/memories?limit=10",
+            "/api/context?limit=10",
             "/api/sessions",
             "/api/runs",
             "/api/retrievals",
@@ -186,8 +192,36 @@ class PerfEndpointTests(unittest.TestCase):
             self.assertNotIn("explanations", row)
             self.assertNotIn("selected_memory_ids", row)
             self.assertIn("selected_memory_ids_count", row)
+        for row in entities["memories"]:
+            self.assertNotIn("annotations", row)
+            self.assertNotIn("manual_reviews", row)
+            self.assertNotIn("lineage", row)
+            self.assertNotIn("raw_json", row)
+            self.assertNotIn("source_paths", row)
+            self.assertNotIn("provenance", row)
+            self.assertNotIn("compare_candidates", row)
+        for row in entities["contexts"]:
+            self.assertNotIn("assembled_text", row)
+            self.assertNotIn("selected_memory_ids", row)
+            self.assertIn("selected_memory_ids_count", row)
         for row in entities["sessions"]:
             self.assertNotIn("timeline", row)
+
+    def test_detail_endpoints_do_not_load_full_observability_index(self) -> None:
+        paths = [
+            f"/api/memories/{self.memory_id}",
+            f"/api/memories/{self.memory_id}/lineage",
+            "/api/context?limit=10",
+            f"/api/context/{self.context_id}",
+        ]
+        with patch(
+            "opendream.webapp.load_or_build_index",
+            side_effect=AssertionError("full index loaded for detail endpoint"),
+        ):
+            for path in paths:
+                with self.subTest(path=path):
+                    payload = self.get_json(path)
+                    self.assertIsInstance(payload, dict)
 
     # --- /api/sessions?limit/since ---
 
