@@ -1,1 +1,1 @@
-The splash extends the wave-viewing segment, then settles the mark before revealing the full wordmark. The final frame crossfades to the supplied wordmark asset for exact lockup fidelity.
+The O mark is intentionally steadier in this version: idle breathe/pulse scale was removed, wave amplitude was reduced slightly, and the mark stays on a stable center before transitioning into the final wordmark lockup.

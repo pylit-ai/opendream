@@ -1,9 +1,12 @@
-# Usage guidelines
+# Usage
 
-Use these as the updated default production assets:
+Primary assets:
 - `logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg`
 - `logo/wordmark/vector/opendream_wordmark_primary_ink_dark.svg`
 - `logo/wordmark/raster/opendream_wordmark_primary_ink_light.png`
 - `logo/wordmark/raster/opendream_wordmark_primary_ink_dark.png`
 
-This revision keeps the preferred refined thin thickness and adds more spacing between the symbol and the “p”.
+Preview references:
+- `previews/primary_lockup_preview.png`
+- `previews/crescent_revision_comparison.png`
+- `previews/alternate_crescent_sheet.png`

@@ -52,14 +52,14 @@ Scaffolds a recurring feature-radar dream job while keeping projections separate
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../../frontend/assets/animation/video/opendream_splash_wordmark_dark_preview.gif">
     <source media="(prefers-color-scheme: light)" srcset="../../frontend/assets/animation/video/opendream_splash_wordmark_light_preview.gif">
-    <img alt="OpenDream wordmark reveal" src="../../frontend/assets/animation/video/opendream_splash_wordmark_light_preview.gif" width="720">
+    <img alt="OpenDream crescent-D wordmark reveal" src="../../frontend/assets/animation/video/opendream_splash_wordmark_light_preview.gif" width="720">
   </picture>
 </p>
 
-The rolling-wave SVG loop is used in the web app loading state. The full-resolution MP4 splash files are better suited for launch videos, release notes, and social cuts:
+The rolling-wave SVG loop is used in the web app loading state. The full-resolution crescent-`D` splash files are available for launch videos, release notes, and social cuts:
 [`dark MP4`](../../frontend/assets/animation/video/opendream_splash_wordmark_dark_1920x1080.mp4),
 [`light MP4`](../../frontend/assets/animation/video/opendream_splash_wordmark_light_1920x1080.mp4).
 
 ## Source media
 
-GIFs are embedded above for broad README/docs compatibility. MP4 and WebM variants live beside them under `docs/assets/demos/` for websites and release assets. Brand motion sources live under `frontend/assets/animation/`.
+GIFs are embedded above for broad README/docs compatibility. MP4 and WebM variants for CLI demos live beside them under `docs/assets/demos/` for websites and release assets. Brand motion sources live under `frontend/assets/animation/`.

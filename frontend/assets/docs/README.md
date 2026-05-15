@@ -1,13 +1,17 @@
-# OpenDream — refined thin spacing bundle
+# OpenDream — denser horizontal band crescent moon variation
 
-This bundle keeps the refined thin wordmark thickness you approved, but increases the spacing between the symbol and the “p”.
+This bundle revises the crescent again based on the latest feedback.
 
-## Selected direction
-- Type basis: **Gillius ADF No2 Regular**
-- Treatment: **custom outline-thinned** (14 units)
-- Additional spacing: **72 font units** between the symbol and the word
-- Wordmark treatment: **Primary Ink**
-- Lockup structure: **symbol-as-O**
+## What changed in this pass
+- Kept the latest known-good O symbol.
+- Kept the improved crescent silhouette.
+- Increased the number of horizontal bands substantially.
+- Tightened the visual cadence so the crescent no longer feels sparse.
+- Used equal vertical spacing between band centers to create a more regular rhythm.
+- Kept the line-weight ramp so the bands are thinner near the tips and thicker through the middle.
+- Left the standalone `O` mark, favicon, and app icons unchanged.
 
-## Recommendation
-This version preserves the preferred stroke weight and fixes the awkward crowding between the symbol and the wordmark.
+## Selected primary
+- `grid20`
+- 20 bands
+- denser internal rhythm than v4

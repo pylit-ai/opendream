@@ -1,16 +1,38 @@
 {
-  "selected_direction": {
-    "typeface_basis": "Gillius ADF No2 Regular",
-    "treatment": "Custom outline-thinned (14 units)",
-    "extra_gap_units": 72,
-    "wordmark_treatment": "Primary Ink",
-    "lockup_structure": "symbol-as-O",
-    "replaces_previous_bundle": "opendream_gillius_primary_ink_refined_thin_bundle_v1",
-    "primary_assets": {
-      "light_svg": "logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg",
-      "dark_svg": "logo/wordmark/vector/opendream_wordmark_primary_ink_dark.svg",
-      "light_png": "logo/wordmark/raster/opendream_wordmark_primary_ink_light.png",
-      "dark_png": "logo/wordmark/raster/opendream_wordmark_primary_ink_dark.png"
-    }
+  "variant": "denser-horizontal-band-crescent-moon",
+  "base_symbol_source": "existing OpenDream standalone O mark, unchanged",
+  "previous_variant_reference": "previous crescent-D dense wordmark bundle v4",
+  "typeface_basis": "Gillius ADF No2 Regular (outline-refined)",
+  "selected_primary": {
+    "name": "grid20",
+    "dx": 180,
+    "n": 20,
+    "min_t": 4.25,
+    "max_t": 13.0,
+    "margin": 18,
+    "power": 1.1
+  },
+  "alternates_in_preview": [
+    "grid18",
+    "grid20",
+    "grid22"
+  ],
+  "settings": {
+    "thin_amount": 14,
+    "tracking": -4,
+    "text_scale": 0.34,
+    "icon_scale": 0.258,
+    "icon_gap_px": 36,
+    "moon_gap_left_px": 52,
+    "moon_gap_right_px": 46
+  },
+  "primary_assets": {
+    "light_svg": "logo/wordmark/vector/opendream_wordmark_primary_ink_light.svg",
+    "dark_svg": "logo/wordmark/vector/opendream_wordmark_primary_ink_dark.svg",
+    "light_png": "logo/wordmark/raster/opendream_wordmark_primary_ink_light.png",
+    "dark_png": "logo/wordmark/raster/opendream_wordmark_primary_ink_dark.png",
+    "primary_preview": "previews/primary_lockup_preview.png",
+    "comparison_preview": "previews/crescent_revision_comparison.png",
+    "alternate_sheet": "previews/alternate_crescent_sheet.png"
   }
 }
