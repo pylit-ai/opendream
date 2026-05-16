@@ -13,13 +13,16 @@
 [![Python versions](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-**Local-first memory for coding agents** — activate OpenDream inside the repo you already use, let supported agent surfaces capture context locally, and keep the advanced runtime machinery available when you need it.
+**Local-first memory for coding agents** — activate OpenDream inside the repo you already use, watch what memory is doing in a browser, and keep the advanced runtime machinery available when you need it.
 
-![OpenDream CLI quick start](./docs/assets/demos/01-first-run-local-memory.gif)
+![OpenDream UI overview](./docs/assets/demos/ui/opendream-ui-overview.gif)
+
+The observability UI shows recent agent activity, selected memories, review decisions, and workspace health without making you read raw JSON first. Full light and dark demo cuts: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
 
 | If you want to… | Start here |
 |-----------------|------------|
 | Try it in a few commands | [Quick start](#quick-start) |
+| Watch the product surface | [UI demo gallery](./docs/showcase/ui-demos.md) |
 | Run the memory demo | [90-second memory showcase](./docs/showcase/memory-showcase.md) |
 | Wire it into an agent runtime | [Integration at a glance](#integration-at-a-glance) |
 | Browse memory in a browser | [Observability UI](#observability-ui) |
@@ -51,17 +54,18 @@ in [`docs/launch-readiness.md`](./docs/launch-readiness.md),
 [`CLEAN_ROOM.md`](./CLEAN_ROOM.md).
 
 <details>
-<summary><strong>More short CLI demos</strong></summary>
+<summary><strong>CLI demos for docs and operators</strong></summary>
 
-OpenDream's first-run path is intentionally small. These clips show the next decisions without making the README front-load every advanced feature.
+OpenDream's first-run path is intentionally small. These clips are useful beside command reference docs; the product UI tour above is the better first look.
 
 | Demo | What it shows |
 |------|---------------|
+| ![OpenDream CLI quick start](./docs/assets/demos/01-first-run-local-memory.gif) | `init`, activation, status, and deactivation in a local workspace. |
 | ![Agent context retrieval](./docs/assets/demos/02-agent-context-retrieval.gif) | `prepare-context` turns durable repo memory into prompt-ready agent context. |
 | ![Memory safety abstention](./docs/assets/demos/03-memory-safety-abstention.gif) | Unrelated prompts return an explicit no-match instead of injecting stale or irrelevant memory. |
 | ![Showcase evaluation proof](./docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
 
-Full demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
+UI demo gallery: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md). CLI demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
 Brand motion assets: [`frontend/assets/animation/README.md`](./frontend/assets/animation/README.md).
 
 </details>
@@ -250,6 +254,8 @@ For semantic-first workspaces, `/overview` and `/settings` should expose the sam
 The same UI also exposes background-runtime controls and digestible summaries of
 the current memory surface plus the latest runtime mutation effects, so you can
 see what OpenDream is changing without dropping straight into raw JSON.
+
+Watch the UI flow in both themes: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
 
 <details>
 <summary><strong>What the observability app exposes</strong></summary>

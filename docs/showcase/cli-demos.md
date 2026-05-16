@@ -8,7 +8,7 @@
   </picture>
 </p>
 
-Short recorded demos for README, docs, launch notes, and walkthroughs. Each demo is rendered from the same deterministic fixture path used by the public CLI tests and showcase docs.
+Short recorded demos for command reference pages, docs, launch notes, and walkthroughs. For a first product look, start with the browser UI recordings in [`ui-demos.md`](./ui-demos.md). Each CLI demo is rendered from the same deterministic fixture path used by the public CLI tests and showcase docs.
 
 ## First-run path
 
@@ -62,4 +62,4 @@ The rolling-wave SVG loop is used in the web app loading state. The full-resolut
 
 ## Source media
 
-GIFs are embedded above for broad README/docs compatibility. MP4 and WebM variants for CLI demos live beside them under `docs/assets/demos/` for websites and release assets. Brand motion sources live under `frontend/assets/animation/`.
+GIFs are embedded above for broad README/docs compatibility. MP4 and WebM variants for CLI demos live beside them under `docs/assets/demos/` for websites and release assets. Browser UI recordings live under `docs/assets/demos/ui/`. Brand motion sources live under `frontend/assets/animation/`.
