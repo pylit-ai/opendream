@@ -88,6 +88,7 @@ from .showcase import (
 from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, store_sort_key
 from .util import FIXTURE_ROOT, json_dumps, read_json, stable_id, to_iso, utc_now, write_json
 from .validation import validate_document
+from .verification import verify_activation_capture
 
 COMPACT_CONTEXT_BUDGET_BYTES = 32768
 
@@ -375,6 +376,11 @@ def command_doctor(args: argparse.Namespace) -> dict[str, Any]:
     raise ValueError(f"unsupported doctor surface: {args.surface}")
 
 
+def command_verify_activation_capture(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return verify_activation_capture(store, targets=args.targets)
+
+
 def command_append_event(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
     store.ensure_layout()
@@ -532,6 +538,7 @@ def command_hook_claude_post_task(args: argparse.Namespace) -> dict[str, Any]:
         channel="cli",
         message_ref=args.message_ref,
         session_id=_string_field(payload, "session_id"),
+        tags=args.tag,
         reporting_agent=_resolve_reporting_agent(
             fallback={
                 "agent_id": "claude-code",
@@ -1805,6 +1812,78 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(doctor_parser)
     doctor_parser.set_defaults(func=command_doctor)
 
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Primary: run setup, capture, quality, runtime, and release verification gates",
+    )
+    verify_subparsers = verify_parser.add_subparsers(dest="verify_command", required=True)
+    activation_capture_parser = verify_subparsers.add_parser(
+        "activation-capture",
+        help="Verify that selected agent activation surfaces can capture durable memory",
+    )
+    activation_capture_parser.add_argument("--workspace", required=True)
+    activation_capture_parser.add_argument(
+        "--targets",
+        default="configured",
+        metavar="SELECTOR",
+        help=(
+            "configured, all-supported, or a comma-separated list of bundled targets "
+            "(claude-code,codex,cursor,gemini,github-copilot,openclaw)"
+        ),
+    )
+    add_layout_arguments(activation_capture_parser)
+    activation_capture_parser.set_defaults(
+        func=command_verify_activation_capture,
+        result_failure_statuses=("failed",),
+    )
+    verify_memory_parser = verify_subparsers.add_parser(
+        "memory-quality",
+        help="Verify memory quality against the packaged replay fixture",
+    )
+    verify_memory_parser.add_argument("--workspace", required=True)
+    verify_memory_parser.add_argument("--fixture")
+    verify_memory_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_memory_parser)
+    verify_memory_parser.set_defaults(func=command_eval_memory_quality, result_failure_statuses=("failed",))
+
+    verify_dream_parser = verify_subparsers.add_parser(
+        "dream-fidelity",
+        help="Verify transcript-native dream fidelity checks",
+    )
+    verify_dream_parser.add_argument("--workspace", required=True)
+    verify_dream_parser.add_argument("--fixture")
+    verify_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_dream_parser)
+    verify_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
+
+    verify_performance_parser = verify_subparsers.add_parser(
+        "performance",
+        help="Verify composite performance scorecard",
+    )
+    verify_performance_parser.add_argument("--workspace", required=True)
+    verify_performance_parser.add_argument("--fixture")
+    verify_performance_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_performance_parser)
+    verify_performance_parser.set_defaults(func=command_eval_performance, result_failure_statuses=("failed",))
+
+    verify_runtime_parser = verify_subparsers.add_parser(
+        "runtime",
+        help="Verify advanced runtime proof report",
+    )
+    verify_runtime_parser.add_argument("--workspace", required=True)
+    verify_runtime_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_runtime_parser)
+    verify_runtime_parser.set_defaults(func=command_eval_advanced_runtime)
+
+    verify_release_parser = verify_subparsers.add_parser(
+        "release",
+        help="Verify release memory-excellence gate",
+    )
+    verify_release_parser.add_argument("--workspace", required=True)
+    verify_release_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_release_parser)
+    verify_release_parser.set_defaults(func=command_eval_memory_excellence, result_failure_statuses=("failed",))
+
     append_parser = subparsers.add_parser("append-event")
     append_parser.add_argument("--workspace", required=True)
     append_parser.add_argument("--events", required=True, help="JSON, JSON array, or JSONL file")
@@ -1854,6 +1933,7 @@ def build_parser() -> argparse.ArgumentParser:
     claude_post_parser.add_argument("--workspace", required=True)
     claude_post_parser.add_argument("--fallback-summary", default="Task completed.")
     claude_post_parser.add_argument("--message-ref", default="claude-post-task")
+    claude_post_parser.add_argument("--tag", action="append", default=[])
     add_layout_arguments(claude_post_parser)
     claude_post_parser.set_defaults(func=command_hook_claude_post_task)
 

@@ -50,6 +50,7 @@
       "transcript_probe",
       "transcripts",
       "verifier",
+      "verification",
       "workspace_catalog"
     ],
     "provider_backends": [

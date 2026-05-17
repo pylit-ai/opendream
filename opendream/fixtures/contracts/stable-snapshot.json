@@ -98,6 +98,9 @@
       "name": "update-service"
     },
     {
+      "name": "verify"
+    },
+    {
       "name": "workspace"
     }
   ],

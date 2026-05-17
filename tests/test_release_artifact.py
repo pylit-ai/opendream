@@ -297,6 +297,25 @@ class ReleaseArtifactTests(unittest.TestCase):
             )
             self.assertIn('"status": "healthy"', doctor.stdout)
 
+            capture_verify = subprocess.run(
+                [
+                    str(entrypoint),
+                    "verify",
+                    "activation-capture",
+                    "--workspace",
+                    str(dream_workspace),
+                    "--memory-dir",
+                    ".dream-memory",
+                    "--targets",
+                    "configured",
+                ],
+                cwd=temp_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn('"status": "passed"', capture_verify.stdout)
+
             compressed_status = subprocess.run(
                 [
                     str(entrypoint),

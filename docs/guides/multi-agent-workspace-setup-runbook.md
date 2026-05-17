@@ -1,6 +1,6 @@
 # Multi-agent OpenDream workspace setup (runbook)
 
-This document records the **exact command sequence** used to initialize OpenDream and activate **Claude Code**, **Codex**, **Cursor**, and **Gemini** in a single repository workspace.
+This document records the command sequence used to initialize OpenDream and activate supported bundled agents in a single repository workspace.
 
 - **Example workspace (as run):** `/path/to/your/repo`
 - **CLI version (as run):** `opendream <version>` (installed with `uv tool install`)
@@ -46,7 +46,7 @@ opendream activation-plan --workspace "$WS" --targets cursor
 opendream activation-plan --workspace "$WS" --targets gemini
 ```
 
-### 3. Apply activation for all four agents
+### 3. Apply activation for supported agents
 
 Run each target once (order does not need to match):
 
@@ -55,6 +55,8 @@ opendream activate --workspace "$WS" --targets claude-code
 opendream activate --workspace "$WS" --targets codex
 opendream activate --workspace "$WS" --targets cursor
 opendream activate --workspace "$WS" --targets gemini
+opendream activate --workspace "$WS" --targets github-copilot
+opendream activate --workspace "$WS" --targets openclaw
 ```
 
 ### 4. Repair drift (idempotent)
@@ -65,25 +67,28 @@ opendream activate --workspace "$WS" --repair
 
 On a clean tree this may report `"status": "noop"`.
 
-### 5. Verify
+### 5. Verify managed surfaces and capture
 
 ```bash
 opendream doctor --workspace "$WS" --surface agents
+opendream verify activation-capture --workspace "$WS" --targets all-supported
 opendream status --workspace "$WS"
 ```
 
-Expected: `doctor` reports `"status": "healthy"` and lists `claude-code`, `codex`, `cursor`, and `gemini` under `activated_targets` / `configured_targets`.
+Expected: `doctor` reports `"status": "healthy"` for generated surfaces, `verify activation-capture` reports `"status": "passed"`, and `status` reports `"capture_verification": {"state": "passed", ...}`. Setup is not complete until capture verification passes.
 
 ## Surfaces created or updated (reference)
 
 | Agent        | Adapter id (`--targets`) | Main managed surfaces |
 |-------------|---------------------------|------------------------|
-| Claude Code | `claude-code`             | `.claude/settings.json` (event-based `UserPromptSubmit` / `Stop` hooks), `.meta/spec-adapters/claude-code/scripts/opendream-pre-task.sh`, `opendream-post-task.sh` |
+| Claude Code | `claude-code`             | `.claude/settings.json` (event-based `UserPromptSubmit` / `Stop` hooks), `.opendream/hooks/claude-pre-task.sh`, `.opendream/hooks/claude-post-task.sh` |
 | Codex       | `codex`                   | `AGENTS.md` (managed OpenDream block), `.opendream/hooks/codex-*.sh`, `.opendream/bin/codex-task-wrapper.sh` |
 | Cursor      | `cursor`                  | `.cursor/rules/opendream.mdc`, `.opendream/hooks/cursor-*.sh` |
 | Gemini      | `gemini`                  | `GEMINI.md` (managed block), `.opendream/hooks/gemini-*.sh` |
+| GitHub Copilot | `github-copilot`       | `.github/copilot-instructions.md` (managed block), `.opendream/hooks/github-copilot-*.sh` |
+| OpenClaw    | `openclaw`                | `.openclaw/config.json`, `.openclaw/opendream-event-map.md`, `.opendream/hooks/openclaw-hooks.sh` |
 
-**Instruction-only surfaces (Cursor rules, `GEMINI.md`):** the host may not run shell hooks automatically. The managed files tell the agent which `sh .opendream/hooks/...` commands to run; follow those instructions in-session. See [coding-agents.md](../coding-agents.md).
+**Instruction-only surfaces (Cursor rules, `GEMINI.md`, Copilot instructions):** the host may not run shell hooks automatically. The managed files tell the agent which `sh .opendream/hooks/...` commands to run; follow those instructions in-session. See [coding-agents.md](../coding-agents.md).
 
 **Subdirectories:** if the agent runs with `cwd` below the repo root, set `OPENDREAM_WORKSPACE` to the workspace root so hooks target the correct store (same doc).
 
@@ -94,6 +99,7 @@ To activate **every** built-in adapter (includes targets beyond the four above, 
 ```bash
 opendream activate --workspace "$WS" --targets all-supported
 opendream activate --workspace "$WS" --repair
+opendream verify activation-capture --workspace "$WS" --targets all-supported
 ```
 
 ## One-liner quick path (detected agents only)
@@ -102,8 +108,9 @@ If you only want surfaces for agents OpenDream **detects** in the tree:
 
 ```bash
 opendream init --workspace "$WS" --activate-configured
-opendream status --workspace "$WS"
 opendream activate --workspace "$WS" --repair
+opendream verify activation-capture --workspace "$WS" --targets configured
+opendream status --workspace "$WS"
 ```
 
 For a tool that is not detected yet, use explicit `--targets <adapter-id>` as in section 3.
@@ -111,9 +118,10 @@ For a tool that is not detected yet, use explicit `--targets <adapter-id>` as in
 ## Testing / confirmation
 
 1. Re-run `opendream doctor --workspace "$WS" --surface agents` and confirm `"status": "healthy"`.
-2. In **Claude Code**, confirm hooks run (or inspect `.claude/settings.json`).
-3. In **Codex**, use the wrapper / hook commands documented in the OpenDream section of `AGENTS.md`.
-4. In **Cursor** / **Gemini**, open the managed rule or `GEMINI.md` and ensure pre/post hook commands are executed around substantive work.
+2. Run `opendream verify activation-capture --workspace "$WS" --targets configured` and confirm `"status": "passed"`.
+3. In **Claude Code**, confirm hooks run (or inspect `.claude/settings.json`).
+4. In **Codex**, use the wrapper / hook commands documented in the OpenDream section of `AGENTS.md`.
+5. In **Cursor** / **Gemini** / **Copilot**, open the managed rule or instruction file and ensure pre/post hook commands are executed around substantive work.
 
 Please run these checks in your environment and confirm there are no hook or permission errors in the agent logs.
 

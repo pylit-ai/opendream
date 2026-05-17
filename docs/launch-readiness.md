@@ -38,6 +38,7 @@ mean OpenDream copies non-public internals.
 uv tool upgrade opendream
 opendream workspace upgrade --workspace "$PWD"
 opendream doctor --workspace "$PWD" --surface agents
+opendream verify activation-capture --workspace "$PWD" --targets configured
 ```
 
 For a Git install:

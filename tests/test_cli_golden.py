@@ -21,7 +21,7 @@ class CliGoldenTests(unittest.TestCase):
     def test_top_level_help_names_launch_critical_commands(self) -> None:
         result = self.run_cli("--help")
         self.assertEqual(result.returncode, 0, result.stderr)
-        for phrase in ("init", "status", "demo", "dream", "observe", "eval"):
+        for phrase in ("init", "verify", "status", "demo", "dream", "observe", "eval"):
             self.assertIn(phrase, result.stdout)
 
     def test_version_is_short_and_parseable(self) -> None:

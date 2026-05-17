@@ -34,17 +34,18 @@ The observability UI shows recent agent activity, selected memories, review deci
 
 ```bash
 uv tool install opendream   # or: pipx install opendream
-opendream init --workspace "$PWD" --activate-configured
-opendream status --workspace "$PWD"
-opendream activate --workspace "$PWD" --repair
-opendream deactivate --workspace "$PWD"
+WS="$PWD"
+opendream init --workspace "$WS"
+opendream activate --workspace "$WS" --targets all-supported
+opendream verify activation-capture --workspace "$WS" --targets all-supported
+opendream status --workspace "$WS"
+opendream deactivate --workspace "$WS"
 ```
 
-If your installed CLI does not show `activate`, `deactivate`, `semantic`, or
+If your installed CLI does not show `activate`, `verify`, `deactivate`, `semantic`, or
 `eval`, upgrade with `uv tool upgrade opendream` or reinstall from Git. After
-upgrading, `opendream semantic --help` and `opendream eval --help` are quick
-checks that your install matches the docs for semantic sleep-time and
-evaluation commands.
+upgrading, `opendream verify --help`, `opendream semantic --help`, and
+`opendream eval --help` are quick checks that your install matches the docs.
 
 Bleeding-edge from Git (overwrites the tool env): `uv tool install --force "opendream @ git+https://github.com/pylit-ai/opendream.git"`.
 
@@ -121,7 +122,9 @@ sudo apt-get install jq
 OpenDream is an **activation-first CLI**. For normal use, the product contract is:
 
 ```bash
-opendream init --workspace "$PWD" --activate-configured
+opendream init --workspace "$PWD"
+opendream activate --workspace "$PWD" --targets all-supported
+opendream verify activation-capture --workspace "$PWD" --targets all-supported
 opendream status --workspace "$PWD"
 opendream activate --workspace "$PWD" --repair
 opendream deactivate --workspace "$PWD"
@@ -143,8 +146,10 @@ Agent-oriented details (workspace vs cwd, `memory_layout`, `empty_reason` / `hin
 1. `opendream init --workspace "$PWD"` — create the memory layout.
 2. `opendream activation-plan --workspace "$PWD" --targets configured` — dry-run: see which surfaces would change (no files written). Use `--targets all-supported` to preview every built-in agent target.
 3. `opendream activate --workspace "$PWD" --targets configured` — apply only targets OpenDream detects (Claude/Codex/OpenClaw/Cursor/Gemini/Copilot markers in the tree). For a tool that was not detected yet, run e.g. `opendream activate --workspace "$PWD" --targets cursor` once to create `.cursor/rules/opendream.mdc` and hook scripts.
-4. `opendream activate --workspace "$PWD" --repair` — restore drifted managed files and hook entries.
-5. `opendream doctor --workspace "$PWD" --surface agents` — verify health before you commit.
+4. `opendream verify activation-capture --workspace "$PWD" --targets configured` — run generated hooks in the selected workspace and prove diagnostic memory capture.
+5. `opendream status --workspace "$PWD"` — report the latest capture verification state (`never_run`, `passed`, or `failed`) with the next action.
+6. `opendream activate --workspace "$PWD" --repair` — restore drifted managed files and hook entries.
+7. `opendream doctor --workspace "$PWD" --surface agents` — inspect managed surfaces without writing diagnostic memory.
 
 Instruction-only targets (Cursor rules, `GEMINI.md`, `.github/copilot-instructions.md`) ship the same pre/post shell hooks as Codex; the agent must still run those commands when the host has no native OpenDream hooks.
 
@@ -280,6 +285,7 @@ Built from the same on-disk artifacts as the runtime (read model is derived; fil
 Use OpenDream as an **activation-first runtime**:
 
 - Run **`init --activate-configured`** for the standard path when the repo already has Claude Code, Codex, or OpenClaw config.
+- Run **`verify activation-capture`** after activation before claiming workspace setup is complete.
 - Run **`status`** for the single high-signal answer covering activation, drift, queue state, and runtime health.
 - Run **`activate --repair`** when `status` or `doctor` reports drift.
 - Run **`deactivate`** if you want to remove OpenDream-managed repo-local surfaces while keeping your repo config intact.

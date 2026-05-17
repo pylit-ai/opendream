@@ -2821,10 +2821,23 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         codex_config = self.workspace / ".codex" / "config.toml"
         codex_config.parent.mkdir(parents=True, exist_ok=True)
         codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+        shim_path = self.write_opendream_shim()
+        python_path = f"{REPO_ROOT}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"
 
         run_cli("init", "--workspace", str(self.workspace), "--activate-configured")
+        with patch.dict(os.environ, {"OPENDREAM_BIN": str(shim_path), "PYTHONPATH": python_path}):
+            capture = run_cli(
+                "verify",
+                "activation-capture",
+                "--workspace",
+                str(self.workspace),
+                "--targets",
+                "configured",
+            )
+        self.assertEqual(capture["status"], "passed")
         active = run_cli("status", "--workspace", str(self.workspace), "--now", FIXED_NOW)
         self.assertEqual(active["overall_state"], "healthy")
+        self.assertEqual(active["capture_verification"]["state"], "passed")
         self.assertEqual(active["activation_state"]["status"], "active")
         self.assertEqual(active["targets"][0]["target_kind"], "codex")
         self.assertEqual(active["targets"][0]["state"], "active")

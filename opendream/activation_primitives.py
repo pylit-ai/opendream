@@ -49,6 +49,57 @@ def opendream_command(store: MemoryStore, command: str) -> str:
     return " ".join(flags)
 
 
+def workspace_guard_lines(store: MemoryStore) -> list[str]:
+    metadata_path = f"{store.memory_dir_name}/state/store.json"
+    return [
+        f'if [ ! -f "$WORKSPACE/{metadata_path}" ]; then',
+        (
+            '  echo "OpenDream workspace not initialized at $WORKSPACE; '
+            'run from workspace root or set OPENDREAM_WORKSPACE to the initialized workspace." >&2'
+        ),
+        "  exit 2",
+        "fi",
+    ]
+
+
+def tag_args_lines() -> list[str]:
+    return [
+        "set --",
+        'if [ -n "${OPENDREAM_TAGS:-}" ]; then',
+        '  OLD_IFS="$IFS"',
+        "  IFS=,",
+        "  for TAG in $OPENDREAM_TAGS; do",
+        '    [ -n "$TAG" ] && set -- "$@" --tag "$TAG"',
+        "  done",
+        '  IFS="$OLD_IFS"',
+        "fi",
+    ]
+
+
+def reporting_args(target: str) -> str:
+    labels = {
+        "claude-code": "Claude Code",
+        "claude": "Claude Code",
+        "codex": "OpenAI Codex CLI",
+        "cursor": "Cursor",
+        "gemini": "Gemini CLI",
+        "github-copilot": "GitHub Copilot",
+        "openclaw": "OpenClaw",
+    }
+    adapter_id = "claude-code" if target == "claude" else target
+    values = [
+        "--agent-id",
+        adapter_id,
+        "--agent-label",
+        labels.get(target, target),
+        "--agent-runtime",
+        adapter_id,
+        "--agent-adapter-id",
+        adapter_id,
+    ]
+    return " ".join(shlex.quote(value) for value in values)
+
+
 def pre_task_script(store: MemoryStore, target: str) -> str:
     if target == "claude":
         command = opendream_command(store, "hook claude-pre-task")
@@ -58,6 +109,7 @@ def pre_task_script(store: MemoryStore, target: str) -> str:
                 "set -eu",
                 "",
                 'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
+                *workspace_guard_lines(store),
                 'QUERY="${1:-${OPENDREAM_QUERY:-current task}}"',
                 f'{command} --fallback-query "$QUERY"',
                 "",
@@ -71,6 +123,7 @@ def pre_task_script(store: MemoryStore, target: str) -> str:
             "set -eu",
             "",
             'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
+            *workspace_guard_lines(store),
             'QUERY="${1:-${OPENDREAM_QUERY:-current task}}"',
             'GLOBAL="${OPENDREAM_GLOBAL_WORKSPACE:-}"',
             f'OUTPUT="$WORKSPACE/{CONTEXT_DIR}/{output_name}"',
@@ -99,9 +152,11 @@ def post_task_script(store: MemoryStore, target: str) -> str:
                 "set -eu",
                 "",
                 'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
+                *workspace_guard_lines(store),
                 'SUMMARY="${1:-${OPENDREAM_SUMMARY:-Task completed.}}"',
                 f'MESSAGE_REF="${{OPENDREAM_REF:-{ref}}}"',
-                f'{command} --fallback-summary "$SUMMARY" --message-ref "$MESSAGE_REF"',
+                *tag_args_lines(),
+                f'{command} --fallback-summary "$SUMMARY" --message-ref "$MESSAGE_REF" "$@"',
                 "",
             ]
         )
@@ -115,9 +170,14 @@ def post_task_script(store: MemoryStore, target: str) -> str:
             "set -eu",
             "",
             'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
+            *workspace_guard_lines(store),
             'SUMMARY="${1:-${OPENDREAM_SUMMARY:-Task completed.}}"',
             f'MESSAGE_REF="${{OPENDREAM_REF:-{ref}}}"',
-            f'{emit_command} --kind task_outcome --content "$SUMMARY" --message-ref "$MESSAGE_REF"',
+            *tag_args_lines(),
+            (
+                f'{emit_command} --kind task_outcome --content "$SUMMARY" '
+                f'--message-ref "$MESSAGE_REF" {reporting_args(target)} "$@"'
+            ),
             f"{maintain_command}",
             f"{worker_command} --once",
             "",
@@ -138,6 +198,7 @@ def openclaw_hook_script(store: MemoryStore) -> str:
             'MODE="${1:-pre-plan}"',
             'PAYLOAD="${2:-${OPENCLAW_TASK:-current task}}"',
             'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
+            *workspace_guard_lines(store),
             'GLOBAL="${OPENDREAM_GLOBAL_WORKSPACE:-}"',
             f'OUTPUT="$WORKSPACE/{CONTEXT_DIR}/openclaw-pre-task.json"',
             'mkdir -p "$(dirname "$OUTPUT")"',
@@ -153,9 +214,10 @@ def openclaw_hook_script(store: MemoryStore) -> str:
             '  cat "$OUTPUT"',
             "  exit 0",
             "fi",
+            *tag_args_lines(),
             (
                 f'{emit_command} --kind task_outcome --content "$PAYLOAD" '
-                '--message-ref "${OPENCLAW_REF:-openclaw-post-task}"'
+                f'--message-ref "${{OPENCLAW_REF:-openclaw-post-task}}" {reporting_args("openclaw")} "$@"'
             ),
             f"{maintain_command}",
             f"{worker_command} --once",
@@ -165,25 +227,35 @@ def openclaw_hook_script(store: MemoryStore) -> str:
 
 
 def codex_wrapper_script(store: MemoryStore) -> str:
-    del store
     return "\n".join(
         [
             "#!/bin/sh",
             "set -eu",
             "",
+            'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
+            *workspace_guard_lines(store),
+            'cd "$WORKSPACE"',
             'SUMMARY="${OPENDREAM_SUMMARY:-Codex task completed.}"',
             'QUERY="${OPENDREAM_QUERY:-$SUMMARY}"',
-            'if [ "${1:-}" = "--summary" ]; then',
-            '  SUMMARY="$2"',
-            "  shift 2",
-            "fi",
-            'if [ "${1:-}" = "--query" ]; then',
-            '  QUERY="$2"',
-            "  shift 2",
-            "fi",
-            'if [ "${1:-}" = "--" ]; then',
-            "  shift",
-            "fi",
+            'while [ "$#" -gt 0 ]; do',
+            '  case "$1" in',
+            "    --summary)",
+            '      SUMMARY="$2"',
+            "      shift 2",
+            "      ;;",
+            "    --query)",
+            '      QUERY="$2"',
+            "      shift 2",
+            "      ;;",
+            "    --)",
+            "      shift",
+            "      break",
+            "      ;;",
+            "    *)",
+            "      break",
+            "      ;;",
+            "  esac",
+            "done",
             'sh .opendream/hooks/codex-pre-task.sh "$QUERY"',
             "status=0",
             'if [ "$#" -gt 0 ]; then',
@@ -265,13 +337,21 @@ def shell_hook_instruction_block(target_label: str, store: MemoryStore) -> str:
             "",
             "## OpenDream",
             "",
-            "Before substantial work, run if the hook exists:",
+            "Before substantial work from the workspace root, run if the hook exists:",
             f"`{pre_cmd}`",
             "",
-            "Before the final response, run if the hook exists:",
+            "Before the final response from the workspace root, run if the hook exists:",
             f"`{post_cmd}`",
             "",
-            "If hooks are absent, continue and repair later with `opendream activate --workspace \"$PWD\" --repair`.",
+            "`opendream doctor --workspace \"$PWD\" --surface agents` checks managed files only.",
+            (
+                "`opendream verify activation-capture --workspace \"$PWD\" "
+                f"--targets {target_label}` proves diagnostic memory capture."
+            ),
+            (
+                "If hooks are absent, continue and repair with "
+                "`opendream activate --workspace \"$PWD\" --repair`, then run capture verification."
+            ),
             "",
             block_end(target_label),
             "",
@@ -287,19 +367,27 @@ def codex_block(store: MemoryStore) -> str:
             "",
             "## OpenDream Activation",
             "",
-            "Before substantial work, run if the hook exists:",
+            "Before substantial work from the workspace root, run if the hook exists:",
             (
                 '`[ -f .opendream/hooks/codex-pre-task.sh ] && '
                 'sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}" || true`'
             ),
             "",
-            "Before the final response, run if the hook exists:",
+            "Before the final response from the workspace root, run if the hook exists:",
             (
                 '`[ -f .opendream/hooks/codex-post-task.sh ] && '
                 'sh .opendream/hooks/codex-post-task.sh "${OPENDREAM_SUMMARY:-Task completed.}" || true`'
             ),
             "",
-            "If hooks are absent, continue and repair later with `opendream activate --workspace \"$PWD\" --repair`.",
+            "`opendream doctor --workspace \"$PWD\" --surface agents` checks managed files only.",
+            (
+                "`opendream verify activation-capture --workspace \"$PWD\" "
+                "--targets codex` proves diagnostic memory capture."
+            ),
+            (
+                "If hooks are absent, continue and repair with "
+                "`opendream activate --workspace \"$PWD\" --repair`, then run capture verification."
+            ),
             "",
             "For scripted Codex entrypoints, prefer:",
             (

@@ -26,6 +26,7 @@ REGISTRY_PATH = Path(".opendream/agents.json")
 TARGET_REGISTRY_PATH = Path(".opendream/targets.json")
 ACTIVATION_STATE_PATH = Path(".opendream/activation-state.json")
 REPORTS_DIR = Path(".opendream/reports")
+ACTIVATION_CAPTURE_LATEST_PATH = REPORTS_DIR / "activation-capture-latest.json"
 
 
 def activate_agents(store: MemoryStore, *, targets: str, repair: bool = False) -> dict[str, Any]:
@@ -278,7 +279,14 @@ def compressed_status(
             "backlog": 0,
         }
     activation_state = _activation_state_payload(store.workspace, generated_at, records, service_state)
-    overall_state = _compressed_overall_state(snapshot, activation_state, records, service_runtime)
+    capture_verification = _activation_capture_verification(store.workspace)
+    overall_state = _compressed_overall_state(
+        snapshot,
+        activation_state,
+        records,
+        service_runtime,
+        capture_verification,
+    )
     targets = [_compressed_target_record(record) for record in records]
     runtime = {
         "memory_state": snapshot["state"],
@@ -302,7 +310,13 @@ def compressed_status(
         "next_eligible_at": snapshot["next_eligible_at"],
     }
     semantic_surface = _semantic_quality_surface(store, now=generated_at)
-    operational_next_action = _next_action(store.workspace, overall_state, targets, runtime)
+    operational_next_action = _next_action(
+        store.workspace,
+        overall_state,
+        targets,
+        runtime,
+        capture_verification,
+    )
     payload = {
         **snapshot,
         "workspace": str(store.workspace),
@@ -311,6 +325,7 @@ def compressed_status(
         "runtime": runtime,
         "activation_state": activation_state,
         "service": service_state,
+        "capture_verification": capture_verification,
         "memory_layout": store.memory_layout_advisory(),
         **semantic_surface,
         "next_action": (
@@ -345,6 +360,9 @@ def format_compressed_status(payload: dict[str, Any]) -> str:
                 for item in target_summary
             )
         )
+    capture = payload.get("capture_verification") or {}
+    if capture.get("state"):
+        lines.append(f"activation_capture={capture['state']}")
     runtime = payload.get("runtime", {})
     lines.append(
         "runtime="
@@ -406,7 +424,6 @@ def doctor_memory(store: MemoryStore) -> dict[str, Any]:
 
 
 def doctor_agents(store: MemoryStore) -> dict[str, Any]:
-    store.ensure_layout()
     workspace = store.workspace
     detections = detect_agents(workspace)
     configured_targets = [item["target_kind"] for item in detections if item["configured"]]
@@ -440,6 +457,7 @@ def doctor_agents(store: MemoryStore) -> dict[str, Any]:
         "missing_service_targets": service_state["missing_targets"],
         "results": [_build_agent_record(record["target_kind"], record) for record in records],
         "service": service_state,
+        "capture_verification": _activation_capture_verification(workspace),
         "memory_layout": memory_layout,
         "cli_output_version": CLI_JSON_VERSION,
     }
@@ -932,6 +950,7 @@ def _compressed_overall_state(
     activation_state: dict[str, Any],
     records: list[dict[str, Any]],
     service_runtime: dict[str, Any],
+    capture_verification: dict[str, Any],
 ) -> str:
     if activation_state["status"] == "inactive" and not records:
         return "inactive"
@@ -942,6 +961,11 @@ def _compressed_overall_state(
     if any(record["drift_state"] in {"drifted", "missing"} for record in records):
         return "degraded"
     if any(record["health_state"] != "healthy" for record in records if record["activated"]):
+        return "degraded"
+    if any(record["activated"] for record in records) and capture_verification.get("state") in {
+        "never_run",
+        "failed",
+    }:
         return "degraded"
     if service_runtime["installed"] and service_runtime["health"] not in {"healthy", "idle"}:
         return "degraded"
@@ -957,13 +981,21 @@ def _next_action(
     overall_state: str,
     targets: list[dict[str, Any]],
     runtime: dict[str, Any],
+    capture_verification: dict[str, Any],
 ) -> str:
     configured_targets = [item["target_kind"] for item in targets if item["configured"]]
     drifted_targets = [item["target_kind"] for item in targets if item["state"] == "drifted"]
-    if drifted_targets or overall_state in {"broken", "degraded"}:
+    unhealthy_targets = [
+        item["target_kind"]
+        for item in targets
+        if item.get("activated") and item.get("health_state") != "healthy"
+    ]
+    if drifted_targets or unhealthy_targets or overall_state == "broken":
         return f"run `opendream activate --workspace {workspace} --repair`"
     if configured_targets and not any(item["activated"] for item in targets):
         return f"run `opendream activate --workspace {workspace}`"
+    if any(item["activated"] for item in targets) and capture_verification.get("state") != "passed":
+        return f"run `opendream verify activation-capture --workspace {workspace} --targets configured`"
     if runtime.get("automation", {}).get("due_job_ids"):
         return f"run `opendream tick --workspace {workspace}` to process due automation jobs"
     if not targets:
@@ -977,6 +1009,62 @@ def _next_action(
     if runtime.get("service", {}).get("installed") and not runtime.get("service", {}).get("running"):
         return f"run `opendream service start --workspace {workspace}` if you want background polling"
     return "no action required"
+
+
+def _activation_capture_verification(workspace: Path) -> dict[str, Any]:
+    report_path = workspace / ACTIVATION_CAPTURE_LATEST_PATH
+    if not report_path.exists():
+        return {
+            "state": "never_run",
+            "status": "never_run",
+            "report_path": None,
+            "generated_at": None,
+            "selected_targets": [],
+            "target_statuses": {},
+            "event_delta": 0,
+            "durable_record_delta": 0,
+            "warnings": [],
+            "next_action": f"run `opendream verify activation-capture --workspace {workspace} --targets configured`",
+        }
+    payload = read_json(report_path, {})
+    if not isinstance(payload, dict):
+        return {
+            "state": "failed",
+            "status": "invalid-report",
+            "report_path": str(report_path),
+            "generated_at": None,
+            "selected_targets": [],
+            "target_statuses": {},
+            "event_delta": 0,
+            "durable_record_delta": 0,
+            "warnings": ["activation capture report is not a JSON object"],
+            "next_action": f"rerun `opendream verify activation-capture --workspace {workspace} --targets configured`",
+        }
+    status = str(payload.get("status") or "failed")
+    results = payload.get("results") or []
+    target_statuses = {
+        str(item.get("target")): str(item.get("status"))
+        for item in results
+        if isinstance(item, dict) and item.get("target")
+    }
+    warnings = [str(item) for item in payload.get("warnings") or []]
+    for item in results:
+        if isinstance(item, dict):
+            warnings.extend(str(warning) for warning in item.get("warnings") or [])
+    state = "passed" if status == "passed" else "failed"
+    return {
+        "state": state,
+        "status": status,
+        "report_path": str(report_path),
+        "generated_at": payload.get("generated_at"),
+        "selected_targets": [str(item) for item in payload.get("selected_targets") or []],
+        "target_statuses": target_statuses,
+        "event_delta": int(payload.get("event_delta") or 0),
+        "durable_record_delta": int(payload.get("durable_record_delta") or 0),
+        "warnings": sorted(dict.fromkeys(warnings)),
+        "next_action": payload.get("next_action")
+        or f"rerun `opendream verify activation-capture --workspace {workspace} --targets configured`",
+    }
 
 
 def _semantic_quality_surface(store: MemoryStore, *, now: str | None = None) -> dict[str, Any]:
