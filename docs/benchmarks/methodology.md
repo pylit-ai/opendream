@@ -73,6 +73,20 @@ The eval is **hermetic**: it creates an isolated empty memory store so existing 
 3. **Deterministic**: The fixture produces consistent scores. This is intentional for CI reliability but does not capture variance.
 4. **Concurrency score is structural**: Set to 100 because the lock mechanism is tested separately via integration tests, not exercised in the performance eval itself.
 
+## Provider Benchmark Cost Guard
+
+The public release gate uses local fixtures only. Any paid/provider benchmark
+path must run in dry-run mode first and record:
+
+- `dry-run-cost`: estimated total spend before execution
+- `budget-usd`: hard maximum budget approved for the run
+- `pricing source`: dated provider pricing evidence used for the estimate
+- benchmark manifest: fixture set, provider/model, sample count, date, and
+  operator approval reference
+
+Without those fields, provider-backed results must stay out of public release
+claims.
+
 ## How to Run
 
 ```bash

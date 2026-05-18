@@ -9,8 +9,10 @@ STALE_NAMES = {".DS_Store"}
 REQUIRED_PUBLIC_FILES = (
     "CLEAN_ROOM.md",
     "KNOWN_LIMITATIONS.md",
+    "NOTICE",
     "SECURITY.md",
     "THIRD_PARTY_NOTICES.md",
+    "TRADEMARKS.md",
     "docs/claims.md",
     "docs/launch-readiness.md",
     "docs/release-protocol.md",

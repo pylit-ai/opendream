@@ -11,6 +11,9 @@ make setup
 make verify
 ```
 
+For install problems, include the exact install path (`pip`, `pipx`, `uvx`, or
+source checkout), Python version, OS, and command output.
+
 ## Pull Requests
 
 Include:
@@ -23,8 +26,18 @@ Include:
 
 ## Issues
 
-Use the issue templates. Include environment, install path, agent target,
-workspace OS, command output, and reproduction steps when applicable.
+Use the issue templates. Route reports by the failure surface:
+
+- install or CLI behavior: bug report
+- stale, harmful, or low-quality memory: memory quality report
+- benchmark fixture or scorecard behavior: bug report with benchmark fixture noted
+- agent activation/integration behavior: bug report with agent target noted
+- security or privacy behavior: private security report
+- trademark, logo, wordmark, license, or brand-boundary issues: public issue only
+  when no security-sensitive details are involved
+
+Include environment, install path, agent target, workspace OS, command output,
+and reproduction steps when applicable.
 
 ## Public Boundary
 

@@ -30,6 +30,7 @@ classifiers = [
 dev = [
     "build>=1.2.2",
     "mypy>=1.11",
+    "pytest>=8.0",
     "ruff>=0.11",
 ]
 
@@ -38,6 +39,7 @@ dev = [
 dev = [
     "build>=1.2.2",
     "mypy>=1.11",
+    "pytest>=8.0",
     "ruff>=0.11",
 ]
 
@@ -77,3 +79,6 @@ exclude = ["^dist/", "^\\.tmp/", "^opendream/webapp\\.py$", "^opendream/observab
 [[tool.mypy.overrides]]
 module = ["opendream.webapp", "opendream.observability", "tests.*"]
 ignore_errors = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -10,6 +10,7 @@ labels: memory, bug
 - Command or integration used:
 - Agent target:
 - Workspace OS:
+- Memory quality impact: stale, contradicted, over-selected, under-selected, or unsafe:
 
 ## Memory Used
 
@@ -46,3 +47,4 @@ Relevant memory that was excluded:
 ## Boundary Check
 
 - [ ] This issue removes secrets, local machine paths, account/provider names, and non-public URLs.
+- [ ] This issue includes enough context to reproduce the memory quality failure with a fixture or local workspace.

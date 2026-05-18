@@ -108,6 +108,35 @@ function routeForKind(kind: string, id: string): string {
   return `/runs?id=${encodeURIComponent(id)}`;
 }
 
+function launchSummary(p: OverviewPayload | undefined, recentCount: number, highlightCount: number) {
+  const surface = ((p as { memory_surface?: MemorySurface } | undefined)?.memory_surface ??
+    {}) as MemorySurface;
+  const contested = surface.durable_contested_total ?? 0;
+  const pruned = surface.learned_context_recently_pruned_total ?? 0;
+  return [
+    {
+      label: 'What happened',
+      value: recentCount > 0 ? `${recentCount} recent traces` : 'No traces yet',
+      action: '/runs',
+    },
+    {
+      label: 'Memory helped',
+      value: highlightCount > 0 ? `${highlightCount} surfaced memories` : 'Awaiting retrieval',
+      action: '/memories/explorer?status=active',
+    },
+    {
+      label: 'Rejected',
+      value: contested + pruned > 0 ? `${contested + pruned} contested or pruned` : 'None flagged',
+      action: '/memories/explorer?status=contested',
+    },
+    {
+      label: 'Next action',
+      value: (p as { next_action?: string } | undefined)?.next_action ?? 'Run an agent task',
+      action: '/settings',
+    },
+  ];
+}
+
 export default function OverviewRoute(): JSX.Element {
   const navigate = useNavigate();
 
@@ -277,6 +306,26 @@ export default function OverviewRoute(): JSX.Element {
           }
         >
           <StatStrip stats={buildClickableStats(overview())} />
+
+          <section class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <For each={launchSummary(overview(), recent().length, (highlights() ?? []).length)}>
+              {(item) => (
+                <button
+                  type="button"
+                  onClick={() => navigate(item.action)}
+                  class="row-hover min-h-20 rounded-md hairline bg-surface px-3 py-2 text-left transition-colors hover:bg-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                  title={item.value}
+                >
+                  <span class="block text-[10px] uppercase tracking-[0.1em] text-text-subtle">
+                    {item.label}
+                  </span>
+                  <span class="mt-2 line-clamp-2 block text-sm font-medium text-text">
+                    {item.value}
+                  </span>
+                </button>
+              )}
+            </For>
+          </section>
 
           <Show when={next().posture || next().nextAction}>
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text-muted">

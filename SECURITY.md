@@ -1,7 +1,9 @@
 # Security Policy
 
 ## Reporting
-Report security issues privately to the repository owner or maintainer channel before opening a public issue.
+Report security issues privately through GitHub Security Advisories when
+available, or to the repository owner or maintainer channel before opening a
+public issue.
 
 Include:
 - affected version or commit
@@ -19,6 +21,9 @@ Security issues include:
 
 OpenDream sends no telemetry by default. Provider/API-key execution paths are
 explicit operator setup paths and should not be described as analytics.
+Local-first defaults mean memory, eval fixtures, and observe UI state stay in
+the selected workspace unless an operator explicitly configures provider-backed
+paths.
 
 ## Supported versions
 
