@@ -110,7 +110,7 @@ def pre_task_script(store: MemoryStore, target: str) -> str:
                 "",
                 'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
                 *workspace_guard_lines(store),
-                'QUERY="${1:-${OPENDREAM_QUERY:-current task}}"',
+                'QUERY="${1:-${OPENDREAM_QUERY:-}}"',
                 f'{command} --fallback-query "$QUERY"',
                 "",
             ]
@@ -124,7 +124,7 @@ def pre_task_script(store: MemoryStore, target: str) -> str:
             "",
             'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
             *workspace_guard_lines(store),
-            'QUERY="${1:-${OPENDREAM_QUERY:-current task}}"',
+            'QUERY="${1:-${OPENDREAM_QUERY:-}}"',
             'GLOBAL="${OPENDREAM_GLOBAL_WORKSPACE:-}"',
             f'OUTPUT="$WORKSPACE/{CONTEXT_DIR}/{output_name}"',
             'mkdir -p "$(dirname "$OUTPUT")"',
@@ -135,6 +135,14 @@ def pre_task_script(store: MemoryStore, target: str) -> str:
             ),
             "else",
             f'  {command} --query "$QUERY" --output compact-json > "$OUTPUT"',
+            "fi",
+            'if [ "${OPENDREAM_QUERY_STRICT:-0}" = "1" ] && grep -q \'"code": "placeholder_query"\' "$OUTPUT"; then',
+            '  cat "$OUTPUT"',
+            (
+                '  echo "OpenDream: placeholder query rejected in strict mode; '
+                'set OPENDREAM_QUERY to the actual task." >&2'
+            ),
+            "  exit 2",
             "fi",
             'cat "$OUTPUT"',
             "",
@@ -227,6 +235,7 @@ def openclaw_hook_script(store: MemoryStore) -> str:
 
 
 def codex_wrapper_script(store: MemoryStore) -> str:
+    record_command = opendream_command(store, "record-context-use")
     return "\n".join(
         [
             "#!/bin/sh",
@@ -260,6 +269,32 @@ def codex_wrapper_script(store: MemoryStore) -> str:
             "status=0",
             'if [ "$#" -gt 0 ]; then',
             '  "$@" || status=$?',
+            "fi",
+            'CONTEXT_JSON=".opendream/context/codex-pre-task.json"',
+            'if [ -f "$CONTEXT_JSON" ] && [ "${OPENDREAM_RECORD_CONTEXT_USE:-1}" != "0" ]; then',
+            (
+                "  CONTEXT_ID=\"$(python3 -c "
+                "'import json,sys; print((json.load(open(sys.argv[1])).get(\"context_id\") or \"\"))' "
+                '"$CONTEXT_JSON" 2>/dev/null || true)"'
+            ),
+            (
+                "  SELECTED_COUNT=\"$(python3 -c "
+                "'import json,sys; p=json.load(open(sys.argv[1])); "
+                "print(len(p.get(\"selected_memory_ids\") or []) + "
+                "len(p.get(\"selected_learned_context_ids\") or []) + "
+                "len(p.get(\"selected_automation_record_ids\") or []))' "
+                '"$CONTEXT_JSON" 2>/dev/null || true)"'
+            ),
+            '  case "$SELECTED_COUNT" in ""|*[!0-9]*) SELECTED_COUNT=0 ;; esac',
+            '  if [ -n "$CONTEXT_ID" ] && [ "$SELECTED_COUNT" -gt 0 ]; then',
+            (
+                f"    {record_command} --context-id \"$CONTEXT_ID\" "
+                '--memory-use-state "${OPENDREAM_MEMORY_USE_STATE:-unknown}" '
+                '--usage-note "${OPENDREAM_MEMORY_USE_NOTE:-Codex wrapper completed without explicit '
+                'memory-use acknowledgement.}" '
+                f"{reporting_args('codex')} || true"
+            ),
+            "  fi",
             "fi",
             'post_status=0',
             'sh .opendream/hooks/codex-post-task.sh "$SUMMARY" || post_status=$?',
@@ -325,7 +360,7 @@ def shell_hook_instruction_block(target_label: str, store: MemoryStore) -> str:
     post_script = f"{target_label}-post-task.sh"
     pre_cmd = (
         f'[ -f .opendream/hooks/{pre_script} ] && '
-        f'sh .opendream/hooks/{pre_script} "${{OPENDREAM_QUERY:-current task}}" || true'
+        f'sh .opendream/hooks/{pre_script} "${{OPENDREAM_QUERY:-}}" || true'
     )
     post_cmd = (
         f'[ -f .opendream/hooks/{post_script} ] && '
@@ -337,8 +372,17 @@ def shell_hook_instruction_block(target_label: str, store: MemoryStore) -> str:
             "",
             "## OpenDream",
             "",
-            "Before substantial work from the workspace root, run if the hook exists:",
+            (
+                "Before substantial work from the workspace root, set `OPENDREAM_QUERY` "
+                "to the actual task text, then run if the hook exists:"
+            ),
             f"`{pre_cmd}`",
+            "",
+            (
+                "If `selected_memory_ids` is non-empty, record how context was used with "
+                "`opendream record-context-use` or include a terse final line such as "
+                "`OpenDream context used: <ids>` / `OpenDream context ignored: <reason>`."
+            ),
             "",
             "Before the final response from the workspace root, run if the hook exists:",
             f"`{post_cmd}`",
@@ -367,10 +411,19 @@ def codex_block(store: MemoryStore) -> str:
             "",
             "## OpenDream Activation",
             "",
-            "Before substantial work from the workspace root, run if the hook exists:",
+            (
+                "Before substantial work from the workspace root, set `OPENDREAM_QUERY` "
+                "to the actual task text, then run if the hook exists:"
+            ),
             (
                 '`[ -f .opendream/hooks/codex-pre-task.sh ] && '
-                'sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}" || true`'
+                'sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-}" || true`'
+            ),
+            "",
+            (
+                "If `selected_memory_ids` is non-empty, record how context was used with "
+                "`opendream record-context-use` or include a terse final line such as "
+                "`OpenDream context used: <ids>` / `OpenDream context ignored: <reason>`."
             ),
             "",
             "Before the final response from the workspace root, run if the hook exists:",

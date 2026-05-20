@@ -25,7 +25,7 @@ from .util import parse_timestamp, read_json, sha256_path, stable_id, to_iso, ut
 # bursts skip redundant stat() calls.
 _INDEX_CACHE_DISABLED = bool(os.environ.get("OPENDREAM_DISABLE_INDEX_CACHE"))
 _FINGERPRINT_TTL_SECONDS = 2.0
-_COMPACT_INDEX_SCHEMA_VERSION = 2
+_COMPACT_INDEX_SCHEMA_VERSION = 3
 _INDEX_CACHE_MAX_ENTRIES = 16
 _index_cache_lock = threading.Lock()
 _index_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -225,8 +225,47 @@ def project_context_list_row(row: dict[str, Any]) -> dict[str, Any]:
         "character_count": row.get("character_count"),
         "token_estimate": row.get("token_estimate"),
         "selected_memory_ids_count": selected_count,
+        "context_use_count": row.get("context_use_count"),
+        "latest_memory_use_state": row.get("latest_memory_use_state"),
+        "latest_context_use_id": row.get("latest_context_use_id"),
         "query": query,
         "display_name": _compact_display_label(query, str(context_id or "context")),
+    }
+    return {key: value for key, value in out.items() if value is not None}
+
+
+def project_context_use_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    selected_ids = row.get("selected_memory_ids")
+    used_ids = row.get("used_memory_ids")
+    selected_count = row.get("selected_memory_ids_count")
+    if not isinstance(selected_count, int):
+        selected_count = len(selected_ids) if isinstance(selected_ids, list) else None
+    used_count = row.get("used_memory_ids_count")
+    if not isinstance(used_count, int):
+        used_count = len(used_ids) if isinstance(used_ids, list) else None
+    reporting_agent = row.get("reporting_agent")
+    if not isinstance(reporting_agent, dict):
+        reporting_agent = {}
+    context_id = row.get("context_id")
+    usage_id = row.get("usage_id")
+    out = {
+        "usage_id": usage_id,
+        "context_id": context_id,
+        "timestamp": row.get("timestamp"),
+        "memory_use_state": row.get("memory_use_state") or "unknown",
+        "selected_memory_ids_count": selected_count,
+        "used_memory_ids_count": used_count,
+        "used_memory_ids": used_ids if isinstance(used_ids, list) else None,
+        "usage_note": row.get("usage_note"),
+        "visible_attestation": row.get("visible_attestation"),
+        "reporting_agent": reporting_agent if reporting_agent else None,
+        "reporting_agent_label": reporting_agent.get("agent_label") or reporting_agent.get("agent_id"),
+        "context_query": row.get("context_query"),
+        "context_display_name": row.get("context_display_name"),
+        "display_name": _compact_display_label(
+            str(row.get("context_query") or row.get("usage_note") or ""),
+            str(usage_id or context_id or "context-use"),
+        ),
     }
     return {key: value for key, value in out.items() if value is not None}
 
@@ -283,6 +322,7 @@ def _build_compact_entities_from_full(entities: dict[str, Any]) -> dict[str, Any
     retrievals = [row for row in entities.get("retrievals", []) if isinstance(row, dict)]
     sessions = [row for row in entities.get("sessions", []) if isinstance(row, dict)]
     contexts = [row for row in entities.get("contexts", []) if isinstance(row, dict)]
+    context_use = [row for row in entities.get("context_use", []) if isinstance(row, dict)]
     dream_cycles = [
         _build_dream_cycle_projection(row, include_detail=False)
         for row in runs
@@ -297,6 +337,7 @@ def _build_compact_entities_from_full(entities: dict[str, Any]) -> dict[str, Any
         "runs": [_compact_run_row(row) for row in runs],
         "retrievals": [project_retrieval_list_row(row) for row in retrievals],
         "contexts": [project_context_list_row(row) for row in contexts],
+        "context_use": [project_context_use_list_row(row) for row in context_use],
         "sessions": [project_session_list_row(row) for row in sessions],
         "dream_cycles": dream_cycles,
     }
@@ -325,12 +366,14 @@ def index_observability_compact(store: MemoryStore, *, now: str | None = None) -
     runs = _load_run_records(store)
     retrievals = _load_retrieval_entities(store)
     contexts = _load_context_entities(store)
+    context_use = _load_context_use_entities(store, contexts)
     sessions = _build_session_entities(store, contexts)
     full_like_entities = {
         "memories": _build_memory_entities(store),
         "runs": runs,
         "retrievals": retrievals,
         "contexts": contexts,
+        "context_use": context_use,
         "sessions": sessions,
     }
     compact = {
@@ -518,6 +561,7 @@ def _observability_source_hint(store: MemoryStore) -> str:
         store.events_dir,
         store.audit_retrieval_dir,
         store.audit_context_dir,
+        store.audit_context_use_dir,
         store.audit_consolidation_dir,
         store.audit_dream_dir,
         store.annotations_dir,
@@ -557,6 +601,7 @@ def _iter_observability_source_paths(store: MemoryStore) -> list[Path]:
         store.events_dir,
         store.audit_retrieval_dir,
         store.audit_context_dir,
+        store.audit_context_use_dir,
         store.audit_consolidation_dir,
         store.audit_dream_dir,
         store.annotations_dir,
@@ -2361,6 +2406,7 @@ def _build_entities(store: MemoryStore) -> dict[str, Any]:
     runs = _load_run_records(store)
     retrievals = _load_retrieval_entities(store)
     contexts = _load_context_entities(store)
+    context_use = _load_context_use_entities(store, contexts)
     sessions = _build_session_entities(store, contexts)
     annotations = store.load_annotations()
     reviews = _build_review_queue(store, memories, retrievals, runs)
@@ -2368,7 +2414,16 @@ def _build_entities(store: MemoryStore) -> dict[str, Any]:
     exports = store.load_export_records()
     health = _build_health(memories, retrievals, runs, reviews)
     relation_edges = read_json(store.relation_edges_path, [])
-    graph = _build_graph_entities(memories, retrievals, runs, annotations, reviews, relation_edges)
+    graph = _build_graph_entities(
+        memories,
+        retrievals,
+        runs,
+        contexts,
+        context_use,
+        annotations,
+        reviews,
+        relation_edges,
+    )
     verification_reports = _load_json_records(store.audit_claim_verification_dir)
     probe_reports = _load_json_records(store.audit_transcript_probe_dir)
     reconciliation_reports = _load_json_records(store.audit_reconciliation_dir)
@@ -2378,6 +2433,7 @@ def _build_entities(store: MemoryStore) -> dict[str, Any]:
         "runs": runs,
         "retrievals": retrievals,
         "contexts": contexts,
+        "context_use": context_use,
         "sessions": sessions,
         "annotations": annotations,
         "reviews": reviews,
@@ -2529,7 +2585,41 @@ def get_context_detail(store: MemoryStore, context_id: str) -> dict[str, Any] | 
     if not isinstance(context, dict):
         return None
     context.setdefault("source_path", str(path))
-    return {**context, "display_name": project_context_list_row(context).get("display_name")}
+    context_use_records = [
+        record
+        for record in _load_context_use_entities(store, [context])
+        if str(record.get("context_id") or "") == context_id
+    ]
+    context_use_records.sort(
+        key=lambda item: (str(item.get("timestamp") or ""), str(item.get("usage_id") or "")),
+        reverse=True,
+    )
+    latest_use = context_use_records[0] if context_use_records else None
+    return {
+        **context,
+        "display_name": project_context_list_row(context).get("display_name"),
+        "context_use_records": context_use_records,
+        "context_use_count": len(context_use_records),
+        "latest_memory_use_state": latest_use.get("memory_use_state") if latest_use else "not-recorded",
+        "latest_context_use_id": latest_use.get("usage_id") if latest_use else None,
+    }
+
+
+def get_context_use_detail(store: MemoryStore, usage_id: str) -> dict[str, Any] | None:
+    if not usage_id or "/" in usage_id or "\\" in usage_id:
+        return None
+    path = store.audit_context_use_dir / f"{usage_id}.json"
+    if not path.exists():
+        return None
+    record = read_json(path, {})
+    if not isinstance(record, dict):
+        return None
+    contexts = _load_context_entities(store)
+    enriched = _load_context_use_entities(store, contexts, records=[record])
+    if not enriched:
+        return None
+    enriched[0].setdefault("source_path", str(path))
+    return enriched[0]
 
 
 def _normalize_event_reporting_agent(event: dict[str, Any]) -> dict[str, str]:
@@ -2772,7 +2862,55 @@ def _load_retrieval_entities(store: MemoryStore) -> list[dict[str, Any]]:
 
 def _load_context_entities(store: MemoryStore) -> list[dict[str, Any]]:
     items = store.load_context_assemblies()
+    context_use_by_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in store.load_context_use_records():
+        if isinstance(record, dict):
+            context_use_by_id[str(record.get("context_id") or "")].append(record)
+    for records in context_use_by_id.values():
+        records.sort(
+            key=lambda item: (str(item.get("timestamp") or ""), str(item.get("usage_id") or "")),
+            reverse=True,
+        )
+    for item in items:
+        context_id = str(item.get("context_id") or "")
+        records = context_use_by_id.get(context_id, [])
+        latest = records[0] if records else None
+        item["context_use_count"] = len(records)
+        item["latest_memory_use_state"] = latest.get("memory_use_state") if latest else "not-recorded"
+        if latest and latest.get("usage_id"):
+            item["latest_context_use_id"] = latest.get("usage_id")
     items.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
+    return items
+
+
+def _load_context_use_entities(
+    store: MemoryStore,
+    contexts: list[dict[str, Any]],
+    *,
+    records: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    context_by_id = {str(item.get("context_id") or ""): item for item in contexts}
+    items: list[dict[str, Any]] = []
+    source_records = records if records is not None else store.load_context_use_records()
+    for record in source_records:
+        if not isinstance(record, dict):
+            continue
+        context_id = str(record.get("context_id") or "")
+        context = context_by_id.get(context_id)
+        enriched = dict(record)
+        enriched.setdefault("usage_id", stable_id("context_use", record))
+        enriched.setdefault("memory_use_state", "unknown")
+        if context:
+            enriched["context_query"] = _context_query_text(context)
+            enriched["context_display_name"] = project_context_list_row(context).get("display_name")
+            selected_ids = context.get("selected_memory_ids")
+            if "selected_memory_ids" not in enriched and isinstance(selected_ids, list):
+                enriched["selected_memory_ids"] = selected_ids
+        items.append(enriched)
+    items.sort(
+        key=lambda item: (str(item.get("timestamp") or ""), str(item.get("usage_id") or "")),
+        reverse=True,
+    )
     return items
 
 
@@ -2962,6 +3100,8 @@ def _build_graph_entities(
     memories: list[dict[str, Any]],
     retrievals: list[dict[str, Any]],
     runs: list[dict[str, Any]],
+    contexts: list[dict[str, Any]],
+    context_use: list[dict[str, Any]],
     annotations: list[dict[str, Any]],
     reviews: list[dict[str, Any]],
     relation_edges: list[dict[str, Any]],
@@ -3006,6 +3146,23 @@ def _build_graph_entities(
         add_node(retrieval_id, "retrieval", retrieval_id, retrieval)
         for memory_id in retrieval.get("selected_memory_ids", []):
             add_edge(retrieval_id, str(memory_id), "selected_by")
+    for context in contexts:
+        context_id = str(context.get("context_id") or "")
+        if not context_id:
+            continue
+        label = str(project_context_list_row(context).get("display_name") or context_id)
+        add_node(context_id, "context", label, context)
+        for memory_id in context.get("selected_memory_ids", []):
+            add_edge(context_id, str(memory_id), "selected_for_context")
+    for usage in context_use:
+        usage_id = str(usage.get("usage_id") or stable_id("context_use", usage))
+        context_id = str(usage.get("context_id") or "")
+        state = str(usage.get("memory_use_state") or "unknown")
+        add_node(usage_id, "context_use", f"{state}: {usage_id}", usage)
+        if context_id:
+            add_edge(usage_id, context_id, "acknowledges_context")
+        for memory_id in usage.get("used_memory_ids", []):
+            add_edge(usage_id, str(memory_id), "used_memory")
     for run in runs:
         add_node(run["run_id"], "run", run["run_id"], run)
         for op in run.get("operations", []):

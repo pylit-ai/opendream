@@ -28,12 +28,14 @@ from .observability import (
     create_export,
     create_review_decision,
     get_context_detail,
+    get_context_use_detail,
     get_dream_cycle,
     get_memory_detail,
     get_memory_lineage,
     index_observability,
     load_or_build_index,
     load_or_build_list_index,
+    project_context_use_list_row,
     project_retrieval_list_row,
     project_run_list_row,
     project_session_list_row,
@@ -879,6 +881,44 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             )
             _finish()
             return
+        if parsed.path == "/api/context-use":
+            list_index = load_or_build_list_index(self.store)
+            entities = list_index["entities"]
+            rows = list(entities.get("context_use", []))
+            context_id = (query.get("context_id") or "").strip()
+            if context_id:
+                rows = [row for row in rows if str(row.get("context_id") or "") == context_id]
+            state = (query.get("state") or "").strip()
+            if state:
+                rows = [row for row in rows if str(row.get("memory_use_state") or "") == state]
+            rows.sort(
+                key=lambda row: (
+                    str(row.get("timestamp") or ""),
+                    str(row.get("usage_id") or ""),
+                ),
+                reverse=True,
+            )
+            total = len(rows)
+            limit = _parse_query_int(query.get("limit"), 100, minimum=1, maximum=500)
+            offset = _parse_query_int(query.get("offset"), 0, minimum=0, maximum=1_000_000)
+            self._write_json(
+                {
+                    "items": [
+                        project_context_use_list_row(row) for row in rows[offset : offset + limit]
+                    ],
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                    "has_more": offset + limit < total,
+                }
+            )
+            _finish()
+            return
+        if parsed.path.startswith("/api/context-use/"):
+            usage_id = parsed.path.split("/")[-1]
+            self._write_json(get_context_use_detail(self.store, usage_id) or {})
+            _finish()
+            return
         if parsed.path.startswith("/api/context/"):
             context_id = parsed.path.split("/")[-1]
             self._write_json(get_context_detail(self.store, context_id) or {})
@@ -1592,6 +1632,9 @@ def _context_list_row(row: dict[str, Any]) -> dict[str, Any]:
         "character_count": row.get("character_count"),
         "token_estimate": row.get("token_estimate"),
         "selected_memory_ids_count": selected_count,
+        "context_use_count": row.get("context_use_count"),
+        "latest_memory_use_state": row.get("latest_memory_use_state"),
+        "latest_context_use_id": row.get("latest_context_use_id"),
         "query": query,
         "display_name": _compact_label(query, str(context_id or "context")),
     }

@@ -1,9 +1,14 @@
 import { createEffect, createResource, createSignal, For, Show, type JSX } from 'solid-js';
 import { useNavigate, useSearchParams } from '@solidjs/router';
 import { FileText } from 'lucide-solid';
-import { getContext, getContexts } from '~/api/client';
+import { getContext, getContexts, getContextUseRecords } from '~/api/client';
 import { cachedFetch } from '~/lib/cache';
-import type { ContextListResponse, ContextRecord } from '~/api/types';
+import type {
+  ContextListResponse,
+  ContextRecord,
+  ContextUseListResponse,
+  ContextUseRecord,
+} from '~/api/types';
 import { Page } from '~/components/Page';
 import { EmptyState } from '~/components/EmptyState';
 import { LoadingPage } from '~/components/Loading';
@@ -18,8 +23,82 @@ interface ContextEntry {
   created_at?: string;
   character_count?: number;
   selected_memory_ids_count?: number;
+  context_use_count?: number;
+  latest_memory_use_state?: string;
+  latest_context_use_id?: string;
   query?: string;
   display_name?: string;
+}
+
+function MemoryUseStateChip(props: { state?: string; hasRecord?: boolean }): JSX.Element {
+  const state = () => (props.hasRecord === false ? 'not-recorded' : (props.state || 'unknown')).toLowerCase();
+  const label = () => {
+    switch (state()) {
+      case 'not-recorded':
+        return 'No use record';
+      case 'unknown':
+        return 'Unknown use';
+      case 'checked-none':
+        return 'Checked none';
+      case 'used':
+        return 'Used';
+      case 'ignored':
+        return 'Ignored';
+      case 'conflicted':
+        return 'Conflicted';
+      case 'stale':
+        return 'Stale';
+      default:
+        return state();
+    }
+  };
+  const title = () => {
+    switch (state()) {
+      case 'not-recorded':
+        return 'No context-use audit record exists for this prepared context. It may predate this instrumentation, or the agent did not record usage. This does not prove the memory was unused.';
+      case 'unknown':
+        return 'A context-use audit record exists, but the agent or wrapper did not say whether the selected memories were used, ignored, stale, or conflicted.';
+      case 'used':
+        return 'The agent explicitly recorded at least one selected memory as used for this context.';
+      case 'checked-none':
+        return 'The agent recorded that it checked the prepared context and no selected memory applied.';
+      case 'ignored':
+        return 'The agent recorded that it ignored the prepared context.';
+      case 'conflicted':
+        return 'The agent recorded that selected memory conflicted with the task or other evidence.';
+      case 'stale':
+        return 'The agent recorded that selected memory was stale for the task.';
+      default:
+        return `Memory-use state: ${state()}`;
+    }
+  };
+  const tone = () => {
+    switch (state()) {
+      case 'used':
+        return 'border-emerald-500/40 bg-emerald-500/12 text-emerald-300';
+      case 'checked-none':
+        return 'border-sky-500/40 bg-sky-500/12 text-sky-300';
+      case 'ignored':
+      case 'unknown':
+        return 'border-amber-500/40 bg-amber-500/12 text-amber-300';
+      case 'conflicted':
+      case 'stale':
+        return 'border-rose-500/40 bg-rose-500/12 text-rose-300';
+      case 'not-recorded':
+        return 'border-border bg-surface-elevated text-text-muted';
+      default:
+        return 'border-border bg-surface-elevated text-text-muted';
+    }
+  };
+  return (
+    <span
+      class={cn('rounded-full border px-2 py-0.5 text-[10.5px] font-medium', tone())}
+      title={title()}
+      aria-label={title()}
+    >
+      {label()}
+    </span>
+  );
 }
 
 function SelectionMetric(props: {
@@ -55,10 +134,20 @@ export default function ContextRoute(): JSX.Element {
   const [contextsData, { refetch: refetchContexts }] = createResource<ContextListResponse>(() =>
     cachedFetch('contexts:200', () => getContexts({ limit: 200 }), 15_000),
   );
+  const [contextUseData] = createResource<ContextUseListResponse>(() =>
+    cachedFetch('context-use:200', () => getContextUseRecords({ limit: 200 }), 15_000),
+  );
 
   const contextEntries = (): ContextEntry[] => {
     return (contextsData()?.items ?? []) as ContextEntry[];
   };
+  const contextUseEntries = (): ContextUseRecord[] => contextUseData()?.items ?? [];
+  const useRecordsForContext = (contextId?: string | null): ContextUseRecord[] => {
+    if (!contextId) return [];
+    return contextUseEntries().filter((row) => row.context_id === contextId);
+  };
+  const latestUseForContext = (contextId?: string | null): ContextUseRecord | undefined =>
+    useRecordsForContext(contextId)[0];
 
   createEffect(() => {
     const id = typeof searchParams.id === 'string' ? searchParams.id : null;
@@ -88,6 +177,10 @@ export default function ContextRoute(): JSX.Element {
       return cachedFetch(`context:${id}`, () => getContext(id), 60_000).catch(() => null);
     },
   );
+  const selectedUseRecords = (): ContextUseRecord[] => {
+    const detailRecords = contextDetail()?.context_use_records ?? [];
+    return detailRecords.length > 0 ? detailRecords : useRecordsForContext(selectedId());
+  };
 
   const assembledText = (): string => {
     const d = contextDetail();
@@ -152,9 +245,15 @@ export default function ContextRoute(): JSX.Element {
                       <span class="truncate font-medium text-text">
                         {entry.display_name ?? entry.query ?? entry.context_id}
                       </span>
-                      <span class="truncate font-mono text-[10.5px] text-text-muted">
-                        {entry.context_id}
-                      </span>
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="truncate font-mono text-[10.5px] text-text-muted">
+                          {entry.context_id}
+                        </span>
+                        <MemoryUseStateChip
+                          state={entry.latest_memory_use_state ?? latestUseForContext(entry.context_id)?.memory_use_state}
+                          hasRecord={(entry.context_use_count ?? 0) > 0 || latestUseForContext(entry.context_id) !== undefined}
+                        />
+                      </div>
                       <div class="flex items-center gap-2 text-text-subtle">
                         <Show when={entry.created_at}>
                           <span>{formatDate(entry.created_at!)}</span>
@@ -262,6 +361,11 @@ export default function ContextRoute(): JSX.Element {
                             startup_index_snapshot?: unknown;
                           };
                           const selected = dx.selected_memory_ids ?? [];
+                          const useRecords = selectedUseRecords();
+                          const latestUse = useRecords[0];
+                          const usedMemoryIds = new Set(
+                            useRecords.flatMap((record) => record.used_memory_ids ?? []),
+                          );
                           const omissions = dx.omission_reasons;
                           const omissionEntries: Array<{ id: string; reason: string }> = Array.isArray(
                             omissions,
@@ -273,6 +377,63 @@ export default function ContextRoute(): JSX.Element {
                           const startup = dx.startup_index_snapshot;
                           return (
                             <>
+                              <section class="flex flex-col gap-2">
+                                <div class="flex items-center justify-between gap-3">
+                                  <h4 class="text-2xs uppercase tracking-wide text-text-subtle">
+                                    Context use audit
+                                  </h4>
+                                  <MemoryUseStateChip
+                                    state={latestUse?.memory_use_state}
+                                    hasRecord={latestUse !== undefined}
+                                  />
+                                </div>
+                                <Show
+                                  when={useRecords.length > 0}
+                                  fallback={
+                                    <div class="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+                                      No context-use audit record exists for this prepared context. This often means the context predates the audit feature, or the agent did not record usage. It does not prove the selected memories were unused.
+                                    </div>
+                                  }
+                                >
+                                  <div class="flex flex-col gap-2">
+                                    <For each={useRecords.slice(0, 5)}>
+                                      {(record) => (
+                                        <div class="rounded-md hairline bg-surface-elevated px-3 py-2 text-[12px]">
+                                          <div class="flex flex-wrap items-center justify-between gap-2">
+                                            <div class="flex items-center gap-2">
+                                              <span class="font-mono text-accent">{record.usage_id}</span>
+                                              <MemoryUseStateChip state={record.memory_use_state} />
+                                            </div>
+                                            <Show when={record.timestamp}>
+                                              <span class="text-text-subtle">{formatDate(record.timestamp!)}</span>
+                                            </Show>
+                                          </div>
+                                          <div class="mt-1 grid gap-1 text-text-muted md:grid-cols-[96px_1fr]">
+                                            <Show when={record.reporting_agent_label}>
+                                              <span>Agent</span>
+                                              <span class="text-text">{record.reporting_agent_label}</span>
+                                            </Show>
+                                            <span>Used IDs</span>
+                                            <span class="font-mono text-text">
+                                              {(record.used_memory_ids ?? []).length > 0
+                                                ? record.used_memory_ids!.join(', ')
+                                                : 'none recorded'}
+                                            </span>
+                                            <Show when={record.usage_note}>
+                                              <span>Note</span>
+                                              <span class="text-text">{record.usage_note}</span>
+                                            </Show>
+                                            <Show when={record.visible_attestation}>
+                                              <span>Attestation</span>
+                                              <span class="text-text">{record.visible_attestation}</span>
+                                            </Show>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </For>
+                                  </div>
+                                </Show>
+                              </section>
                               <Show when={selected.length > 0}>
                                 <section class="flex flex-col gap-1">
                                   <h4 class="text-2xs uppercase tracking-wide text-text-subtle">
@@ -288,6 +449,13 @@ export default function ContextRoute(): JSX.Element {
                                           title={`Open memory ${id} in Explorer`}
                                         >
                                           <span class="font-mono text-accent hover:underline">{id}</span>
+                                          <span class="ml-2 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-text-subtle">
+                                            {usedMemoryIds.has(id)
+                                              ? 'used'
+                                              : latestUse
+                                                ? 'selected only'
+                                                : 'not recorded'}
+                                          </span>
                                         </button>
                                       )}
                                     </For>

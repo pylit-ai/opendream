@@ -774,6 +774,29 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(visibility["selected"]["count"], len(context["selected_memory_ids"]))
         self.assertIsNone(context.get("empty_reason"))
         self.assertEqual(context.get("hints"), [])
+        contract = context["memory_use_contract"]
+        self.assertEqual(contract["context_id"], context["context_id"])
+        self.assertTrue(contract["usage_required"])
+        self.assertEqual(contract["selected_memory_ids"], context["selected_memory_ids"])
+        self.assertIn("used", contract["allowed_states"])
+
+    def test_prepare_context_warns_on_placeholder_query(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace))
+        context = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "current task",
+            "--now",
+            FIXED_NOW,
+            "--output",
+            "compact-json",
+        )
+
+        self.assertEqual(context["memory_use_contract"]["usage_required"], False)
+        warning_codes = {warning["code"] for warning in context["warnings"]}
+        self.assertIn("placeholder_query", warning_codes)
 
     def test_prepare_context_output_modes_preserve_full_audit_and_compact_prompt(self) -> None:
         self.write_learned_context_records(
@@ -825,6 +848,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn("prompt_context", compact)
         self.assertIn("context_pruning", compact)
         self.assertIn("prompt_context_visibility", compact)
+        self.assertIn("memory_use_contract", compact)
         self.assertIn("audit", compact)
         self.assertNotIn("suppressed", compact)
         self.assertNotIn("omitted", compact)
@@ -901,6 +925,45 @@ class MemoryCliIntegrationTests(unittest.TestCase):
 
         self.assertGreater(len(json.dumps(compact).encode("utf-8")), 32768)
         self.assertEqual(compact["warnings"][0]["code"], "compact_context_budget_exceeded")
+
+    def test_record_context_use_writes_audit_only_record(self) -> None:
+        fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
+        run_cli("append-event", "--workspace", str(self.workspace), "--events", str(fixture))
+        run_cli("maintain", "--workspace", str(self.workspace), "--now", FIXED_NOW)
+        context = run_cli(
+            "prepare-context",
+            "--workspace",
+            str(self.workspace),
+            "--query",
+            "package manager and workflow",
+            "--now",
+            FIXED_NOW,
+        )
+        result = run_cli(
+            "record-context-use",
+            "--workspace",
+            str(self.workspace),
+            "--context-id",
+            str(context["context_id"]),
+            "--memory-use-state",
+            "used",
+            "--usage-note",
+            "Applied selected package-manager memory.",
+            "--agent-id",
+            "codex",
+            "--agent-label",
+            "Codex",
+            "--timestamp",
+            FIXED_NOW,
+        )
+
+        self.assertEqual(result["status"], "recorded")
+        store = MemoryStore(self.workspace)
+        usage_records = store.load_context_use_records()
+        self.assertEqual(len(usage_records), 1)
+        self.assertEqual(usage_records[0]["memory_use_state"], "used")
+        self.assertEqual(usage_records[0]["used_memory_ids"], context["selected_memory_ids"])
+        self.assertEqual(store.load_durable_records()[0]["status"], "active")
 
     def test_prepare_context_records_reporting_agent_and_model(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "golden_events.jsonl"
@@ -2797,7 +2860,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         agents_text = (self.workspace / "AGENTS.md").read_text(encoding="utf-8")
         pre_cmd = (
             '[ -f .opendream/hooks/codex-pre-task.sh ] && '
-            'sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-current task}" || true'
+            'sh .opendream/hooks/codex-pre-task.sh "${OPENDREAM_QUERY:-}" || true'
         )
         post_cmd = (
             '[ -f .opendream/hooks/codex-post-task.sh ] && '
@@ -2805,6 +2868,8 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         )
         self.assertIn(pre_cmd, agents_text)
         self.assertIn(post_cmd, agents_text)
+        self.assertIn("opendream record-context-use", agents_text)
+        self.assertIn("actual task text", agents_text)
 
         (self.workspace / ".opendream" / "hooks" / "codex-pre-task.sh").unlink()
         completed = subprocess.run(

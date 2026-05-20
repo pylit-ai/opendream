@@ -42,8 +42,16 @@
       review:    '#fbbf24',
       run:       '#4ade80',
       retrieval: '#94a3b8',
+      context:   '#14b8a6',
+      context_use: '#fb923c',
     },
     edgeColors: {
+      selected_by:    '#60a5fa',
+      selected_for_context: '#14b8a6',
+      acknowledges_context: '#fb923c',
+      used_memory:    '#4ade80',
+      applied_to:     '#c084fc',
+      annotated_by:   '#fbbf24',
       supersedes:     '#f87171',
       conflicts_with: '#fbbf24',
       supports:       '#4ade80',
@@ -53,6 +61,12 @@
       reviewed:       '#94a3b8',
     },
     edgeOpacity: {
+      selected_by:    0.70,
+      selected_for_context: 0.80,
+      acknowledges_context: 0.85,
+      used_memory:    0.90,
+      applied_to:     0.75,
+      annotated_by:   0.70,
       supersedes:     1.0,
       conflicts_with: 0.85,
       supports:       0.85,
@@ -173,7 +187,7 @@
   }
 
   function nodeDetailHref(node) {
-    const detailRoutes = { memory: '/memories/', run: '/runs/', retrieval: '/retrievals/' };
+    const detailRoutes = { memory: '/memories/', run: '/runs/', retrieval: '/retrievals/', context: '/context?id=' };
     const base = detailRoutes[node.type];
     return base ? base + encodeURIComponent(node.id) : null;
   }
@@ -366,7 +380,7 @@
   }
 
   function detailLinkFor(node) {
-    const detailRoutes = { memory: '/memories/', run: '/runs/', retrieval: '/retrievals/' };
+    const detailRoutes = { memory: '/memories/', run: '/runs/', retrieval: '/retrievals/', context: '/context?id=' };
     const base = detailRoutes[node.type];
     if (!base) return '';
     return `<a class="graph-detail-link" href="${base}${encodeURIComponent(node.id)}">Open detail →</a>`;

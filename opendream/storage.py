@@ -213,6 +213,7 @@ class MemoryStore:
         self.audit_consolidation_dir = self.memory_root / "audit" / "consolidation"
         self.audit_retrieval_dir = self.memory_root / "audit" / "retrieval"
         self.audit_context_dir = self.memory_root / "audit" / "context"
+        self.audit_context_use_dir = self.memory_root / "audit" / "context-use"
         self.audit_bootstrap_dir = self.memory_root / "audit" / "bootstrap"
         self.audit_dream_dir = self.memory_root / "audit" / "dream"
         self.audit_plan_dir = self.memory_root / "audit" / "plans"
@@ -382,6 +383,7 @@ class MemoryStore:
             self.audit_consolidation_dir,
             self.audit_retrieval_dir,
             self.audit_context_dir,
+            self.audit_context_use_dir,
             self.audit_bootstrap_dir,
             self.audit_dream_dir,
             self.audit_plan_dir,
@@ -973,6 +975,22 @@ class MemoryStore:
                 payload.setdefault("source_path", str(path))
                 assemblies.append(payload)
         return assemblies
+
+    def write_context_use_audit(self, usage_id: str, payload: dict[str, Any]) -> Path:
+        self.ensure_layout()
+        path = self.audit_context_use_dir / f"{usage_id}.json"
+        write_json(path, payload)
+        return path
+
+    def load_context_use_records(self) -> list[dict[str, Any]]:
+        self.ensure_layout()
+        records: list[dict[str, Any]] = []
+        for path in sorted(self.audit_context_use_dir.glob("*.json"), reverse=True):
+            payload = read_json(path, {})
+            if isinstance(payload, dict):
+                payload.setdefault("source_path", str(path))
+                records.append(payload)
+        return records
 
     def write_dream_audit(
         self,

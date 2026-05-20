@@ -346,12 +346,16 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         context = self.get_json(f"/api/context/{self.context['context_id']}")
         self.assertEqual(context["context_id"], self.context["context_id"])
         self.assertTrue(context["assembled_text"].startswith("# OpenDream Memory Context"))
+        self.assertEqual(context["latest_memory_use_state"], "not-recorded")
+        self.assertEqual(context["context_use_count"], 0)
 
         contexts = self.get_json("/api/context?limit=1")
         self.assertGreaterEqual(contexts["total"], 1)
         self.assertEqual(len(contexts["items"]), 1)
         self.assertEqual(contexts["items"][0]["context_id"], self.context["context_id"])
         self.assertEqual(contexts["items"][0]["display_name"], "package manager and redis")
+        self.assertEqual(contexts["items"][0]["latest_memory_use_state"], "not-recorded")
+        self.assertEqual(contexts["items"][0]["context_use_count"], 0)
         self.assertNotIn("assembled_text", contexts["items"][0])
 
         context_session_id = context["session_id"]
@@ -371,6 +375,58 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(context_event["label"], "package manager and redis")
         self.assertEqual(context_event["payload"]["display_name"], "package manager and redis")
+
+    def test_context_use_records_are_indexed(self) -> None:
+        payload = {
+            "usage_id": "context-use-test",
+            "context_id": self.context["context_id"],
+            "timestamp": FIXED_NOW,
+            "memory_use_state": "used",
+            "selected_memory_ids": self.context["selected_memory_ids"],
+            "used_memory_ids": self.context["selected_memory_ids"][:1],
+            "reporting_agent": {"agent_id": "codex", "agent_label": "Codex"},
+        }
+        self.store.write_context_use_audit("context-use-test", payload)
+
+        index = index_observability(self.store, now=FIXED_NOW)
+
+        context_use = index["entities"]["context_use"]
+        self.assertEqual(len(context_use), 1)
+        self.assertEqual(context_use[0]["context_id"], self.context["context_id"])
+        self.assertEqual(context_use[0]["memory_use_state"], "used")
+        self.assertEqual(context_use[0]["context_query"], "package manager and redis")
+
+        records = self.get_json("/api/context-use?limit=10")
+        self.assertEqual(records["total"], 1)
+        self.assertEqual(records["items"][0]["usage_id"], "context-use-test")
+        self.assertEqual(records["items"][0]["used_memory_ids_count"], 1)
+
+        detail = self.get_json("/api/context-use/context-use-test")
+        self.assertEqual(detail["memory_use_state"], "used")
+        self.assertEqual(detail["context_display_name"], "package manager and redis")
+
+        context = self.get_json(f"/api/context/{self.context['context_id']}")
+        self.assertEqual(context["latest_memory_use_state"], "used")
+        self.assertEqual(context["context_use_count"], 1)
+        self.assertEqual(context["context_use_records"][0]["usage_id"], "context-use-test")
+
+        contexts = self.get_json("/api/context?limit=1")
+        self.assertEqual(contexts["items"][0]["latest_memory_use_state"], "used")
+        self.assertEqual(contexts["items"][0]["context_use_count"], 1)
+
+        graph = self.get_json("/api/graph?focus=context-use-test&limit=20&depth=2")
+        nodes = {node["id"]: node for node in graph["nodes"]}
+        self.assertEqual(nodes["context-use-test"]["type"], "context_use")
+        self.assertEqual(nodes[self.context["context_id"]]["type"], "context")
+        edge_types = {(edge["source"], edge["target"], edge["type"]) for edge in graph["edges"]}
+        self.assertIn(
+            ("context-use-test", self.context["context_id"], "acknowledges_context"),
+            edge_types,
+        )
+        self.assertIn(
+            ("context-use-test", self.context["selected_memory_ids"][0], "used_memory"),
+            edge_types,
+        )
 
     def test_settings_api_returns_fast_semantic_config_payload(self) -> None:
         payload = self.get_json("/api/settings")

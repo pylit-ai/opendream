@@ -86,7 +86,7 @@ from .showcase import (
     showcase_report_path,
 )
 from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, store_sort_key
-from .util import FIXTURE_ROOT, json_dumps, read_json, stable_id, to_iso, utc_now, write_json
+from .util import CLI_JSON_VERSION, FIXTURE_ROOT, json_dumps, read_json, stable_id, to_iso, utc_now, write_json
 from .validation import validate_document
 from .verification import verify_activation_capture
 
@@ -683,9 +683,11 @@ def compact_prepare_context_output(context: dict[str, Any]) -> dict[str, Any]:
         "selected_memory_ids",
         "selected_learned_context_ids",
         "selected_automation_record_ids",
+        "memory_use_contract",
         "prompt_context",
         "empty_reason",
         "hints",
+        "warnings",
     )
     compact = {key: context[key] for key in keys if key in context}
     context_id = str(context.get("context_id") or "")
@@ -693,18 +695,83 @@ def compact_prepare_context_output(context: dict[str, Any]) -> dict[str, Any]:
         compact["audit"] = {"context_path": f".opendream/memory/audit/context/{context_id}.json"}
     compact_size = len(json_dumps(compact).encode("utf-8"))
     if compact_size > COMPACT_CONTEXT_BUDGET_BYTES:
-        compact["warnings"] = [
-            {
-                "code": "compact_context_budget_exceeded",
-                "severity": "warning",
-                "message": "compact prepare-context output exceeds the hook stdout budget",
-                "details": {
-                    "compact_bytes": compact_size,
-                    "budget_bytes": COMPACT_CONTEXT_BUDGET_BYTES,
-                },
-            }
-        ]
+        budget_warning = {
+            "code": "compact_context_budget_exceeded",
+            "severity": "warning",
+            "message": "compact prepare-context output exceeds the hook stdout budget",
+            "details": {
+                "compact_bytes": compact_size,
+                "budget_bytes": COMPACT_CONTEXT_BUDGET_BYTES,
+            },
+        }
+        compact.setdefault("warnings", []).append(budget_warning)
     return compact
+
+
+def command_record_context_use(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    store.ensure_layout()
+    context_id = str(args.context_id or "").strip()
+    if not context_id:
+        raise ValueError("record-context-use requires --context-id")
+    timestamp = args.timestamp or to_iso(utc_now())
+    context_path = store.audit_context_dir / f"{context_id}.json"
+    context = read_json(context_path, {}) if context_path.exists() else {}
+    selected_memory_ids = [
+        str(item)
+        for item in context.get("selected_memory_ids", [])
+        if str(item).strip()
+    ] if isinstance(context, dict) else []
+    selected_learned_context_ids = []
+    if isinstance(context, dict):
+        for item in context.get("selected_learned_context_items", []):
+            if isinstance(item, dict) and str(item.get("record_id") or "").strip():
+                selected_learned_context_ids.append(str(item["record_id"]))
+    selected_automation_record_ids: list[str] = []
+    used_memory_ids = [str(item).strip() for item in (args.used_memory_id or []) if str(item).strip()]
+    if args.memory_use_state == "used" and not used_memory_ids:
+        used_memory_ids = selected_memory_ids
+    unknown_used = sorted(set(used_memory_ids) - set(selected_memory_ids))
+    if unknown_used and context:
+        raise ValueError(
+            "used memory id(s) were not selected in this context: " + ", ".join(unknown_used)
+        )
+    reporting_agent = _resolve_reporting_agent(args)
+    usage_id = stable_id(
+        "context-use",
+        context_id,
+        timestamp,
+        args.memory_use_state,
+        ",".join(used_memory_ids),
+        reporting_agent.get("agent_id", "unknown"),
+    )
+    payload = {
+        "usage_id": usage_id,
+        "context_id": context_id,
+        "timestamp": timestamp,
+        "workspace": str(store.workspace),
+        "memory_use_state": args.memory_use_state,
+        "selected_memory_ids": selected_memory_ids,
+        "selected_learned_context_ids": selected_learned_context_ids,
+        "selected_automation_record_ids": selected_automation_record_ids,
+        "used_memory_ids": used_memory_ids,
+        "usage_note": args.usage_note or "",
+        "visible_attestation": args.visible_attestation or "",
+        "retrieval_query": str(context.get("profile", {}).get("query", "") if isinstance(context, dict) else ""),
+        "reporting_agent": reporting_agent,
+        "source": "record-context-use",
+        "cli_output_version": CLI_JSON_VERSION,
+    }
+    path = store.write_context_use_audit(usage_id, payload)
+    return {
+        "status": "recorded",
+        "usage_id": usage_id,
+        "context_id": context_id,
+        "memory_use_state": args.memory_use_state,
+        "used_memory_ids": used_memory_ids,
+        "path": str(path.relative_to(store.workspace)),
+        "cli_output_version": CLI_JSON_VERSION,
+    }
 
 
 def _env_first(*keys: str) -> str | None:
@@ -2018,6 +2085,30 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(prepare_context_parser)
     add_store_group_arguments(prepare_context_parser)
     prepare_context_parser.set_defaults(func=command_prepare_context)
+
+    record_context_use_parser = subparsers.add_parser(
+        "record-context-use",
+        help="Record audit-only acknowledgement of how an agent used prepared memory context",
+    )
+    record_context_use_parser.add_argument("--workspace", required=True)
+    record_context_use_parser.add_argument("--context-id", required=True)
+    record_context_use_parser.add_argument(
+        "--memory-use-state",
+        choices=["used", "checked-none", "ignored", "unknown", "conflicted", "stale"],
+        required=True,
+    )
+    record_context_use_parser.add_argument("--used-memory-id", action="append", default=[])
+    record_context_use_parser.add_argument("--usage-note")
+    record_context_use_parser.add_argument("--visible-attestation")
+    record_context_use_parser.add_argument("--timestamp")
+    record_context_use_parser.add_argument("--agent-id", default="unknown")
+    record_context_use_parser.add_argument("--agent-label", default="Unknown")
+    record_context_use_parser.add_argument("--agent-runtime")
+    record_context_use_parser.add_argument("--agent-adapter-id")
+    record_context_use_parser.add_argument("--agent-model-id")
+    record_context_use_parser.add_argument("--agent-model-version")
+    add_layout_arguments(record_context_use_parser)
+    record_context_use_parser.set_defaults(func=command_record_context_use)
 
     status_parser = subparsers.add_parser("status", help="Primary: summarize activation, drift, and runtime health")
     status_parser.add_argument("--workspace", required=True)

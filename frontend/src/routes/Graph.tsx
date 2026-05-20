@@ -23,16 +23,24 @@ import { IdLink } from '~/components/IdLink';
 import { cachedFetch } from '~/lib/cache';
 
 type LayoutMode = 'hierarchical' | 'force';
-type NodeType = 'memory' | 'review' | 'run' | 'retrieval';
+type NodeType = 'memory' | 'review' | 'run' | 'retrieval' | 'context' | 'context_use';
 
 const NODE_TYPE_COLORS: Record<NodeType | string, string> = {
   memory: '#6366f1',
   review: '#f59e0b',
   run: '#10b981',
   retrieval: '#3b82f6',
+  context: '#14b8a6',
+  context_use: '#f97316',
 };
 
 const EDGE_KINDS = [
+  'selected_by',
+  'selected_for_context',
+  'acknowledges_context',
+  'used_memory',
+  'applied_to',
+  'annotated_by',
   'supersedes',
   'conflicts_with',
   'supports',
@@ -41,7 +49,7 @@ const EDGE_KINDS = [
   'invalidated_by',
 ] as const;
 
-const NODE_TYPES: NodeType[] = ['memory', 'review', 'run', 'retrieval'];
+const NODE_TYPES: NodeType[] = ['memory', 'review', 'run', 'retrieval', 'context', 'context_use'];
 const DEPTH_OPTIONS = [0, 1, 2, 3];
 const LIMIT_OPTIONS = [24, 100, 500, 1000];
 
@@ -568,9 +576,11 @@ export default function GraphRoute(): JSX.Element {
                     t === 'run'
                       ? `/runs?id=${encodeURIComponent(n.id)}`
                       : t === 'retrieval'
-                      ? `/retrievals?id=${encodeURIComponent(n.id)}`
+                        ? `/retrievals?id=${encodeURIComponent(n.id)}`
+                      : t === 'context'
+                        ? `/context?id=${encodeURIComponent(n.id)}`
                       : t === 'review'
-                      ? `/reviews?id=${encodeURIComponent(n.id)}`
+                        ? `/reviews?id=${encodeURIComponent(n.id)}`
                       : null;
                   return (
                     <div class="flex flex-col gap-3 p-5">

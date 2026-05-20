@@ -163,6 +163,35 @@ def _content_tokens(query: str) -> set[str]:
     return tokenize(query) - STOPWORDS
 
 
+_PLACEHOLDER_QUERIES = {
+    "",
+    "<task>",
+    "current task",
+    "task",
+    "todo",
+    "your task",
+}
+
+
+def _placeholder_query_warning(query: str) -> dict[str, Any] | None:
+    normalized = " ".join(str(query or "").strip().lower().split())
+    if normalized not in _PLACEHOLDER_QUERIES:
+        return None
+    return {
+        "code": "placeholder_query",
+        "severity": "warning",
+        "message": (
+            "prepare-context query looks like a placeholder; "
+            "pass the actual task text for useful memory retrieval"
+        ),
+        "details": {
+            "query": query,
+            "recommended_env": "OPENDREAM_QUERY",
+            "strict_env": "OPENDREAM_QUERY_STRICT=1",
+        },
+    }
+
+
 def _context_profile(query: str, *, limit: int) -> dict[str, Any]:
     tokens = _content_tokens(query)
     semantic_query = semantic_tokens(query)
@@ -1104,6 +1133,33 @@ def prepare_context(
             "memory_ids": startup_index_only_ids,
         },
     }
+    selected_context_ids = [
+        *selected_ids,
+        *selected_learned_ids,
+        *[item["record_id"] for item in selected_automation],
+    ]
+    memory_use_contract = {
+        "context_id": context_id,
+        "usage_required": bool(selected_context_ids),
+        "visible_attestation_required": bool(selected_ids),
+        "selected_memory_ids": selected_ids,
+        "selected_learned_context_ids": selected_learned_ids,
+        "selected_automation_record_ids": [item["record_id"] for item in selected_automation],
+        "allowed_states": ["used", "checked-none", "ignored", "unknown", "conflicted", "stale"],
+        "audit_command": (
+            "opendream record-context-use --workspace <path> "
+            f"--context-id {context_id} --memory-use-state <state>"
+        ),
+        "visible_attestation_formats": {
+            "used": "OpenDream context used: <ids>",
+            "checked_none": "OpenDream context checked: none selected; reason=<empty_reason>",
+            "ignored": "OpenDream context ignored: not relevant; selected=<ids>",
+        },
+    }
+    warnings: list[dict[str, Any]] = []
+    placeholder_warning = _placeholder_query_warning(query)
+    if placeholder_warning is not None:
+        warnings.append(placeholder_warning)
 
     assembly = ContextAssembly(
         context_id=context_id,
@@ -1201,6 +1257,7 @@ def prepare_context(
             "saved_token_estimate": max((raw_character_count - injected_character_count) // 4, 0),
         },
         "prompt_context_visibility": prompt_context_visibility,
+        "memory_use_contract": memory_use_contract,
         "selected_memory_ids": selected_ids,
         "selected_learned_context_ids": selected_learned_ids,
         "selected_automation_record_ids": [item["record_id"] for item in selected_automation],
@@ -1222,5 +1279,6 @@ def prepare_context(
         "summary": summarize(query, 80),
         "empty_reason": empty_reason,
         "hints": hints,
+        "warnings": warnings,
         "cli_output_version": CLI_JSON_VERSION,
     }

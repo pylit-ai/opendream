@@ -171,6 +171,8 @@ class GraphEntityAssemblyTests(unittest.TestCase):
             [],
             [],
             [],
+            [],
+            [],
             relation_edges,
         )
         edge_tuples = {(edge["source"], edge["target"], edge["type"]) for edge in graph["edges"]}

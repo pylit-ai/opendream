@@ -600,6 +600,11 @@ export interface ContextRecord {
   created_at?: string;
   character_count?: number;
   selected_memory_ids_count?: number;
+  selected_memory_ids?: string[];
+  context_use_records?: ContextUseRecord[];
+  context_use_count?: number;
+  latest_memory_use_state?: string;
+  latest_context_use_id?: string;
   query?: string;
   selection?: Record<string, { candidate_count?: number; selected?: number }>;
   context_pruning?: {
@@ -618,6 +623,41 @@ export interface ContextListParams extends PageParams {
 
 export interface ContextListResponse {
   items: ContextRecord[];
+  total?: number;
+  [key: string]: unknown;
+}
+
+export interface ContextUseRecord {
+  usage_id: string;
+  context_id: string;
+  timestamp?: string;
+  memory_use_state?: string;
+  selected_memory_ids_count?: number;
+  used_memory_ids_count?: number;
+  used_memory_ids?: string[];
+  usage_note?: string;
+  visible_attestation?: string;
+  reporting_agent?: {
+    agent_id?: string;
+    agent_label?: string;
+    runtime?: string;
+    adapter_id?: string;
+    [key: string]: unknown;
+  };
+  reporting_agent_label?: string;
+  context_query?: string;
+  context_display_name?: string;
+  display_name?: string;
+  [key: string]: unknown;
+}
+
+export interface ContextUseListParams extends PageParams {
+  context_id?: string;
+  state?: string;
+}
+
+export interface ContextUseListResponse {
+  items: ContextUseRecord[];
   total?: number;
   [key: string]: unknown;
 }

@@ -6,6 +6,9 @@ import type {
   ContextListParams,
   ContextListResponse,
   ContextRecord,
+  ContextUseListParams,
+  ContextUseListResponse,
+  ContextUseRecord,
   DreamCoverageResponse,
   DreamCycle,
   DreamCycleListResponse,
@@ -183,6 +186,10 @@ export const getContext = (id: string) =>
   api<ContextRecord>(`/api/context/${encodeURIComponent(id)}`);
 export const getContexts = (params?: ContextListParams) =>
   api<ContextListResponse>(`/api/context${buildQuery(params as Record<string, unknown>)}`);
+export const getContextUse = (id: string) =>
+  api<ContextUseRecord>(`/api/context-use/${encodeURIComponent(id)}`);
+export const getContextUseRecords = (params?: ContextUseListParams) =>
+  api<ContextUseListResponse>(`/api/context-use${buildQuery(params as Record<string, unknown>)}`);
 
 export const getGraph = (params?: GraphParams) =>
   api<GraphPayload>(`/api/graph${buildQuery(params as Record<string, unknown>)}`);
