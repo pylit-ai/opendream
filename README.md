@@ -17,7 +17,7 @@
 
 ![OpenDream UI overview](./docs/assets/demos/ui/opendream-ui-overview.gif)
 
-The observability UI shows recent agent activity, selected memories, review decisions, and workspace health without making you read raw JSON first. Full light and dark demo cuts: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
+The observability UI shows recent agent activity, selected memories, context-use audit records, review decisions, and workspace health without making you read raw JSON first. Full light and dark demo cuts: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
 
 | If you want to… | Start here |
 |-----------------|------------|

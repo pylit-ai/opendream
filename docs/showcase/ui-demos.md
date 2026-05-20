@@ -19,6 +19,7 @@ These short recordings are the best first look at OpenDream's product surface. T
 | Pick up context | [MP4](../assets/demos/ui/light-pick-up-context.mp4) | [MP4](../assets/demos/ui/dark-pick-up-context.mp4) | Recent activity, memory health, and retrieval evidence when an agent returns to a workspace. |
 | Observability tour | [MP4](../assets/demos/ui/light-observability-tour.mp4) | [MP4](../assets/demos/ui/dark-observability-tour.mp4) | The main dashboard, memory surfaces, and workspace status without opening raw JSON. |
 | Agent context | [MP4](../assets/demos/ui/light-agent-context.mp4) | [MP4](../assets/demos/ui/dark-agent-context.mp4) | How OpenDream assembles prompt-ready context and exposes the source memories behind it. |
+| Context-use proof | [MP4](../assets/demos/ui/light-context-use-proof.mp4) / [WebM](../assets/demos/ui/light-context-use-proof.webm) | [MP4](../assets/demos/ui/dark-context-use-proof.mp4) / [WebM](../assets/demos/ui/dark-context-use-proof.webm) | How OpenDream distinguishes selected context from recorded memory use after an agent runs. |
 | Human review | [MP4](../assets/demos/ui/light-human-review.mp4) | [MP4](../assets/demos/ui/dark-human-review.mp4) | Review surfaces for checking, accepting, or rejecting memory updates before they become durable. |
 | Docs walkthrough | [MP4](../assets/demos/ui/light-docs-walkthrough.mp4) | [MP4](../assets/demos/ui/dark-docs-walkthrough.mp4) | How the docs connect setup, memory workflow, and observability for a new operator. |
 
@@ -28,4 +29,4 @@ The CLI recordings remain useful as documentation accompaniments when a reader n
 
 ## Source media
 
-The README embeds a GIF preview for broad compatibility. Full MP4 cuts live under `docs/assets/demos/ui/`.
+The README embeds a GIF preview for broad compatibility. Full MP4 cuts live under `docs/assets/demos/ui/`; the context-use proof cut also includes WebM alternatives for docs and social reuse.
