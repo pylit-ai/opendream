@@ -160,9 +160,9 @@ Corrections worth knowing:
 - **No first-party MCP server** in this repo; [`docs/mcp/servers.md`](./docs/mcp/servers.md) is a template for inventorying MCP, not a shipped server.
 
 <details>
-<summary><strong>Agent / spec cross-references</strong> (optional reading)</summary>
+<summary><strong>Agent and architecture references</strong> (optional reading)</summary>
 
-Human-facing behavior is described in this README and in [`AGENTS.md`](./AGENTS.md). Numbered trees under `specs/` are for **design traceability and tooling**, not required reading to use the CLI.
+Human-facing behavior is described in this README and in [`AGENTS.md`](./AGENTS.md). Machine-readable runtime contracts live under [`opendream/schema/`](./opendream/schema/).
 
 </details>
 
@@ -284,7 +284,7 @@ Built from the same on-disk artifacts as the runtime (read model is derived; fil
 
 Use OpenDream as an **activation-first runtime**:
 
-- Run **`init --activate-configured`** for the standard path when the repo already has Claude Code, Codex, or OpenClaw config.
+- Run **`init`** for the standard path; it creates the memory layout and activates detected/configured agent surfaces by default.
 - Run **`verify activation-capture`** after activation before claiming workspace setup is complete.
 - Run **`status`** for the single high-signal answer covering activation, drift, queue state, and runtime health.
 - Run **`activate --repair`** when `status` or `doctor` reports drift.
@@ -332,13 +332,14 @@ opendream doctor --workspace "$PWD" --surface agents
 Dream (explicit, bounded):
 
 ```bash
+opendream transcripts ingest --workspace "$PWD"
 opendream dream run \
   --workspace "$PWD" \
   --episodes tests/fixtures/transcript_only_dream.jsonl \
-  --compat-mode autodream
+  --compat-mode project-user
 
-opendream dream status --workspace "$PWD" --compat-mode autodream
-opendream dream tick --workspace "$PWD" --compat-mode autodream
+opendream dream status --workspace "$PWD" --compat-mode project-user
+opendream dream tick --workspace "$PWD" --compat-mode project-user
 opendream dream enqueue --workspace "$PWD" --episodes tests/fixtures/transcript_only_dream.jsonl
 opendream dream worker --workspace "$PWD" --once
 opendream dream daemon --workspace "$PWD" --interval-seconds 30 --max-polls 20
@@ -349,6 +350,12 @@ opendream service status --workspace "$PWD"
 opendream service doctor --workspace "$PWD"
 ```
 
+The observe UI's **Allow import and dream** action grants one-time browser
+consent to import detectable local transcripts before the first manual dream run
+when the transcript store is empty. The CLI keeps transcript ingest explicit so
+large local session stores are scanned only when the operator asks for that data
+import.
+
 Use `dream worker --once` for a single queue drain inside hooks, scripts, or CI. Use `dream daemon` when a supervisor should keep polling over time. `install-service` renders launchd or systemd manifests, persists worker heartbeat state under the memory root, and exposes `service start|stop|restart|status|doctor` as a first-party lifecycle path. The default backend stays managed for portable verification; use `--backend native` when you want best-effort launchd or systemd activation.
 For project workspaces, `workspace upgrade` and `semantic setup --apply` now
 ensure the managed background runtime by default so memory improvement does not
@@ -358,11 +365,15 @@ depend on manual runs. Use `service enable|disable` or the observe UI
 For supported configured agents, the standard operator path is:
 
 ```bash
-opendream init --workspace "$PWD" --activate-configured
+opendream init --workspace "$PWD"
 opendream status --workspace "$PWD"
 opendream activate --workspace "$PWD" --repair
 opendream deactivate --workspace "$PWD"
 ```
+
+Use `opendream init --workspace "$PWD" --no-activate-configured` only when
+you need a storage-only layout and do not want OpenDream to install repo-local
+agent activation surfaces.
 
 Semantic / hybrid dream mode (optional — extends **`dream run`** with the learned-context pipeline; config on disk under `<memory-root>/state/`):
 
@@ -402,7 +413,7 @@ The retrieval story is also semantic-first. `prepare-context` is expected to use
 Eval:
 
 ```bash
-opendream eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodream
+opendream eval dream-layout --workspace .tmp/dream-eval --compat-mode project-user
 opendream eval memory-quality --workspace .tmp/eval
 opendream eval performance --workspace .tmp/eval
 opendream eval semantic-benchmark --workspace .tmp/eval --mode hybrid
@@ -412,7 +423,7 @@ Eval commands print JSON to stdout; if the report includes `"status": "failed"`,
 
 **`eval performance`** — **hermetic:** uses an **isolated** empty memory store (same `--memory-dir` / `--compat-mode` as you pass in) so existing durable memory in your workspace cannot skew the scorecard; the JSON `workspace` field is still your `--workspace` path for context.
 
-**`eval dream-fidelity`** — **state- and compat-sensitive:** reuses the store at `--workspace` and checks AutoDream-style **`compatibility_views`** (`project.md` / `user.md` under the active memory root). Running `demo` in **canonical** mode then `eval dream-fidelity` without a matching `--compat-mode autodream` (and the same `--memory-dir`) can fail that check; use a fresh workspace or align flags. On failure, stderr adds a **`failing checks: …`** summary (and extra guidance when `compatibility_views` fails); stdout JSON is unchanged.
+**`eval dream-layout`** — **state- and layout-sensitive:** reuses the store at `--workspace` and checks project/user **`compatibility_views`** (`project.md` / `user.md` under the active memory root). Running `demo` in **canonical** mode then `eval dream-layout` without a matching `--compat-mode project-user` (and the same `--memory-dir`) can fail that check; use a fresh workspace or align flags. On failure, stderr adds a **`failing checks: ...`** summary (and extra guidance when `compatibility_views` fails); stdout JSON is unchanged.
 
 **`eval memory-quality`** — **mutating / not hermetic:** replays a packaged fixture into the **current** store (`emit-event` + `maintain`), then scores retrieval. Prior state (e.g. after `demo`) can make titles **contested** or create **duplicate** actives so the eval fails; use a **fresh workspace** when you want a clean CI-style verdict. On failure, stderr summarizes **duplicate/contested** context when present plus this “use a fresh workspace” hint.
 
@@ -436,7 +447,7 @@ Cron example:
 
 By default, durable memory artifacts live under **`.opendream/memory/`** (so a repo-root `memory/` folder stays free for other tools). If `memory/state/store.json` already exists from an older layout, that tree is used automatically until you migrate. Use `--memory-dir <relative-path>` to pin a custom location; planner plans, verifier reports, dream queue state, and worker audits live under the same memory root.
 
-Activation and compressed-status metadata (for the standard `init --activate-configured` / `status` path) persist under **`.opendream/`** at the workspace root — notably `targets.json` and `activation-state.json`. Add `.opendream/` to `.gitignore` if you do not want those files committed.
+Activation and compressed-status metadata (for the standard `init` / `status` path) persist under **`.opendream/`** at the workspace root — notably `targets.json` and `activation-state.json`. Add `.opendream/` to `.gitignore` if you do not want those files committed.
 
 ---
 
@@ -449,7 +460,7 @@ Activation and compressed-status metadata (for the standard `init --activate-con
 | [docs/automation/dream-task-playbook.md](./docs/automation/dream-task-playbook.md) | Automation and recurring memory tasks |
 | [docs/architecture/overview.md](./docs/architecture/overview.md) | Architecture overview |
 | [docs/benchmarks/methodology.md](./docs/benchmarks/methodology.md) | Benchmark methodology |
-| [docs/claims.md](./docs/claims.md) | Evidence-backed public claims |
+| [docs/claims.md](./docs/claims.md) | Evidence-backed claims |
 | [KNOWN_LIMITATIONS.md](./KNOWN_LIMITATIONS.md) | Known limitations |
 | [SECURITY.md](./SECURITY.md) | Security policy |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Contributor guide |
@@ -587,8 +598,8 @@ opendream prepare-context --workspace "$PWD" --query "your task"
 |------|----------|
 | `opendream/` | Runtime: events, candidates, consolidation, retrieval, storage |
 | `tests/` | Fixture-driven integration and validation |
-| `specs/` | Canonical implementation spec tree |
-| `docs/` | Architecture and governance |
+| `opendream/schema/` | Machine-readable runtime contracts |
+| `docs/` | Architecture, governance, and user-facing guides |
 
 Optional, **non-normative** framework examples may live under `.meta/spec-adapters/` (see [`AGENTS.md`](./AGENTS.md)). They are not part of the packaged product API; `scripts/check_adapters.py` keeps example paths and documented CLI strings consistent.
 
@@ -604,8 +615,8 @@ Authoritative when the scripted gate passes; report at `.tmp/verification/verifi
 | `make lint` | Ruff (`scripts/lint.py`) |
 | `make typecheck` | mypy on `opendream` and `scripts` |
 | `make test` | Unit tests |
-| `make verify` | Lint, typecheck, tests, `eval dream-fidelity` (fresh temp workspace), `scripts/check_adapters.py`, packaging smoke |
-| `make release-check` | Release gate: artifacts, clean venv install, `dream run`, `eval dream-fidelity`, verification replay |
+| `make verify` | Lint, typecheck, tests, `eval dream-layout` (fresh temp workspace), `scripts/check_adapters.py`, packaging smoke |
+| `make release-check` | Release gate: artifacts, clean venv install, `dream run`, `eval dream-layout`, verification replay |
 
 `make release-check` also writes `.tmp/release-check/release_manifest.json` and `release_summary.md`.
 
@@ -646,7 +657,7 @@ opendream maintain --workspace .tmp/workspace
 opendream dream run --workspace .tmp/workspace --episodes tests/fixtures/transcript_only_dream.jsonl
 opendream dream status --workspace .tmp/workspace
 opendream dream tick --workspace .tmp/workspace --episodes tests/fixtures/transcript_only_dream.jsonl
-opendream eval dream-fidelity --workspace .tmp/dream-eval --compat-mode autodream
+opendream eval dream-layout --workspace .tmp/dream-eval --compat-mode project-user
 opendream eval memory-quality --workspace .tmp/eval
 opendream prepare-context --workspace .tmp/workspace --query "package manager and workflow"
 opendream prepare-context --workspace .tmp/workspace --query "package manager and workflow" --include-global --global-workspace ~/.opendream-global

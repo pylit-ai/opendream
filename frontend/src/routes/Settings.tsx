@@ -66,8 +66,44 @@ function readinessTone(s: string | undefined): 'ok' | 'warn' | 'danger' | 'neutr
   return 'neutral';
 }
 
-const MODE_OPTIONS = ['auto', 'full', 'lite', 'disabled'] as const;
+const MODE_OPTIONS = ['deterministic', 'semantic', 'hybrid'] as const;
 type SemanticMode = (typeof MODE_OPTIONS)[number];
+const TRANSCRIPT_IMPORT_CONSENT_KEY = 'opendream.transcriptImportConsent.v1';
+
+function loadTranscriptImportConsent(): boolean {
+  try {
+    return window.localStorage.getItem(TRANSCRIPT_IMPORT_CONSENT_KEY) === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+function saveTranscriptImportConsent(): void {
+  try {
+    window.localStorage.setItem(TRANSCRIPT_IMPORT_CONSENT_KEY, 'granted');
+  } catch {
+    // Local storage can be unavailable in restricted browser contexts.
+  }
+}
+
+const MODE_COPY: Record<SemanticMode, { label: string; help: string }> = {
+  deterministic: {
+    label: 'Deterministic',
+    help: 'Runs the baseline deterministic dream pipeline without semantic learned-context synthesis.',
+  },
+  semantic: {
+    label: 'Semantic',
+    help: 'Runs the semantic learned-context dream pipeline.',
+  },
+  hybrid: {
+    label: 'Hybrid',
+    help: 'Runs deterministic dream processing with semantic learned-context support.',
+  },
+};
+
+function normalizeSemanticMode(value: unknown): SemanticMode {
+  return MODE_OPTIONS.includes(value as SemanticMode) ? (value as SemanticMode) : 'deterministic';
+}
 
 function ReadinessSection(props: { overview: OverviewPayload | undefined }): JSX.Element {
   const rd = () => readinessOf(props.overview);
@@ -478,10 +514,21 @@ function RetentionSettings(props: { overview: SettingsPayload | undefined; onAft
 
 function AdvancedTab(props: { overview: OverviewPayload | undefined; onRefetch: () => void }): JSX.Element {
   const rd = () => readinessOf(props.overview);
-  const currentMode = (): SemanticMode => (rd()?.mode as SemanticMode) ?? 'auto';
+  const currentMode = (): SemanticMode => {
+    const overview = props.overview as
+      | (OverviewPayload & { dream_mode?: unknown; semantic_config?: { mode?: unknown } })
+      | undefined;
+    return normalizeSemanticMode(
+      overview?.dream_mode ?? overview?.semantic_config?.mode ?? rd()?.mode,
+    );
+  };
   const [mode, setMode] = createSignal<SemanticMode>(currentMode());
   const [saving, setSaving] = createSignal(false);
   const [saveMsg, setSaveMsg] = createSignal('');
+
+  createEffect(() => {
+    setMode(currentMode());
+  });
 
   async function handleSave() {
     setSaving(true);
@@ -500,19 +547,39 @@ function AdvancedTab(props: { overview: OverviewPayload | undefined; onRefetch: 
   return (
     <div class="flex flex-col gap-5">
       <div class="flex flex-col gap-2">
-        <div class="text-xs font-medium text-text">Semantic dream mode</div>
+        <div class="inline-flex items-center gap-1 text-xs font-medium text-text">
+          Semantic dream mode
+          <Tooltip openDelay={250} closeDelay={0}>
+            <Tooltip.Trigger
+              as="button"
+              type="button"
+              class="inline-flex h-4 w-4 items-center justify-center rounded-sm text-text-subtle hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+              aria-label="Semantic dream mode definitions"
+            >
+              <Info size={12} />
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content class="z-50 max-w-xs rounded-md bg-surface-elevated px-2 py-1 text-[11px] leading-4 text-text shadow-[var(--shadow-elevated)] hairline">
+                Deterministic is the baseline pipeline. Semantic uses learned-context synthesis.
+                Hybrid combines deterministic processing with semantic support.
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip>
+        </div>
         <div class="inline-flex items-center gap-px rounded-md bg-surface p-0.5 hairline w-fit">
           {MODE_OPTIONS.map((m) => (
             <button
               type="button"
               onClick={() => setMode(m)}
-              class={`rounded px-3 py-1 text-xs transition-colors duration-150 ${
+              aria-pressed={mode() === m}
+              title={MODE_COPY[m].help}
+              class={`rounded px-3 py-1 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
                 mode() === m
-                  ? 'bg-surface-elevated text-text'
-                  : 'text-text-muted hover:text-text'
+                  ? 'bg-accent text-accent-fg shadow-sm ring-1 ring-accent/60'
+                  : 'text-text-muted hover:bg-surface-elevated hover:text-text'
               }`}
             >
-              {m}
+              {MODE_COPY[m].label}
             </button>
           ))}
         </div>
@@ -561,16 +628,24 @@ function DreamControls(props: { onAfter: () => void }): JSX.Element {
   const [dream, setDream] = createSignal<DreamRunResult | null>(null);
   const [ingest, setIngest] = createSignal<TranscriptsIngestResult | null>(null);
   const [err, setErr] = createSignal<string | null>(null);
+  const [transcriptImportConsented, setTranscriptImportConsented] = createSignal(loadTranscriptImportConsent());
 
   async function trigger(action: 'full' | 'semantic' | 'hybrid' | 'ingest') {
     setBusy(action);
     setErr(null);
     try {
       if (action === 'ingest') {
+        saveTranscriptImportConsent();
+        setTranscriptImportConsented(true);
         const r = await ingestTranscripts(false);
         setIngest(r);
       } else {
-        const r = await runDream(action);
+        const autoIngestTranscripts = transcriptImportConsented() || action === 'full';
+        if (autoIngestTranscripts && !transcriptImportConsented()) {
+          saveTranscriptImportConsent();
+          setTranscriptImportConsented(true);
+        }
+        const r = await runDream(action, { autoIngestTranscripts });
         setDream(r);
       }
       props.onAfter();
@@ -585,16 +660,17 @@ function DreamControls(props: { onAfter: () => void }): JSX.Element {
     <div class="flex flex-col gap-3">
       <div class="text-xs font-medium text-text">Dream + ingest</div>
       <p class="text-[11.5px] text-text-muted">
-        Force a dream cycle or pull in fresh agent session transcripts without
-        dropping to the CLI. Ingest auto-detect currently supports Claude Code (
+        Import detectable local agent session transcripts or force a dream cycle
+        without dropping to the CLI. First import grants one-time browser consent
+        to scan local agent transcript locations. Ingest auto-detects Claude Code (
         <code class="mx-1 rounded bg-surface-elevated px-1 font-mono text-[11px]">
           ~/.claude/projects/&lt;slug&gt;
         </code>
-        ). Codex, Cursor, Gemini, and GitHub Copilot can be imported with{' '}
+        ) and Codex (
         <code class="mx-1 rounded bg-surface-elevated px-1 font-mono text-[11px]">
-          opendream transcripts ingest --from &lt;path&gt;
+          ~/.codex/sessions
         </code>
-        .
+        ).
       </p>
       <div class="flex flex-wrap items-center gap-2">
         <button
@@ -611,7 +687,7 @@ function DreamControls(props: { onAfter: () => void }): JSX.Element {
           onClick={() => void trigger('full')}
           class="rounded-md bg-accent px-3 py-1.5 text-[11.5px] font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
         >
-          {busy() === 'full' ? 'Dreaming…' : 'Dream now (full)'}
+          {busy() === 'full' ? 'Dreaming…' : transcriptImportConsented() ? 'Import and dream' : 'Allow import and dream'}
         </button>
         <button
           type="button"
@@ -657,7 +733,9 @@ function DreamControls(props: { onAfter: () => void }): JSX.Element {
                 : r().reason ?? null;
           const explainer = idle
             ? r().reason === 'no-episodes'
-              ? 'No agent transcripts to consume yet. Click "Ingest transcripts" or run more agent sessions.'
+              ? r().auto_ingest_required
+                ? 'Use Allow import and dream or Ingest transcripts to grant one-time local transcript import consent.'
+                : 'No detectable local transcripts were found. Run more agent sessions or import an explicit transcript source.'
               : 'Pipeline ran and found nothing new — healthy idle state. New events appear once agents generate fresh sessions.'
             : null;
           return (

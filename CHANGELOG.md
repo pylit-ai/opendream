@@ -1,10 +1,16 @@
 # Changelog
 
+## 0.3.16 - 2026-05-29
+
+- Add one-time observe UI consent before importing detectable local agent transcripts.
+- Keep dream-run transcript auto-import fail-closed unless the request carries explicit transcript import consent.
+- Keep configured agent activation on by default during workspace initialization while preserving storage-only opt-out.
+
 ## 0.3.5 - 2026-05-11
 
-- Add public launch-readiness gates for clean-room provenance, vendored assets, release evidence, no-network defaults, CLI golden paths, and supply-chain baseline.
-- Add public-safe release criteria, limitations, claims matrix, contribution templates, and security/telemetry policy.
-- Remove generated agent planning artifacts from public docs and keep local launch metadata excluded from publishable content.
+- Add release-readiness gates for clean-room provenance, vendored assets, release evidence, no-network defaults, CLI golden paths, and supply-chain baseline.
+- Add release-safe criteria, limitations, claims matrix, contribution templates, and security/telemetry policy.
+- Remove generated agent planning artifacts from docs and keep local launch metadata excluded from publishable content.
 
 ## 0.3.3 - 2026-05-08
 
@@ -34,7 +40,7 @@
 - **Claude scheduled-task adapter**: Delegates semantic refresh to Claude as a scheduled task. Results return via validated delegated semantic envelopes.
 - **Cursor automation adapter**: Delegates semantic refresh to a Cursor Automation. Results return via validated delegated semantic envelopes.
 - **Delegated envelope ingest**: `opendream semantic ingest --workspace . --scan-inbox` validates and ingests delegated envelopes through the standard verify-promote pipeline. Invalid envelopes are archived with failure reasons.
-- **Unsupported path guardrails**: Gemini CLI OAuth reuse is explicitly unsupported and never recommended. Public/untrusted CI contexts never default to account-backed mode.
+- **Unsupported path guardrails**: Gemini CLI OAuth reuse is explicitly unsupported and never recommended. Shared or untrusted CI contexts never default to account-backed mode.
 - **New schemas**: `semantic-adapter-manifest`, `semantic-adapter-status`, `semantic-setup-report`, `delegated-semantic-envelope`, `semantic-execution-policy`.
 - **ADRs**: ADR-012 (semantic auth/execution matrix), ADR-013 (delegated semantic ingest model).
 - **Docs**: README, FAQ, coding-agents, and architecture docs updated with explicit auth/execution matrix. Docs distinguish direct-provider vs vendor-delegated execution.
@@ -43,7 +49,7 @@
 
 - Activation and service management (compressed zero-touch UX, memory management hooks).
 - README and CLI updates for `dream worker`, `dream enqueue`, and integration model.
-- CLI UX polish (spec `431-cli-ux-polish`): actionable hints on bare invocation, non-zero exit when `eval` JSON status is `failed`, explicit `no-episodes` results for `dream run` / `dream enqueue`, clearer `dream worker` vs `dream daemon` help; verify uses a clean workspace for dream-fidelity.
+- CLI UX polish (spec `431-cli-ux-polish`): actionable hints on bare invocation, non-zero exit when `eval` JSON status is `failed`, explicit `no-episodes` results for `dream run` / `dream enqueue`, clearer `dream worker` vs `dream daemon` help; verify uses a clean workspace for dream-layout.
 
 ## 0.1.0 - 2026-03-26
 - initial local-first memory subsystem runtime

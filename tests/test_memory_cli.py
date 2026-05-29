@@ -261,7 +261,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
     def test_no_subcommand_error_includes_next_step_hint(self) -> None:
         completed = run_cli_raw(check=False)
         self.assertEqual(completed.returncode, 2)
-        self.assertIn('opendream init --workspace "$PWD" --activate-configured', completed.stderr)
+        self.assertIn('opendream init --workspace "$PWD"', completed.stderr)
         self.assertIn('opendream status --workspace "$PWD"', completed.stderr)
 
     def test_bootstrap_index_stages_without_topic_writes(self) -> None:
@@ -781,7 +781,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn("used", contract["allowed_states"])
 
     def test_prepare_context_warns_on_placeholder_query(self) -> None:
-        run_cli("init", "--workspace", str(self.workspace))
+        run_cli("init", "--workspace", str(self.workspace), "--no-activate-configured")
         context = run_cli(
             "prepare-context",
             "--workspace",
@@ -1771,7 +1771,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
         )
         self.assertEqual(result["status"], "completed")
         memory_root = self.workspace / ".dream-memory"
@@ -1853,7 +1853,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
         )
         first = run_cli(
             "dream",
@@ -1867,7 +1867,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
         )
         second = run_cli(
             "dream",
@@ -1881,7 +1881,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
         )
         self.assertEqual(first["queue_depth"], 1)
         self.assertEqual(second["queue_depth"], 2)
@@ -1906,7 +1906,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
             "--now",
             FIXED_NOW,
             "--once",
@@ -1921,7 +1921,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
             "--now",
             "2026-03-26T12:02:00Z",
             "--once",
@@ -1954,7 +1954,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
         )
         transcript_dir = self.workspace / ".dream-memory" / "state" / "transcripts"
         transcript_dir.mkdir(parents=True, exist_ok=True)
@@ -1978,7 +1978,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
             "--now",
             FIXED_NOW,
             "--min-interval-seconds",
@@ -1992,7 +1992,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
             "--now",
             "2026-03-26T12:00:10Z",
             "--min-interval-seconds",
@@ -2494,10 +2494,10 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn(expected_ver, completed.stdout)
         self.assertTrue(completed.stdout.strip().startswith("opendream "))
 
-    def test_eval_dream_fidelity_failure_stderr_hint(self) -> None:
+    def test_eval_dream_layout_failure_stderr_hint(self) -> None:
         completed = run_cli_raw(
             "eval",
-            "dream-fidelity",
+            "dream-layout",
             "--workspace",
             str(self.workspace),
             "--now",
@@ -2511,7 +2511,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["status"], "failed")
         self.assertIn("failing checks:", completed.stderr)
         self.assertIn("compatibility_views", completed.stderr)
-        self.assertIn("autodream", completed.stderr)
+        self.assertIn("project-user", completed.stderr)
 
     def test_contract_misplaced_workspace_prints_export_hint(self) -> None:
         completed = run_cli_raw("contract", "/tmp/opendream-contract-path-hint-test", check=False)
@@ -2524,10 +2524,10 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
         self.assertIn("gated", completed.stdout)
 
-    def test_eval_dream_fidelity_command(self) -> None:
+    def test_eval_dream_layout_command(self) -> None:
         result = run_cli(
             "eval",
-            "dream-fidelity",
+            "dream-layout",
             "--workspace",
             str(self.workspace),
             "--now",
@@ -2535,7 +2535,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             "--memory-dir",
             ".dream-memory",
             "--compat-mode",
-            "autodream",
+            "project-user",
         )
         self.assertEqual(result["status"], "passed")
         self.assertTrue(all(result["checks"].values()))
@@ -2838,18 +2838,29 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         self.assertIn("uv tool upgrade opendream", completed.stderr)
         self.assertIn('opendream workspace upgrade --workspace "$PWD"', completed.stderr)
 
-    def test_init_activate_configured_returns_activation_report(self) -> None:
+    def test_init_returns_activation_report_by_default(self) -> None:
         codex_config = self.workspace / ".codex" / "config.toml"
         codex_config.parent.mkdir(parents=True, exist_ok=True)
         codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
 
-        result = run_cli("init", "--workspace", str(self.workspace), "--activate-configured")
+        result = run_cli("init", "--workspace", str(self.workspace))
         self.assertEqual(result["status"], "initialized")
         self.assertEqual(result["activation"]["status"], "applied")
         self.assertTrue((self.workspace / "AGENTS.md").exists())
         self.assertTrue((self.workspace / ".opendream" / "agents.json").exists())
         self.assertTrue((self.workspace / ".opendream" / "targets.json").exists())
         self.assertTrue((self.workspace / ".opendream" / "activation-state.json").exists())
+
+    def test_init_no_activate_configured_only_initializes_layout(self) -> None:
+        codex_config = self.workspace / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+
+        result = run_cli("init", "--workspace", str(self.workspace), "--no-activate-configured")
+        self.assertEqual(result["status"], "initialized")
+        self.assertNotIn("activation", result)
+        self.assertFalse((self.workspace / "AGENTS.md").exists())
+        self.assertFalse((self.workspace / ".opendream" / "agents.json").exists())
 
     def test_codex_agents_hook_instructions_skip_missing_hooks(self) -> None:
         codex_config = self.workspace / ".codex" / "config.toml"
@@ -3091,7 +3102,7 @@ class MemoryCliIntegrationTests(unittest.TestCase):
         openclaw_config = self.workspace / ".openclaw" / "config.json"
         openclaw_config.parent.mkdir(parents=True, exist_ok=True)
         openclaw_config.write_text("{}", encoding="utf-8")
-        run_cli("init", "--workspace", str(self.workspace))
+        run_cli("init", "--workspace", str(self.workspace), "--no-activate-configured")
         report = run_cli("activate", "--workspace", str(self.workspace), "--targets", "all-supported")
         self.assertEqual(report["status"], "applied")
         kinds = {item["target_kind"] for item in report["targets"]}

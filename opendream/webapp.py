@@ -551,6 +551,15 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                 from .dream import dream_run
                 mode = str(payload.get("mode") or "").strip().lower() or None
                 episode_paths = sorted(self.store.transcripts_dir.glob("*.jsonl"))
+                ingest_result = None
+                auto_ingest_requested = bool(payload.get("auto_ingest_transcripts"))
+                if not episode_paths and auto_ingest_requested:
+                    from . import transcripts as _transcripts
+
+                    ingest_result = _transcripts.ingest_claude_for_workspace(
+                        self.store, overwrite=False
+                    )
+                    episode_paths = sorted(self.store.transcripts_dir.glob("*.jsonl"))
                 if mode in ("semantic", "hybrid"):
                     from .semantic_dreamer import semantic_dream_run
                     result = semantic_dream_run(
@@ -579,6 +588,16 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
                     "run_id": result.get("run_id"),
                     "trigger_class": result.get("trigger_class"),
                     "mode": mode or "full",
+                    "ingest": ingest_result,
+                    "auto_ingested_transcripts": bool(
+                        ingest_result and int(ingest_result.get("files_written") or 0) > 0
+                    ),
+                    "auto_ingest_required": bool(
+                        not auto_ingest_requested
+                        and result.get("status") == "skipped"
+                        and result.get("reason") == "no-episodes"
+                    ),
+                    "episode_files_consulted": len(episode_paths),
                 })
                 return
             elif parsed.path == "/api/transcripts/ingest":

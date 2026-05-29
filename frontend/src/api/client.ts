@@ -286,12 +286,22 @@ export interface DreamRunResult {
   trigger_class?: string;
   mode?: string;
   narrative?: string;
+  ingest?: TranscriptsIngestResult | null;
+  auto_ingested_transcripts?: boolean;
+  auto_ingest_required?: boolean;
+  episode_files_consulted?: number;
 }
 
-export const runDream = (mode?: 'full' | 'semantic' | 'hybrid') =>
+export const runDream = (
+  mode?: 'full' | 'semantic' | 'hybrid',
+  options?: { autoIngestTranscripts?: boolean },
+) =>
   api<DreamRunResult>('/api/dream/run', {
     method: 'POST',
-    body: JSON.stringify(mode ? { mode } : {}),
+    body: JSON.stringify({
+      ...(mode ? { mode } : {}),
+      ...(options?.autoIngestTranscripts ? { auto_ingest_transcripts: true } : {}),
+    }),
   });
 
 export interface TranscriptsIngestResult {

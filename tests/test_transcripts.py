@@ -25,6 +25,25 @@ class TranscriptIngestTests(unittest.TestCase):
         self.assertEqual(flattened["speaker"], "assistant")
         self.assertEqual(flattened["text"], "Use the dream dashboard.")
 
+    def test_flatten_codex_row_supports_response_item_payload_shape(self) -> None:
+        row = {
+            "timestamp": "2026-05-23T04:00:00Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Rerun the dream worker."}],
+            },
+        }
+
+        flattened = flatten_codex_row(row)
+
+        self.assertIsNotNone(flattened)
+        assert flattened is not None
+        self.assertEqual(flattened["timestamp"], "2026-05-23T04:00:00Z")
+        self.assertEqual(flattened["speaker"], "user")
+        self.assertEqual(flattened["text"], "Rerun the dream worker.")
+
     def test_ingest_codex_sessions_walks_well_known_nested_layout(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -54,3 +73,56 @@ class TranscriptIngestTests(unittest.TestCase):
             self.assertEqual(result["rows_out"], 1)
             written = list(store.transcripts_dir.glob("*.jsonl"))
             self.assertEqual(len(written), 1)
+
+    def test_ingest_codex_sessions_can_filter_by_workspace_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspace"
+            other_workspace = root / "other"
+            source = root / "codex" / "sessions" / "2026" / "05" / "23"
+            source.mkdir(parents=True)
+            workspace.mkdir()
+            other_workspace.mkdir()
+            store = MemoryStore(workspace)
+            store.initialize(store_kind="project")
+
+            def write_session(path: Path, cwd: Path, content: str) -> None:
+                path.write_text(
+                    json.dumps(
+                        {
+                            "timestamp": "2026-05-23T04:00:00Z",
+                            "type": "turn_context",
+                            "payload": {"cwd": str(cwd)},
+                        }
+                    )
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "timestamp": "2026-05-23T04:01:00Z",
+                            "type": "response_item",
+                            "payload": {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [{"type": "output_text", "text": content}],
+                            },
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+            write_session(source / "matching.jsonl", workspace, "MRH-local note.")
+            write_session(source / "other.jsonl", other_workspace, "Other workspace note.")
+
+            result = ingest_codex_sessions(
+                store,
+                root / "codex" / "sessions",
+                workspace_filter=workspace,
+            )
+
+            self.assertEqual(result["files_written"], 1)
+            self.assertEqual(result["files_filtered"], 1)
+            self.assertEqual(result["rows_out"], 1)
+            written = list(store.transcripts_dir.glob("*.jsonl"))
+            self.assertEqual(len(written), 1)
+            self.assertIn("MRH-local note.", written[0].read_text(encoding="utf-8"))

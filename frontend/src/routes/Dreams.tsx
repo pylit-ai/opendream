@@ -46,6 +46,23 @@ function reasonVariant(r: string | undefined): ChipVariant {
 
 const IDLE_REASONS = new Set(['no-episodes', 'insufficient-signal']);
 const SIGNAL_BUCKET_SIZE = 10;
+const TRANSCRIPT_IMPORT_CONSENT_KEY = 'opendream.transcriptImportConsent.v1';
+
+function loadTranscriptImportConsent(): boolean {
+  try {
+    return window.localStorage.getItem(TRANSCRIPT_IMPORT_CONSENT_KEY) === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+function saveTranscriptImportConsent(): void {
+  try {
+    window.localStorage.setItem(TRANSCRIPT_IMPORT_CONSENT_KEY, 'granted');
+  } catch {
+    // Local storage can be unavailable in restricted browser contexts.
+  }
+}
 
 function isIdleReason(r: string | undefined): boolean {
   return r != null && IDLE_REASONS.has(r);
@@ -60,7 +77,7 @@ function reasonLabel(r: string | undefined): string {
 
 function reasonExplainer(r: string | undefined): string | null {
   if (r === 'no-episodes') {
-    return 'No agent transcripts available. Run "Ingest transcripts" to pull from ~/.claude/projects (or pass --from for Codex/Cursor/Gemini).';
+    return 'No agent transcripts are available yet. Use Allow import and dream or Ingest transcripts to grant one-time local transcript import consent.';
   }
   if (r === 'insufficient-signal') {
     return 'Dream completed but found no new content to consume. Pipeline is healthy and idle — it will produce new events once your agents generate fresh sessions.';
@@ -309,6 +326,7 @@ export default function DreamsRoute(): JSX.Element {
   );
   const [showAllPhases, setShowAllPhases] = createSignal(false);
   const phaseLimit = () => (showAllPhases() ? dreams().length : 5);
+  const [transcriptImportConsented, setTranscriptImportConsented] = createSignal(loadTranscriptImportConsent());
   const observedPhases = (): string[] => {
     const set = new Set<string>();
     for (const r of dreams()) {
@@ -323,9 +341,16 @@ export default function DreamsRoute(): JSX.Element {
     setErr(null);
     try {
       if (action === 'ingest') {
+        saveTranscriptImportConsent();
+        setTranscriptImportConsented(true);
         setLastIngest(await ingestTranscripts(false));
       } else {
-        setLastDream(await runDream(action));
+        const autoIngestTranscripts = transcriptImportConsented() || action === 'full';
+        if (autoIngestTranscripts && !transcriptImportConsented()) {
+          saveTranscriptImportConsent();
+          setTranscriptImportConsented(true);
+        }
+        setLastDream(await runDream(action, { autoIngestTranscripts }));
       }
       invalidate('runs');
       invalidate('overview');
@@ -735,7 +760,7 @@ export default function DreamsRoute(): JSX.Element {
             disabled={busy() !== null}
             onClick={() => void trigger('ingest')}
             class="rounded-md hairline px-3 py-1.5 text-[12px] text-text hover:bg-surface-elevated disabled:opacity-50"
-            title="Pull agent transcripts into transcripts/. Auto-detect currently supports Claude Code; Codex, Cursor, and Gemini can be ingested with `opendream transcripts ingest --from <path>`."
+            title="Grant one-time browser consent and pull detectable local agent transcripts into transcripts/."
           >
             {busy() === 'ingest' ? 'Ingesting…' : 'Ingest transcripts'}
           </button>
@@ -744,8 +769,9 @@ export default function DreamsRoute(): JSX.Element {
             disabled={busy() !== null}
             onClick={() => void trigger('full')}
             class="rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
+            title="First use grants local transcript import consent; later dream runs reuse that browser consent."
           >
-            {busy() === 'full' ? 'Dreaming…' : 'Dream now'}
+            {busy() === 'full' ? 'Dreaming…' : transcriptImportConsented() ? 'Import and dream' : 'Allow import and dream'}
           </button>
           <button
             type="button"
@@ -1093,7 +1119,7 @@ export default function DreamsRoute(): JSX.Element {
                 <EmptyState
                   icon={Moon}
                   title="No dream cycles yet"
-                  description="Click Dream now to force a cycle, or wait for the runtime to schedule one."
+                  description="Import detectable local transcripts and run the first dream cycle."
                 />
               }
             />

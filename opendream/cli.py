@@ -92,6 +92,8 @@ from .verification import verify_activation_capture
 
 COMPACT_CONTEXT_BUDGET_BYTES = 32768
 
+VALID_COMPAT_MODES = {"canonical", "project-user", "autodream"}
+
 ACTIVATION_TARGETS_HELP = (
     "configured | all-detected | all-supported | <adapter-id> "
     f"(built-in ids: {', '.join(SUPPORTED_TARGETS)}; "
@@ -105,7 +107,7 @@ def build_server(*args: Any, **kwargs: Any) -> Any:
     return _build_server(*args, **kwargs)
 
 TOP_LEVEL_EXAMPLES = """Examples:
-  opendream init --workspace "$PWD" --activate-configured
+  opendream init --workspace "$PWD"
   opendream status --workspace "$PWD"
   opendream activate --workspace "$PWD" --repair
   opendream repair --workspace "$PWD"
@@ -161,7 +163,7 @@ class OpenDreamArgumentParser(argparse.ArgumentParser):
 def _error_hint(prog: str, message: str) -> str | None:
     if prog == "opendream" and "required: command" in message:
         return (
-            "try `opendream init --workspace \"$PWD\" --activate-configured` or "
+            "try `opendream init --workspace \"$PWD\"` or "
             "`opendream status --workspace \"$PWD\"`; use `opendream -h` "
             "for the full command tree"
         )
@@ -215,9 +217,15 @@ def resolve_episode_paths(store: MemoryStore, paths: list[str] | None) -> list[P
     return sorted(store.transcripts_dir.glob("*.jsonl"))
 
 
+def parse_compat_mode(value: str) -> str:
+    if value not in VALID_COMPAT_MODES:
+        raise argparse.ArgumentTypeError("expected one of: canonical, project-user")
+    return value
+
+
 def add_layout_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--memory-dir", help="Relative directory under the workspace for memory artifacts")
-    parser.add_argument("--compat-mode", choices=["canonical", "autodream"], default=None)
+    parser.add_argument("--compat-mode", type=parse_compat_mode, metavar="MODE", default=None)
 
 
 def add_service_arguments(parser: argparse.ArgumentParser) -> None:
@@ -1207,10 +1215,10 @@ def command_eval_dream_fidelity(args: argparse.Namespace) -> dict[str, Any]:
     store = build_store(
         args.workspace,
         memory_dir=args.memory_dir,
-        compat_mode=args.compat_mode or "autodream",
+        compat_mode=args.compat_mode or "project-user",
     )
     if not store.is_initialized():
-        store.initialize(store_kind="project", compat_mode=args.compat_mode or "autodream")
+        store.initialize(store_kind="project", compat_mode=args.compat_mode or "project-user")
     fixture_path = Path(args.fixture) if args.fixture else None
     return run_dream_fidelity_eval(store, fixture_path=fixture_path, now=args.now)
 
@@ -1822,11 +1830,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = subparsers.add_parser(
         "init",
-        help="Primary: create the memory layout and optionally activate configured agents",
+        help="Primary: create the memory layout and activate configured agents",
     )
     init_parser.add_argument("--workspace", required=True)
     init_parser.add_argument("--store-kind", choices=sorted(VALID_STORE_KINDS), default="project")
-    init_parser.add_argument("--activate-configured", action="store_true")
+    init_parser.add_argument(
+        "--activate-configured",
+        dest="activate_configured",
+        action="store_true",
+        default=True,
+        help="Activate configured agents during init (default; kept for compatibility)",
+    )
+    init_parser.add_argument(
+        "--no-activate-configured",
+        dest="activate_configured",
+        action="store_false",
+        help="Only create the memory layout; do not install agent activation surfaces",
+    )
     add_layout_arguments(init_parser)
     init_parser.set_defaults(func=command_init)
 
@@ -1914,14 +1934,23 @@ def build_parser() -> argparse.ArgumentParser:
     verify_memory_parser.set_defaults(func=command_eval_memory_quality, result_failure_statuses=("failed",))
 
     verify_dream_parser = verify_subparsers.add_parser(
-        "dream-fidelity",
-        help="Verify transcript-native dream fidelity checks",
+        "dream-layout",
+        help="Verify transcript-native memory layout checks",
     )
     verify_dream_parser.add_argument("--workspace", required=True)
     verify_dream_parser.add_argument("--fixture")
     verify_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(verify_dream_parser)
     verify_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
+    legacy_verify_dream_parser = verify_subparsers.add_parser(
+        "dream-fidelity",
+        help=argparse.SUPPRESS,
+    )
+    legacy_verify_dream_parser.add_argument("--workspace", required=True)
+    legacy_verify_dream_parser.add_argument("--fixture")
+    legacy_verify_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(legacy_verify_dream_parser)
+    legacy_verify_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
 
     verify_performance_parser = verify_subparsers.add_parser(
         "performance",
@@ -2327,7 +2356,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     eval_parser = subparsers.add_parser(
         "eval",
-        help="Run machine-readable quality and fidelity evaluations",
+        help="Run machine-readable quality and layout evaluations",
     )
     eval_subparsers = eval_parser.add_subparsers(dest="eval_command", required=True)
     eval_memory_parser = eval_subparsers.add_parser(
@@ -2347,13 +2376,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(eval_memory_parser)
     eval_memory_parser.set_defaults(func=command_eval_memory_quality, result_failure_statuses=("failed",))
     eval_dream_parser = eval_subparsers.add_parser(
-        "dream-fidelity",
-        help="Run transcript-native dream fidelity checks",
+        "dream-layout",
+        help="Run transcript-native memory layout checks",
         description=(
-            "Runs the packaged transcript fixture and checks AutoDream-style compatibility views among other signals. "
+            "Runs the packaged transcript fixture and checks project/user compatibility views among other signals. "
             "Uses the workspace you pass in: an existing store keeps its layout (e.g. `demo` without `--compat-mode "
-            "autodream` leaves canonical mode, so compatibility_views may fail). Prefer a fresh workspace or pass "
-            "`--compat-mode autodream` consistently (and the same `--memory-dir`) for green runs."
+            "project-user` leaves canonical mode, so compatibility_views may fail). Prefer a fresh workspace or pass "
+            "`--compat-mode project-user` consistently (and the same `--memory-dir`) for green runs."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -2362,6 +2391,16 @@ def build_parser() -> argparse.ArgumentParser:
     eval_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(eval_dream_parser)
     eval_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
+    legacy_eval_dream_parser = eval_subparsers.add_parser(
+        "dream-fidelity",
+        help=argparse.SUPPRESS,
+        description=argparse.SUPPRESS,
+    )
+    legacy_eval_dream_parser.add_argument("--workspace", required=True)
+    legacy_eval_dream_parser.add_argument("--fixture")
+    legacy_eval_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(legacy_eval_dream_parser)
+    legacy_eval_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
     eval_performance_parser = eval_subparsers.add_parser(
         "performance",
         help="Run composite performance evaluation with scorecard",
@@ -2862,7 +2901,8 @@ def _dream_fidelity_failure_hint(result: dict[str, Any]) -> str | None:
     if "compatibility_views" in failed:
         msg += (
             ". For compatibility_views, `project.md` and `user.md` must exist under the active memory root "
-            "(legacy compatibility layout). Use `--compat-mode autodream` consistently with `demo`/init, the same "
+            "(project/user compatibility layout). Use `--compat-mode project-user` consistently with "
+            "`demo`/init, the same "
             "`--memory-dir`, or a fresh workspace."
         )
     return msg

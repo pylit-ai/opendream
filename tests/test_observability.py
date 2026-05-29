@@ -7,6 +7,7 @@ import time
 import unittest
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 from opendream.integration import archive_stale_learned_context, emit_event, maintain, prepare_context
 from opendream.models import ContextAssembly
@@ -93,6 +94,63 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         )
         with urllib.request.urlopen(request) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def test_dream_run_requires_transcript_import_consent_when_store_is_empty(self) -> None:
+        payload = self.post_json("/api/dream/run", {})
+
+        self.assertEqual(payload["status"], "skipped")
+        self.assertEqual(payload["reason"], "no-episodes")
+        self.assertIsNone(payload["ingest"])
+        self.assertFalse(payload["auto_ingested_transcripts"])
+        self.assertTrue(payload["auto_ingest_required"])
+        self.assertEqual(payload["episode_files_consulted"], 0)
+
+    def test_dream_run_auto_ingests_transcripts_when_consent_payload_is_set(self) -> None:
+        source_dir = Path(self.temp_dir.name) / "claude-sessions"
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "session.jsonl").write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "user",
+                            "timestamp": "2026-03-27T12:01:00Z",
+                            "message": {
+                                "content": "Decision: use uv for OpenDream test execution in this workspace."
+                            },
+                            "sessionId": "session-auto-ingest",
+                            "uuid": "turn-1",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "assistant",
+                            "timestamp": "2026-03-27T12:02:00Z",
+                            "message": {
+                                "content": "Recorded the uv test workflow and linked it to the workspace setup."
+                            },
+                            "sessionId": "session-auto-ingest",
+                            "uuid": "turn-2",
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch(
+            "opendream.transcripts.auto_detect_claude_project_dir",
+            return_value=source_dir,
+        ):
+            payload = self.post_json("/api/dream/run", {"auto_ingest_transcripts": True})
+
+        self.assertEqual(payload["ingest"]["status"], "ingested")
+        self.assertEqual(payload["ingest"]["files_written"], 1)
+        self.assertEqual(payload["episode_files_consulted"], 1)
+        self.assertTrue(payload["auto_ingested_transcripts"])
+        self.assertFalse(payload["auto_ingest_required"])
+        self.assertNotEqual(payload.get("reason"), "no-episodes")
 
     def test_index_contains_core_entity_groups(self) -> None:
         payload = self.get_json("/api/overview")
