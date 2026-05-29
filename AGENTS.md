@@ -1,12 +1,12 @@
 # AGENTS.md
 
-Public, sanitized agent guidance for OpenDream contributors.
+Contributor guidance for OpenDream.
 
-## Boundary
+## Release Hygiene
 
-- Keep this file and path-scoped AGENTS files public-safe.
-- Do not add private specs, provider/account names, local machine paths, secrets, non-public URLs, or generated local agent surfaces here.
-- Tool-specific generated surfaces belong in non-public workspaces or ignored local directories.
+- Keep this file and path-scoped AGENTS files release-safe.
+- Do not add local machine paths, secrets, provider/account details, internal URLs, or generated local tool state here.
+- Tool-specific generated surfaces belong in ignored local directories.
 
 ## Path-Scoped Guidance
 

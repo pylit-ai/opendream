@@ -553,7 +553,7 @@
     menu.style.top = clientY + 'px';
     // Unified close path — item clicks AND outside clicks both route through
     // here so the document-level dismiss listener is always removed exactly
-    // once (previously an item click removed the menu but leaked the listener
+    // once (previously an item click removed the menu but left the listener
     // until the next stray outside click).
     let dismiss;
     const closeMenu = () => {

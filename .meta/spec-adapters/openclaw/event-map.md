@@ -1,6 +1,6 @@
 # OpenClaw event map
 
-Reference only. Canonical semantics remain in `specs/403-406`.
+Reference only. Canonical semantics remain in `README.md`, `docs/architecture/`, and `opendream/schema/`.
 
 - `planner.pre_plan` -> `sh .meta/spec-adapters/openclaw/scripts/opendream-hooks.sh pre-plan "$OPENCLAW_TASK"`
 - `worker.post_task` -> `sh .meta/spec-adapters/openclaw/scripts/opendream-hooks.sh post-task "$OPENCLAW_SUMMARY"`

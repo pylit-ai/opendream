@@ -19,6 +19,9 @@ import { cachedFetch } from '~/lib/cache';
 import { MemoryTypeChip } from '~/components/MemoryTypeChip';
 import { memoryPreview } from '~/lib/memoryPresentation';
 
+const CONTESTED_MEMORY_HELP =
+  'Contested memories have conflicting evidence and need review before the runtime trusts them.';
+
 interface MemorySurface {
   durable_active_total?: number;
   durable_contested_total?: number;
@@ -108,7 +111,11 @@ function routeForKind(kind: string, id: string): string {
   return `/runs?id=${encodeURIComponent(id)}`;
 }
 
-function launchSummary(p: OverviewPayload | undefined, recentCount: number, highlightCount: number) {
+function launchSummary(
+  p: OverviewPayload | undefined,
+  recentCount: number,
+  highlightCount: number,
+): Array<{ label: string; value: string; action: string; hint?: string }> {
   const surface = ((p as { memory_surface?: MemorySurface } | undefined)?.memory_surface ??
     {}) as MemorySurface;
   const contested = surface.durable_contested_total ?? 0;
@@ -128,6 +135,7 @@ function launchSummary(p: OverviewPayload | undefined, recentCount: number, high
       label: 'Rejected',
       value: contested + pruned > 0 ? `${contested + pruned} contested or pruned` : 'None flagged',
       action: '/memories/explorer?status=contested',
+      hint: CONTESTED_MEMORY_HELP,
     },
     {
       label: 'Next action',
@@ -273,6 +281,7 @@ export default function OverviewRoute(): JSX.Element {
         label: 'Contested',
         value: contested,
         tone: contested > 0 ? 'warn' : 'default',
+        hint: CONTESTED_MEMORY_HELP,
         onClick: () => navigate('/memories/explorer?status=contested'),
       },
       {
@@ -314,7 +323,7 @@ export default function OverviewRoute(): JSX.Element {
                   type="button"
                   onClick={() => navigate(item.action)}
                   class="row-hover min-h-20 rounded-md hairline bg-surface px-3 py-2 text-left transition-colors hover:bg-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                  title={item.value}
+                  title={item.hint ?? item.value}
                 >
                   <span class="block text-[10px] uppercase tracking-[0.1em] text-text-subtle">
                     {item.label}

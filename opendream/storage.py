@@ -1213,7 +1213,7 @@ class MemoryStore:
         atomic_write_text(path, "\n".join(lines) + "\n")
 
     def _write_compat_views(self, records: list[dict[str, Any]]) -> None:
-        if self.compat_mode != "autodream":
+        if self.compat_mode not in {"project-user", "autodream"}:
             return
         grouped = {
             "project.md": [

@@ -75,7 +75,7 @@ The eval is **hermetic**: it creates an isolated empty memory store so existing 
 
 ## Provider Benchmark Cost Guard
 
-The public release gate uses local fixtures only. Any paid/provider benchmark
+The release gate uses local fixtures only. Any paid/provider benchmark
 path must run in dry-run mode first and record:
 
 - `dry-run-cost`: estimated total spend before execution
@@ -84,7 +84,7 @@ path must run in dry-run mode first and record:
 - benchmark manifest: fixture set, provider/model, sample count, date, and
   operator approval reference
 
-Without those fields, provider-backed results must stay out of public release
+Without those fields, provider-backed results must stay out of release
 claims.
 
 ## How to Run

@@ -7,9 +7,9 @@ Path-scoped guidance for the `opendream/` Python package (CLI implementation, me
 ## Read order
 
 1. `docs/architecture/overview.md`
-2. Active spec in `specs/<id>/` and `specs/registry.yaml`
-3. `docs/architecture/overview.md` for invariants
-4. JSON schemas under `opendream/schema/` for machine-readable contracts
+2. `docs/adr/` for durable architecture decisions
+3. JSON schemas under `opendream/schema/` for machine-readable contracts
+4. `docs/architecture/overview.md` for invariants
 
 ## Conventions
 

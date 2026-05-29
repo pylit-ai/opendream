@@ -46,5 +46,5 @@ Relevant memory that was excluded:
 
 ## Boundary Check
 
-- [ ] This issue removes secrets, local machine paths, account/provider names, and non-public URLs.
+- [ ] This issue removes secrets, local machine paths, account/provider names, and internal URLs.
 - [ ] This issue includes enough context to reproduce the memory quality failure with a fixture or local workspace.

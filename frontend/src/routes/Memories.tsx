@@ -91,7 +91,14 @@ function memoryColumns(onSelect: (id: string) => void): TableColumn<MemoryRecord
       key: 'status',
       header: 'Status',
       width: '110px',
-      render: (m) => <Chip variant={statusVariant(m.status)}>{m.status ?? 'unknown'}</Chip>,
+      render: (m) => {
+        const meta = STATUS_COPY[String(m.status ?? '').toLowerCase()];
+        return (
+          <Chip variant={statusVariant(m.status)} title={meta?.help}>
+            {meta?.label ?? m.status ?? 'unknown'}
+          </Chip>
+        );
+      },
     },
     {
       key: 'preview',
@@ -243,6 +250,7 @@ function SurfaceDashboard(): JSX.Element {
               label="Contested"
               value={String(surface().durable_contested_total ?? 0)}
               tone={(surface().durable_contested_total ?? 0) > 0 ? 'warn' : 'default'}
+              title={STATUS_COPY.contested.help}
             />
             <CompactStat
               label="Learned (live)"
@@ -417,6 +425,7 @@ function CompactStat(props: {
   label: string;
   value: string | number;
   tone?: 'ok' | 'warn' | 'danger' | 'default';
+  title?: string;
 }): JSX.Element {
   const tone =
     props.tone === 'ok'
@@ -427,7 +436,7 @@ function CompactStat(props: {
           ? 'text-danger'
           : 'text-text';
   return (
-    <div class="flex flex-col leading-tight">
+    <div class="flex flex-col leading-tight" title={props.title}>
       <span class="text-[9.5px] uppercase tracking-[0.08em] text-text-subtle">{props.label}</span>
       <span class={`font-mono text-[14px] ${tone}`}>{props.value}</span>
     </div>

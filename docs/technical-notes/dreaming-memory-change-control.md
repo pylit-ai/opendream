@@ -16,12 +16,12 @@ materialized as durable memory only when validation passes.
 
 ## Trust Boundaries
 
-| Boundary | Public behavior |
+| Boundary | Documented behavior |
 | --- | --- |
 | Local storage | Memory is stored under the selected workspace unless the operator chooses another memory dir. |
 | Provider execution | Provider-backed semantic execution is explicit setup. Default release checks do not require API keys. |
-| Release notes | Account-specific evidence, unpublished URLs, and issue-tracker writeback stay outside public artifacts. |
-| Vendored assets | Offline graph assets are pinned public packages with checksums and license notices. |
+| Release notes | Account-specific evidence, unpublished URLs, and issue-tracker writeback stay outside release artifacts. |
+| Vendored assets | Offline graph assets are pinned packages with checksums and license notices. |
 
 ## Release Review
 

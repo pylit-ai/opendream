@@ -73,26 +73,26 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as temp_dir:
         eval_workspace = Path(temp_dir) / "dream-fidelity-eval"
         stages = [
-            ("public-boundary", [str(REPO_ROOT / "scripts" / "check_public_boundary.sh")]),
+            ("release-hygiene", [str(REPO_ROOT / "scripts" / "check_release_hygiene.sh")]),
             ("package-boundaries", [sys.executable, "scripts/check_package_boundaries.py"]),
-            ("public-artifacts", [sys.executable, "scripts/check_public_artifacts.py"]),
+            ("release-artifacts", [sys.executable, "scripts/check_release_artifacts.py"]),
             ("vendor-assets", [sys.executable, "scripts/check_vendor_assets.py"]),
             ("provenance-risk", [sys.executable, "scripts/check_provenance_risk.py"]),
             ("lint", [sys.executable, "scripts/lint.py"]),
             ("typecheck", [sys.executable, "scripts/typecheck.py"]),
             ("tests", [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]),
             (
-                "dream-fidelity-eval",
+                "dream-layout-eval",
                 [
                     sys.executable,
                     "-m",
                     "opendream.cli",
                     "eval",
-                    "dream-fidelity",
+                    "dream-layout",
                     "--workspace",
                     str(eval_workspace),
                     "--compat-mode",
-                    "autodream",
+                    "project-user",
                 ],
             ),
             (

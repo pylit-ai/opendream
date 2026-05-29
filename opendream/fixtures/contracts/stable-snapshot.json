@@ -136,7 +136,7 @@
     ],
     "trust_boundaries": {
       "claude-scheduled-task": "vendor-owned-runtime",
-      "codex-account": "trusted-local-or-private-infrastructure-only",
+      "codex-account": "trusted-local-or-controlled-infrastructure-only",
       "cursor-automation": "vendor-owned-runtime",
       "deterministic": "no-model-call",
       "direct-provider": "operator-managed-api-key"

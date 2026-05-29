@@ -725,7 +725,7 @@ export interface ReviewDecisionRequest {
 }
 
 export interface SemanticDreamModeRequest {
-  mode?: string;
+  mode?: 'deterministic' | 'semantic' | 'hybrid';
   enabled?: boolean;
   [key: string]: unknown;
 }

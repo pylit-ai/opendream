@@ -134,7 +134,7 @@ opendream dream run \
   --workspace "$WORKSPACE" \
   --episodes ./tests/fixtures/transcript_only_dream.jsonl \
   --mode hybrid \
-  --compat-mode autodream
+  --compat-mode project-user
 ```
 
 Else pass `--episodes` to **your** JSONL episode paths.

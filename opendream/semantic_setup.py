@@ -30,7 +30,7 @@ UNSUPPORTED_STRATEGIES = ("gemini-oauth-reuse",)
 
 
 def _is_trusted_environment() -> bool:
-    """Heuristic: return False if running in a known public CI context."""
+    """Heuristic: return False if running in a known shared CI context."""
     import os
 
     ci_vars = ("CI", "GITHUB_ACTIONS", "GITLAB_CI", "CIRCLECI", "TRAVIS", "BUILDKITE")
@@ -66,7 +66,7 @@ def _build_candidate(
         trusted = _is_trusted_environment()
         supported = codex_ok and trusted
         reason = "Codex CLI detected on trusted infrastructure" if supported else (
-            "Codex CLI not detected" if not codex_ok else "untrusted/public CI environment"
+            "Codex CLI not detected" if not codex_ok else "untrusted/shared CI environment"
         )
         return {
             "strategy": "codex-account",
@@ -187,7 +187,7 @@ def semantic_setup(
             " Use direct-provider or deterministic mode."
         )
     if not _is_trusted_environment() and recommended == "codex-account":
-        warnings.append("Codex account-auth should not be used on public/untrusted CI. Falling back.")
+        warnings.append("Codex account-auth should not be used on shared or untrusted CI. Falling back.")
         recommended = "deterministic"
 
     report: dict[str, Any] = {

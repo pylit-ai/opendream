@@ -16,7 +16,7 @@ Short reference for tools that drive the CLI (hooks, IDE agents, scripts).
 - **`opendream status`**, **`opendream doctor --surface agents`**, and **`opendream doctor --surface memory`** include **`memory_layout`**: use **`active_memory_root`** as the single source of truth. If **`shadow_memory_paths`** is non-empty (e.g. both `.opendream/memory` and `memory` exist), treat those extras as **misleading** unless they match the active root. Do not pass **`--memory`** to `doctor` (it is rejected with a hint); use **`--surface memory`** and reserve **`--memory-dir`** for the relative store path under the workspace.
 - **`opendream status`** includes **`capture_verification.state`**: `never_run`, `passed`, or `failed`. Treat `passed` as the setup completion proof for the selected agents.
 - **`opendream eval performance`** — **hermetic:** scores against an isolated temp workspace using the same **`--memory-dir`** / **`--compat-mode`** you pass; the JSON **`workspace`** field remains your real path.
-- **`opendream eval dream-fidelity`** — **state- and compat-sensitive:** uses the store at `--workspace`. **`compatibility_views`** expects AutoDream layout (`project.md` / `user.md`); align **`--compat-mode autodream`** (and **`--memory-dir`**) with **`demo`/init** or use a fresh workspace. On **`failed`**, stderr includes **`failing checks:`** and extra guidance for `compatibility_views`; stdout JSON is unchanged.
+- **`opendream eval dream-layout`** — **state- and layout-sensitive:** uses the store at `--workspace`. **`compatibility_views`** expects the project/user layout (`project.md` / `user.md`); align **`--compat-mode project-user`** (and **`--memory-dir`**) with **`demo`/init** or use a fresh workspace. On **`failed`**, stderr includes **`failing checks:`** and extra guidance for `compatibility_views`; stdout JSON is unchanged.
 - **`opendream eval memory-quality`** — **mutating:** replays a packaged fixture into the **current** store; existing memories (e.g. after **`demo`**) can cause failure. Prefer a **fresh workspace** for a clean CI-style pass/fail.
 - **`opendream retrieve`** (and **`prepare-context`**): very short queries may return **`gated: true`** with a **`reason`** (token threshold) instead of ranked hits — intentional noise gate, not a parser error.
 - **Contract:** `opendream contract export --workspace "$WORKSPACE" --format json` — the first argument after **`contract`** must be **`export`**, not the workspace path.
@@ -145,7 +145,7 @@ opendream semantic adapters status --workspace "$PWD"
 opendream semantic ingest --workspace "$PWD" --scan-inbox
 ```
 
-**Unsupported paths:** Gemini CLI OAuth reuse is explicitly unsupported and never recommended. Public/untrusted runners should not default to account-backed execution.
+**Unsupported paths:** Gemini CLI OAuth reuse is explicitly unsupported and never recommended. Untrusted CI and shared runners should not default to account-backed execution.
 
 ## Semantic dream mode vs automation radar
 

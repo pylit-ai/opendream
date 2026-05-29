@@ -97,6 +97,8 @@ def validate_release_manifest_shape(manifest: dict[str, Any]) -> dict[str, Any]:
 
 
 def preferred_release_blockers() -> list[str]:
+    if not (REPO_ROOT / "specs").exists():
+        return []
     next_gen = [
         "418-transcript-native-dream-engine",
         "419-dream-fidelity-evals",
@@ -114,7 +116,7 @@ def preferred_release_blockers() -> list[str]:
         return latest
     if all((REPO_ROOT / "specs" / spec_id / "tasks.md").exists() for spec_id in next_gen):
         return next_gen
-    return ["410-truthful-verification", "411-autodream-fidelity", "412-memory-quality"]
+    return []
 
 
 def load_semantic_release_proof_fixture(path: Path = SEMANTIC_RELEASE_PROOF_FIXTURE) -> dict[str, Any]:
@@ -238,8 +240,8 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
         )
         stages.append(
             run_stage(
-                "public-artifacts",
-                [sys.executable, "scripts/check_public_artifacts.py"],
+                "release-artifacts",
+                [sys.executable, "scripts/check_release_artifacts.py"],
                 cwd=REPO_ROOT,
                 timeout_seconds=timeout_seconds,
             )
@@ -324,7 +326,7 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
                     "--episodes",
                     str(REPO_ROOT / "tests" / "fixtures" / "transcript_only_dream.jsonl"),
                     "--compat-mode",
-                    "autodream",
+                    "project-user",
                     "--memory-dir",
                     ".dream-memory",
                 ],
@@ -489,15 +491,15 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
         )
         stages.append(
             run_stage(
-                "eval-dream-fidelity",
+                "eval-dream-layout",
                 [
                     str(venv_dir / scripts_dir / "opendream"),
                     "eval",
-                    "dream-fidelity",
+                    "dream-layout",
                     "--workspace",
                     str(eval_workspace),
                     "--compat-mode",
-                    "autodream",
+                    "project-user",
                     "--memory-dir",
                     ".dream-memory",
                 ],

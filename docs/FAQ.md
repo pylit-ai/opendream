@@ -15,10 +15,8 @@ source-grounded records, local audit artifacts, explicit stale/contested
 handling, fixture-driven release checks, and activation surfaces across multiple
 agent tools.
 
-OpenDream does not claim live parity or benchmark superiority over proprietary
-managed memory systems. Comparisons in
-[docs/benchmarks/autodream-comparison.md](benchmarks/autodream-comparison.md)
-are limited to public behavior and OpenDream's own fixture-driven evidence.
+OpenDream does not claim live benchmark superiority over managed memory
+systems. Scorecards are limited to OpenDream's own fixture-driven evidence.
 
 ## What does OpenDream NOT do?
 
@@ -28,7 +26,7 @@ are limited to public behavior and OpenDream's own fixture-driven evidence.
 - **No code mutation**: OpenDream reads and remembers — it does not modify your codebase.
 - **No cross-project memory by default**: Each project has its own store. Global memory is opt-in via `--store-kind global`.
 
-## Is it local-first / private?
+## Is it local-first?
 
 Yes for **data**: artifacts stay under your workspace memory root (default `.opendream/memory/`). The default **deterministic** consolidation and **automation** paths do not open network connections from this package. **Optional** semantic provider configuration is intended for future outbound API calls to your chosen vendor; today the bundled semantic path still runs **without** those calls (heuristic synthesis/verification). The observability UI listens on `localhost` only when you start it. Operators: [semantic-mode-and-feature-radar-setup.md](automation/semantic-mode-and-feature-radar-setup.md).
 
@@ -43,7 +41,7 @@ Third-party notices and provenance notes are documented in
 
 1. **Fixture-driven benchmarks**: Performance evaluation uses controlled fixtures, not diverse real-world repos. Ecological validity is future work.
 2. **Small-scale testing**: Current eval uses 5-9 events. Behavior at 1000+ events over months is not benchmarked.
-3. **No live AutoDream comparison**: We cannot run AutoDream programmatically, so comparisons are evidence-based, not runtime-based.
+3. **No external live-system comparison**: Managed-system comparisons are evidence-based and limited to documented behavior, not runtime-based.
 4. **Consolidation recall**: Deterministic mode uses rule-based extraction with consistent results but potentially lower recall on ambiguous signals. Hybrid mode adds model-backed synthesis for higher recall, but learned-context outputs require verification before promotion.
 5. **Memory can hurt**: In some scenarios, stale or contradicted memories could degrade agent performance. The memory-hurt audit tracks this but mitigation is still evolving.
 
@@ -77,7 +75,7 @@ Learned context is a separate mutable memory layer for model-generated semantic 
 
 OpenDream's benchmark suite has three tiers:
 
-1. **Internal fixtures**: Controlled tests for query-family anticipation, stale abstraction detection, contradiction handling, and memory-hurt adversarial cases.
+1. **Controlled fixtures**: Tests for query-family anticipation, stale abstraction detection, contradiction handling, and memory-hurt adversarial cases.
 2. **MemoryAgentBench-style adapters**: Clean-room implementations measuring Accurate Retrieval (AR), Test-Time Learning (TTL), Long-Range Understanding (LRU), and Conflict Resolution (CR). Empty adapter tiers are reported as `skipped_no_fixture`, not external-benchmark success.
 3. **Coding-task evals**: Repeated task evaluations measuring pass rate, retrieval latency, irrelevant recall, contradiction recovery, procedural reuse, and memory-hurt rate.
 

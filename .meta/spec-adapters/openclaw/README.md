@@ -1,8 +1,6 @@
 # OpenClaw adapter pack
 
-Canonical behavior lives in `specs/404-framework-adapter-pack/`, `specs/405-layered-memory-stores/`,
-`specs/418-transcript-native-dream-engine/`, `specs/420-truthful-verification-and-release/`,
-`specs/430-sota-dream-runtime-bundle/`, and `README.md`.
+Canonical behavior lives in `README.md`, `docs/architecture/`, `docs/adr/`, and `opendream/schema/`.
 This folder only maps that CLI into OpenClaw prompts and hook examples.
 
 1. Prefer `opendream init --workspace "$PWD" --activate-configured` for the standard path.

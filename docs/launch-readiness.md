@@ -1,6 +1,6 @@
 # OpenDream Release Readiness
 
-This checklist is the public release path for a one-install OpenDream user.
+This checklist is the release path for a one-install OpenDream user.
 
 ## Install
 
@@ -18,19 +18,19 @@ Source install for unreleased commits:
 uv tool install --force "opendream @ git+https://github.com/pylit-ai/opendream.git"
 ```
 
-Optional extras: none for the public runtime. Development tooling remains under `.[dev]` and the mirrored `uv sync --group dev` path.
+Optional extras: none for the runtime package. Development tooling remains under `.[dev]` and the mirrored `uv sync --group dev` path.
 
 ## Demo
 
 ```bash
 opendream demo --workspace .tmp/demo
 opendream status --workspace .tmp/demo
-opendream dream run --workspace .tmp/demo --compat-mode autodream
-opendream eval dream-fidelity --workspace .tmp/demo --compat-mode autodream
+opendream dream run --workspace .tmp/demo --compat-mode project-user
+opendream eval dream-layout --workspace .tmp/demo --compat-mode project-user
 ```
 
-`--compat-mode autodream` is a legacy compatibility fixture name. It does not
-mean OpenDream copies non-public internals.
+`--compat-mode project-user` writes a project/user compatibility layout. It
+does not imply copied internals or equivalence with any external system.
 
 ## Upgrade
 
@@ -62,7 +62,7 @@ checks, provenance-risk checks, unit tests, eval smoke, package build,
 clean-venv install, CLI help, demo, dream, service lifecycle, semantic release
 proof, and advanced runtime eval.
 
-## Public Evidence
+## Evidence
 
 - Clean-room manifest: [`CLEAN_ROOM.md`](../CLEAN_ROOM.md)
 - Claims matrix: [`docs/claims.md`](./claims.md)
@@ -80,7 +80,7 @@ proof, and advanced runtime eval.
 
 ## Branch Protection And Release Environment
 
-Before a public tag, an operator must verify:
+Before a release tag, an operator must verify:
 
 | Setting | Required state |
 | --- | --- |

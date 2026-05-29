@@ -20,7 +20,7 @@ Every semantic execution run is classified by exactly one **execution strategy**
 - **Setup wizard** resolves a single recommended strategy via `opendream semantic setup`.
 - **Preferred auth mode** is either `no-extra-key` (default) or `direct-provider`.
 - **Gemini CLI OAuth reuse** is explicitly `unsupported` and must never be recommended.
-- **Public/untrusted runners** must never default to account-backed execution.
+- **Untrusted CI and shared runners** must never default to account-backed execution.
 
 Status surfaces, contract export, and observability always show the active strategy and auth source.
 

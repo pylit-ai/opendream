@@ -1,7 +1,7 @@
 # Known Limitations
 
-OpenDream is alpha software. Public claims are intentionally bounded to what
-the public repository can verify.
+OpenDream is alpha software. Claims are intentionally bounded to what users and
+reviewers can verify.
 
 ## Scope Limits
 
@@ -12,7 +12,7 @@ the public repository can verify.
 | MCP server | OpenDream does not ship a first-party MCP server in this release. It exposes CLI, local files, and observe UI surfaces. | README integration docs |
 | Platform support | CI and package metadata target Python 3.11 through 3.14. Shell helpers assume POSIX-style environments. Windows usage should be treated as best-effort until verified. | `pyproject.toml`, `.github/workflows/ci.yml` |
 | Network behavior | Runtime defaults are local-first and do not send telemetry. Provider/API-key paths are explicit setup paths, not hidden analytics. | `tests/test_no_network_defaults.py`, `SECURITY.md` |
-| Public package hygiene | Public artifacts must not contain local paths, secrets, account-specific details, non-public URLs, or generated runtime state. | `CLEAN_ROOM.md`, `scripts/check_public_boundary.sh` |
+| Package hygiene | Release artifacts must not contain local paths, secrets, account-specific details, internal URLs, or generated runtime state. | `CLEAN_ROOM.md`, `scripts/check_release_hygiene.sh` |
 
 ## Claim Rules
 

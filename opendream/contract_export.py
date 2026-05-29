@@ -97,7 +97,7 @@ def build_contract_export(_workspace: Path) -> dict[str, Any]:
         "supported_strategies": auth_matrix["strategies"],
         "unsupported_strategies": auth_matrix["unsupported"],
         "trust_boundaries": {
-            "codex-account": "trusted-local-or-private-infrastructure-only",
+            "codex-account": "trusted-local-or-controlled-infrastructure-only",
             "claude-scheduled-task": "vendor-owned-runtime",
             "cursor-automation": "vendor-owned-runtime",
             "direct-provider": "operator-managed-api-key",

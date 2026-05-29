@@ -6,7 +6,7 @@ The auto-reviewer consumes review queue items + memory snapshots and emits
 review decisions for items that satisfy operator-tunable thresholds. Items
 that do not match any rule remain in the queue for human attention.
 
-Public surface:
+Exported surface:
     AutoReviewerConfig    - operator-tunable thresholds + per-rule toggles
     Rule                  - protocol implemented by individual rules
     RuleProposal          - structured output of a rule
@@ -47,7 +47,7 @@ class _RuleView:
     thresholds: dict[str, Any]
 
 
-# Public alias used by CLI tests + frontend-facing types
+# Exported alias used by CLI tests + frontend-facing types
 RuleConfig = _RuleView
 
 

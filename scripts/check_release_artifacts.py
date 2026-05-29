@@ -33,11 +33,11 @@ def main() -> int:
         if path.name in STALE_NAMES or path.name.endswith(STALE_SUFFIXES):
             problems.append(str(rel))
     if problems:
-        print("public artifact check failed:", file=sys.stderr)
+        print("release artifact check failed:", file=sys.stderr)
         for problem in sorted(problems):
             print(f"- {problem}", file=sys.stderr)
         return 1
-    print("public artifact check passed")
+    print("release artifact check passed")
     return 0
 
 

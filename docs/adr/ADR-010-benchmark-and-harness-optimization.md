@@ -9,7 +9,7 @@ The semantic sleep-time release must demonstrate that semantic mode improves uti
 ## Decision
 Introduce a unified benchmark suite with:
 
-1. **Internal fixtures** — lightweight regression tests using `tests/fixtures/` corpora, runnable in CI with no external dependencies.
+1. **Controlled fixtures** — lightweight regression tests using `tests/fixtures/` corpora, runnable in CI with no external dependencies.
 2. **MemoryAgentBench-style adapters** — clean-room adapters that implement the MemoryAgentBench evaluation protocol without vendoring unlicensed code (see ADR-011).
 3. **Coding-task evaluations** — task-based evals measuring retrieval-augmented code generation quality.
 4. **Harness optimization** — automated parameter sweeps over retrieval weights, context budgets, and prompt templates with result tracking.

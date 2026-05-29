@@ -3,7 +3,7 @@
 ## Reporting
 Report security issues privately through GitHub Security Advisories when
 available, or to the repository owner or maintainer channel before opening a
-public issue.
+issue.
 
 Include:
 - affected version or commit

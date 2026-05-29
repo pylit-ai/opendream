@@ -208,7 +208,7 @@ class TestExecutionOwnershipInContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             contract = build_contract_export(Path(td))
             boundaries = contract["execution_ownership"]["trust_boundaries"]
-            self.assertEqual(boundaries["codex-account"], "trusted-local-or-private-infrastructure-only")
+            self.assertEqual(boundaries["codex-account"], "trusted-local-or-controlled-infrastructure-only")
             self.assertEqual(boundaries["claude-scheduled-task"], "vendor-owned-runtime")
             self.assertEqual(boundaries["cursor-automation"], "vendor-owned-runtime")
             self.assertEqual(boundaries["direct-provider"], "operator-managed-api-key")
@@ -262,13 +262,13 @@ class TestSemanticStatusTrustBoundary(unittest.TestCase):
         self.assertEqual(status["trust_boundary"], "no-model-call")
 
 
-class TestRegistryEntry(unittest.TestCase):
-    """WS1: Verify 440 is in the spec registry."""
+class TestPublicSchemaEntry(unittest.TestCase):
+    """WS1: Verify advanced runtime schema is stable."""
 
-    def test_440_in_registry(self) -> None:
-        registry_path = REPO_ROOT / "specs" / "registry.yaml"
-        content = registry_path.read_text(encoding="utf-8")
-        self.assertIn("440-advanced-memory-platform-release-bundle", content)
+    def test_advanced_runtime_schema_is_public(self) -> None:
+        schema_path = REPO_ROOT / "opendream" / "schema" / "advanced-runtime-report.schema.json"
+        content = schema_path.read_text(encoding="utf-8")
+        self.assertIn("advanced-runtime-report", content)
 
 
 class TestADRs(unittest.TestCase):

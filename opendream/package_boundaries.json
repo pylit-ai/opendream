@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "package": "opendream",
-  "source_of_truth": "public",
+  "source_of_truth": "repository",
   "one_install_entrypoints": {
     "cli": "opendream.cli:main"
   },
@@ -103,10 +103,10 @@
     "CHANGELOG.md",
     "SECURITY.md"
   ],
-  "public_artifact_forbidden_markers": [
-    "non-public companion checkout name",
+  "release_artifact_forbidden_markers": [
+    "local companion checkout name",
     "bootstrap artifact archive name",
-    "absolute non-public companion checkout path",
+    "absolute local companion checkout path",
     "local runtime notes path",
     "local agent runtime config path"
   ]

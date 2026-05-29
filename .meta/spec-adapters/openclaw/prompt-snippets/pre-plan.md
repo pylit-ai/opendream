@@ -1,6 +1,6 @@
 # OpenClaw pre-plan snippet
 
-Reference only. Canonical behavior remains in `README.md` and `specs/403-406`.
+Reference only. Canonical behavior remains in `README.md`, `docs/architecture/`, and `opendream/schema/`.
 
 Before planning:
 `opendream status --workspace "$OPENDREAM_WORKSPACE"`

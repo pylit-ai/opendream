@@ -1,4 +1,4 @@
-# ADR-001: Canonical Spec Surface and Framework Adapters
+# ADR-001: Contract Surface and Framework Adapters
 
 ## Status
 Accepted
@@ -8,8 +8,8 @@ This repository supports multiple AI coding tools and workflows. Without strict 
 framework artifacts can become competing sources of requirements and increase governance drift.
 
 ## Decision
-- Canonical implementation requirements live in `specs/<id>/{spec.md,plan.md,tasks.md}`.
-- Spec lifecycle metadata lives in `specs/registry.yaml`.
+- Machine-readable contracts live in `opendream/schema/`.
+- Implementation guidance lives in README, architecture docs, ADRs, and tests.
 - Durable architecture decisions live in `docs/adr/`.
 - Framework artifacts are optional adapters and must only translate canonical sources.
 - Preferred location for framework adapter payloads is `.meta/spec-adapters/<framework>/...`.

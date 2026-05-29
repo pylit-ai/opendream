@@ -1,12 +1,12 @@
-"""Semantic dreamer — model-backed offline memory synthesis.
+"""Semantic dreamer - model-backed offline memory synthesis.
 
-Implements WS5 (T21-T27): semantic dreamer integration into DreamRunner,
+Implements WS5 (T21-T27): semantic dream runtime integration,
 semantic run phases, hybrid run modes, cost/token budget enforcement,
 semantic status metadata, and integration tests.
 
-The semantic dreamer extends the existing four-phase DreamRunner with:
-  orient → gather_recent_signal → infer_families → synthesize →
-  verify → promote/archive → prune/reindex
+The semantic dreamer extends the existing four-phase dream runtime with:
+  orient -> gather_recent_signal -> infer_families -> synthesize ->
+  verify -> promote/archive -> prune/reindex
 """
 
 from __future__ import annotations
@@ -862,7 +862,7 @@ def _strategy_trust_boundary(strategy: str) -> str:
     mapping = {
         "deterministic": "no-model-call",
         "direct-provider": "operator-managed-api-key",
-        "codex-account": "trusted-local-or-private-infrastructure-only",
+        "codex-account": "trusted-local-or-controlled-infrastructure-only",
         "claude-scheduled-task": "vendor-owned-runtime",
         "cursor-automation": "vendor-owned-runtime",
     }

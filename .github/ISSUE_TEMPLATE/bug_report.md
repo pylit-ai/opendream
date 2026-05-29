@@ -12,7 +12,7 @@ labels: bug
 - OS and architecture:
 - Agent target, if relevant:
 - Benchmark fixture or scorecard involved, if relevant:
-- Workspace path shape, without private path details:
+- Workspace path shape, without sensitive path details:
 
 ## Command
 
@@ -37,5 +37,5 @@ labels: bug
 
 ## Boundary Check
 
-- [ ] This issue does not include secrets, account/provider names, non-public URLs, or local machine paths.
+- [ ] This issue does not include secrets, account/provider names, internal URLs, or local machine paths.
 - [ ] This issue does not request a repo visibility, release, publish, or launch action.

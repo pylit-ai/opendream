@@ -8,7 +8,7 @@
   </picture>
 </p>
 
-Short recorded demos for command reference pages, docs, launch notes, and walkthroughs. For a first product look, start with the browser UI recordings in [`ui-demos.md`](./ui-demos.md). Each CLI demo is rendered from the same deterministic fixture path used by the public CLI tests and showcase docs.
+Short recorded demos for command reference pages, docs, launch notes, and walkthroughs. For a first product look, start with the browser UI recordings in [`ui-demos.md`](./ui-demos.md). Each CLI demo is rendered from the same deterministic fixture path used by the CLI tests and showcase docs.
 
 ## First-run path
 

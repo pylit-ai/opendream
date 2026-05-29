@@ -24,7 +24,7 @@ OpenDream is a local-first memory control plane for coding-agent workspaces. It 
 - extraction produces typed candidates under `memory/state/candidates/`
 - consolidation promotes candidates into durable records in `memory/state/durable_records.json`
 - automation jobs read durable records and maintain projection outputs under `memory/automation/`
-- durable records are rendered to `MEMORY.md`, topic markdown, and optional AutoDream compatibility views
+- durable records are rendered to `MEMORY.md`, topic markdown, and optional project/user compatibility views
 - prompt context may include both durable memory and active automation projections, but they remain separate stores
 - direct writes, dream runs, consolidation, retrieval, and release checks emit audit artifacts
 
@@ -42,11 +42,11 @@ OpenDream is a local-first memory control plane for coding-agent workspaces. It 
 - consolidator writes are restricted to the workspace `memory/` subtree
 - automation writes are restricted to the workspace `memory/automation/` subtree
 - topic markdown is a generated user-editable representation of canonical durable state
-- OpenSpec bundles remain proposal-stage; canonical implementation control lives in `specs/`
+- machine-readable contracts live under `opendream/schema/`
 
 ## Dependencies
 - Python 3 standard library only
-- repository OpenSpec schemas and config as the normative design reference
+- machine-readable contracts under `opendream/schema/` as the packaged design reference
 
 ## Agent-ready platform (in progress)
 
@@ -75,7 +75,7 @@ The semantic dreamer (`opendream.semantic_dreamer`) extends dreaming with a lear
 - Per-source attribution and harm-aware suppression for learned-context records
 
 ### Benchmark suite and harness optimizer (ADR-010, ADR-011)
-- `opendream.benchmark_adapters`, `opendream.evaluation`, `opendream.harness_optimizer` — internal fixtures, MemoryAgentBench-style adapters, coding-task evals, harness search
+- `opendream.benchmark_adapters`, `opendream.evaluation`, `opendream.harness_optimizer` — controlled fixtures, MemoryAgentBench-style adapters, coding-task evals, harness search
 - Third-party provenance in `THIRD_PARTY_NOTICES.md`; benchmark protocols reimplemented clean-room where applicable
 
 ### Semantic execution strategies (ADR-012)
@@ -97,7 +97,7 @@ The setup wizard (`opendream semantic setup`) resolves a single recommended stra
 
 ### Unsupported paths
 - Gemini CLI OAuth reuse is explicitly unsupported and never recommended
-- Public/untrusted runners never default to account-backed execution
+- Untrusted CI and shared runners never default to account-backed execution
 - Arbitrary vendor OAuth session borrowing is forbidden
 
 ### Feature mining and radar integration
@@ -113,6 +113,6 @@ The setup wizard (`opendream semantic setup`) resolves a single recommended stra
 - Checks memory-excellence evidence across direct-provider and delegated execution modes
 
 ## Out of scope for this doc
-- Per-change rollout, file lists, and verification steps → `specs/<id>/plan.md`
+- Per-change rollout, file lists, and verification steps are maintained outside the runtime package.
 - Product positioning and roadmap planning are outside this architecture overview.
 - Architectural decisions and rationale → `docs/adr/`

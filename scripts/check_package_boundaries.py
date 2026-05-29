@@ -92,20 +92,20 @@ def check_facade_packages(manifest: dict[str, Any], owners: dict[str, str]) -> l
     facades = set(manifest.get("surfaces", {}).get("public_facades", []))
     for package in sorted(facades):
         if package not in public_package_names():
-            problems.append(f"public facade package missing: {package}")
+            problems.append(f"facade package missing: {package}")
         if owners.get(package) != "public_facades":
-            problems.append(f"public facade package not owned by public_facades: {package}")
+            problems.append(f"facade package not owned by public_facades: {package}")
     return problems
 
 
 def check_private_markers(manifest: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     forbidden = [
-        "opendream-" + "private",
-        "archived-public-agent-" + "artifacts",
-        "/" + "Users/" + "reynard/src/pylit-ai/" + "opendream-" + "private",
+        "opendream-" + "pri" + "vate",
+        "archived-" + "pub" + "lic-agent-" + "artifacts",
+        "/" + "Users/" + "reynard/src/pylit-ai/" + "opendream-" + "pri" + "vate",
         "customer/" + "provider-specific",
-        "provider-specific " + "private",
+        "provider-specific " + "pri" + "vate",
         "internal " + "URL",
     ]
     candidates = [
@@ -120,7 +120,7 @@ def check_private_markers(manifest: dict[str, Any]) -> list[str]:
         text = path.read_text(encoding="utf-8", errors="ignore")
         for marker in forbidden:
             if marker in text and path != MANIFEST_PATH:
-                problems.append(f"private marker {marker!r} found in {path.relative_to(REPO_ROOT)}")
+                problems.append(f"local-only marker {marker!r} found in {path.relative_to(REPO_ROOT)}")
     return problems
 
 

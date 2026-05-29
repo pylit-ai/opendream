@@ -9,6 +9,7 @@ export interface ChipProps {
   onRemove?: () => void;
   children: JSX.Element;
   class?: string;
+  title?: string;
 }
 
 const VARIANT_STYLES: Record<ChipVariant, string> = {
@@ -25,6 +26,7 @@ const VARIANT_STYLES: Record<ChipVariant, string> = {
 export function Chip(props: ChipProps): JSX.Element {
   return (
     <span
+      title={props.title}
       class={cn(
         'inline-flex h-[20px] items-center gap-1 rounded-full px-2 text-[10.5px] font-medium tracking-wide',
         VARIANT_STYLES[props.variant ?? 'neutral'],

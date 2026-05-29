@@ -100,7 +100,7 @@ opendream dream run \
   --workspace "$PWD" \
   --episodes path/to/episodes.jsonl \
   --mode hybrid \
-  --compat-mode autodream
+  --compat-mode project-user
 ```
 
 Use repo fixtures for a smoke test, e.g. `tests/fixtures/transcript_only_dream.jsonl` from an OpenDream checkout.

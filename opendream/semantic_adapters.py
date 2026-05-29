@@ -42,10 +42,10 @@ CODEX_ACCOUNT_MANIFEST: dict[str, Any] = {
     "supports_local_files": True,
     "supports_background_schedule": False,
     "ingest_mode": "direct-report",
-    "trust_boundary": "trusted-local-or-private-infrastructure-only",
+    "trust_boundary": "trusted-local-or-controlled-infrastructure-only",
     "notes": [
         "Uses Codex CLI subprocess with account-backed auth (~/.codex/auth.json).",
-        "Do NOT use on public runners or untrusted infrastructure.",
+        "Do NOT use on shared runners or untrusted infrastructure.",
         "Do NOT parse or refresh tokens manually; let Codex manage its own auth cache.",
     ],
 }
@@ -310,8 +310,8 @@ def _scaffold_codex(workspace: Path, scaffold_dir: Path) -> list[str]:
         "This adapter uses the Codex CLI as a local subprocess for semantic synthesis.\n\n"
         "## Requirements\n"
         "- Codex CLI installed and signed in (`codex auth login`)\n"
-        "- Trusted local or private infrastructure only\n"
-        "- Do NOT use on public CI runners\n\n"
+        "- Trusted local or controlled infrastructure only\n"
+        "- Do NOT use on shared CI runners\n\n"
         "## Trust boundary\n"
         "- `~/.codex/auth.json` is treated as a secret\n"
         "- OpenDream never reads or logs auth token contents\n"
@@ -330,7 +330,7 @@ def _scaffold_codex(workspace: Path, scaffold_dir: Path) -> list[str]:
         "invocation_type": "subprocess",
         "binary": "codex",
         "structured_output": True,
-        "trust_boundary": "trusted-local-or-private-infrastructure-only",
+        "trust_boundary": "trusted-local-or-controlled-infrastructure-only",
         "concurrency": "single-instance",
     })
 

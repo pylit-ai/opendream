@@ -226,7 +226,7 @@ def ensure_relative_to(path: Path, base: Path) -> None:
 
 
 def canonical_schema_path(schema_name: str) -> Path:
-    for pattern in ("specs/*/schema", "specs/*/schemas"):
-        for path in sorted(REPO_ROOT.glob(f"{pattern}/{schema_name}")):
-            return path
+    public_schema = REPO_ROOT / "opendream" / "schema" / schema_name
+    if public_schema.exists():
+        return public_schema
     raise FileNotFoundError(schema_name)

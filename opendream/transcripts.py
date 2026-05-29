@@ -6,7 +6,7 @@ nested message structures that ``opendream/episodes.py`` cannot parse directly.
 This module flattens them to ``{timestamp, speaker, text, session_id,
 source_path}`` so the existing episode loader works without modification.
 
-Public surface:
+Exported surface:
     flatten_claude_row(row)            -> dict | None
     flatten_codex_row(row)             -> dict | None
     ingest_claude_sessions(store, src) -> dict (summary)
@@ -92,6 +92,35 @@ def _extract_codex_text(row: dict[str, Any]) -> str:
     return ""
 
 
+def _normalize_codex_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Unwrap current Codex JSONL envelopes into message-like rows."""
+    payload = row.get("payload")
+    if row.get("type") == "response_item" and isinstance(payload, dict):
+        normalized = dict(payload)
+        if "timestamp" not in normalized and isinstance(row.get("timestamp"), str):
+            normalized["timestamp"] = row["timestamp"]
+        if "id" not in normalized and isinstance(row.get("id"), str):
+            normalized["id"] = row["id"]
+        return normalized
+    return row
+
+
+def _codex_row_workspace(row: dict[str, Any]) -> str | None:
+    payload = row.get("payload")
+    candidates = [payload, row] if isinstance(payload, dict) else [row]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        value = (
+            candidate.get("cwd")
+            or candidate.get("current_working_directory")
+            or candidate.get("workspace")
+        )
+        if isinstance(value, str) and value:
+            return str(Path(value).expanduser().resolve())
+    return None
+
+
 def flatten_claude_row(row: dict[str, Any]) -> dict[str, Any] | None:
     """Convert a Claude session JSONL row to the episode-loader shape.
 
@@ -118,6 +147,7 @@ def flatten_claude_row(row: dict[str, Any]) -> dict[str, Any] | None:
 
 def flatten_codex_row(row: dict[str, Any]) -> dict[str, Any] | None:
     """Convert common Codex session JSONL rows to episode-loader shape."""
+    row = _normalize_codex_row(row)
     role = str(row.get("role") or row.get("type") or "").lower()
     item = row.get("item")
     if isinstance(item, dict) and not role:
@@ -218,6 +248,7 @@ def ingest_codex_sessions(
     source_dir: Path | str,
     *,
     overwrite: bool = False,
+    workspace_filter: Path | str | None = None,
 ) -> dict[str, Any]:
     """Walk Codex session JSONL files and write flattened transcript rows."""
     src = Path(source_dir).expanduser()
@@ -234,6 +265,12 @@ def ingest_codex_sessions(
     rows_in = 0
     rows_out = 0
     written_paths: list[str] = []
+    files_filtered = 0
+    workspace_filter_path = (
+        str(Path(workspace_filter).expanduser().resolve())
+        if workspace_filter is not None
+        else None
+    )
 
     for jsonl_path in sorted(src.rglob("*.jsonl")):
         files_seen += 1
@@ -243,6 +280,7 @@ def ingest_codex_sessions(
             files_skipped += 1
             continue
         flattened: list[dict[str, Any]] = []
+        file_matches_workspace = workspace_filter_path is None
         try:
             for line in jsonl_path.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
@@ -252,10 +290,18 @@ def ingest_codex_sessions(
                     row = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if (
+                    workspace_filter_path is not None
+                    and _codex_row_workspace(row) == workspace_filter_path
+                ):
+                    file_matches_workspace = True
                 out = flatten_codex_row(row)
                 if out is not None:
                     flattened.append(out)
         except OSError:
+            continue
+        if not file_matches_workspace:
+            files_filtered += 1
             continue
         if not flattened:
             files_skipped += 1
@@ -275,8 +321,10 @@ def ingest_codex_sessions(
         "files_seen": files_seen,
         "files_written": files_written,
         "files_skipped": files_skipped,
+        "files_filtered": files_filtered,
         "rows_in": rows_in,
         "rows_out": rows_out,
+        "workspace_filter": workspace_filter_path,
         "written_paths_sample": written_paths[:5],
     }
 
@@ -295,7 +343,12 @@ def ingest_claude_for_workspace(
         if detected is None:
             codex_detected = auto_detect_codex_sessions_dir()
             if codex_detected is not None:
-                return ingest_codex_sessions(store, codex_detected, overwrite=overwrite)
+                return ingest_codex_sessions(
+                    store,
+                    codex_detected,
+                    overwrite=overwrite,
+                    workspace_filter=store.workspace,
+                )
             return {
                 "status": "no-agent-transcripts",
                 "workspace": str(store.workspace),

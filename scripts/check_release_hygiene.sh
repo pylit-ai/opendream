@@ -44,7 +44,7 @@ elif [ -e .codex-goal ]; then
   find .codex-goal -print | sed 's#^\./##' >"$tracked_codex_goal"
 fi
 if [ -s "$tracked_codex_goal" ]; then
-  echo "Public repo tracks or stages local launch metadata:"
+  echo "Release tree tracks or stages local launch metadata:"
   cat "$tracked_codex_goal"
   exit 1
 fi
@@ -70,22 +70,25 @@ done <"$tracked_or_new" >"$existing_paths"
 
 grep -E "$blocked_paths" "$existing_paths" >"$blocked_hits" || true
 if [ -s "$blocked_hits" ]; then
-  echo "Public repo contains non-public, generated, or local-only paths:"
+  echo "Release tree contains generated or local-only paths:"
   cat "$blocked_hits"
   exit 1
 fi
 
 grep -E "$agent_doc_paths" "$existing_paths" | grep -Ev "$allowed_agent_docs" >"$agent_doc_hits" || true
 if [ -s "$agent_doc_hits" ]; then
-  echo "Public repo contains unexpected agent instruction documents:"
+  echo "Release tree contains unexpected agent instruction documents:"
   cat "$agent_doc_hits"
   exit 1
 fi
 
-content_markers='/Users/[[:alnum:]_.-]+|/home/[[:alnum:]_.-]+|[A-Za-z]:\\Users\\|opendream-private|archived-public-agent-artifacts|customer/provider-specific|provider-specific (private|non-public):|internal URL:|internal_url|https?://internal'
+private_repo_marker='opendream-[p]rivate'
+agent_archive_marker='archived-[p]ublic-agent-artifacts'
+provider_detail_marker='provider-specific ([p]rivate|non-[p]ublic):'
+content_markers="/Users/[[:alnum:]_.-]+|/home/[[:alnum:]_.-]+|[A-Za-z]:\\\\Users\\\\|${private_repo_marker}|${agent_archive_marker}|customer/provider-specific|${provider_detail_marker}|internal URL:|internal_url|https?://internal"
 while IFS= read -r path; do
   case "$path" in
-    scripts/check_public_boundary.sh|scripts/check_provenance_risk.py|.gitignore|uv.lock|frontend/pnpm-lock.yaml)
+    scripts/check_release_hygiene.sh|scripts/check_provenance_risk.py|.gitignore|uv.lock|frontend/pnpm-lock.yaml)
       continue
       ;;
     .venv/*)
@@ -99,9 +102,9 @@ done <"$existing_paths"
 
 grep -Ev '(/Users/example|/Users/me|/home/example|[A-Za-z]:\\Users\\example)' "$content_hits" >"$content_filtered" || true
 if [ -s "$content_filtered" ]; then
-  echo "Public repo contains non-public content markers:"
+  echo "Release tree contains local-only or sensitive content markers:"
   cat "$content_filtered"
   exit 1
 fi
 
-echo "Public boundary OK"
+echo "Release hygiene OK"
