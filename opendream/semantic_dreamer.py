@@ -69,6 +69,10 @@ def semantic_dream_run(
     availability = semantic_mode_available(store)
     config = store.load_semantic_config()
     budgets = config.get("budgets", {})
+    execution_strategy = str(config.get("execution_strategy", "deterministic") or "deterministic")
+    execution_owner = _strategy_execution_owner(execution_strategy)
+    auth_source = _strategy_auth_source(execution_strategy)
+    trust_boundary = _strategy_trust_boundary(execution_strategy)
 
     if not availability.get("available", False):
         fallback = config.get("fallback_policy", "fallback_to_deterministic")
@@ -94,6 +98,10 @@ def semantic_dream_run(
                 "phases": [],
                 "duration_ms": duration_ms,
                 "trigger_class": trigger_class,
+                "execution_strategy": execution_strategy,
+                "execution_owner": execution_owner,
+                "auth_source": auth_source,
+                "trust_boundary": trust_boundary,
             }
 
     deterministic_summary: dict[str, Any] = {}
@@ -257,6 +265,10 @@ def semantic_dream_run(
                 ended_at=to_iso(utc_now()),
                 phases=phases,
                 trigger_class=trigger_class,
+                execution_strategy=execution_strategy,
+                execution_owner=execution_owner,
+                auth_source=auth_source,
+                trust_boundary=trust_boundary,
                 query_families_considered=semantic_summary["families_considered"],
                 query_families_selected=families_selected,
                 proposals_generated=len(proposals),
@@ -869,6 +881,28 @@ def _strategy_trust_boundary(strategy: str) -> str:
     return mapping.get(strategy, "unknown")
 
 
+def _strategy_execution_owner(strategy: str) -> str:
+    mapping = {
+        "deterministic": "opendream-local",
+        "direct-provider": "opendream-local",
+        "codex-account": "opendream-local",
+        "claude-scheduled-task": "vendor-runtime",
+        "cursor-automation": "vendor-runtime",
+    }
+    return mapping.get(strategy, "opendream-local")
+
+
+def _strategy_auth_source(strategy: str) -> str:
+    mapping = {
+        "deterministic": "none",
+        "direct-provider": "provider-api-key",
+        "codex-account": "chatgpt-account",
+        "claude-scheduled-task": "claude-account-task",
+        "cursor-automation": "cursor-account-automation",
+    }
+    return mapping.get(strategy, "none")
+
+
 def _summary_int(summary: dict[str, Any], key: str) -> int:
     try:
         return int(summary.get(key) or 0)
@@ -968,13 +1002,6 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
     active_adapter = config.get("active_adapter")
     candidate_strategies = config.get("candidate_strategies", [])
 
-    auth_source_map = {
-        "deterministic": "none",
-        "direct-provider": "provider-api-key",
-        "codex-account": "chatgpt-account",
-        "claude-scheduled-task": "claude-account-task",
-        "cursor-automation": "cursor-account-automation",
-    }
     capability_state, reason = derive_semantic_product_state(
         config,
         availability,
@@ -1002,7 +1029,8 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
         "execution_strategy": execution_strategy,
         "preferred_auth_mode": preferred_auth_mode,
         "active_adapter": active_adapter,
-        "auth_source": auth_source_map.get(execution_strategy, "none"),
+        "execution_owner": _strategy_execution_owner(execution_strategy),
+        "auth_source": _strategy_auth_source(execution_strategy),
         "candidate_strategies": availability.get("candidate_strategies", candidate_strategies),
         "recommended_strategy": availability.get("recommended_strategy"),
         "detected_tools": availability.get("detected_tools", []),
@@ -1023,6 +1051,6 @@ def dream_status_semantic(store: MemoryStore) -> dict[str, Any]:
             "active": sum(1 for f in families if f.get("status", "active") == "active"),
         },
         "last_semantic_run": dream_state.get("semantic_mode"),
-        "trust_boundary": _strategy_trust_boundary(config.get("execution_strategy", "deterministic")),
+        "trust_boundary": _strategy_trust_boundary(execution_strategy),
         "budgets": config.get("budgets", {}),
     }

@@ -34,6 +34,13 @@ import { IdLink } from '~/components/IdLink';
 import { cachedFetch } from '~/lib/cache';
 import { MemoryTypeChip } from '~/components/MemoryTypeChip';
 import { memoryPreview, memoryTypePresentation, stripMemoryPrefix } from '~/lib/memoryPresentation';
+import {
+  MEMORY_STATUS_GLOSSARY,
+  MEMORY_TAG_GLOSSARY,
+  MEMORY_TYPE_GLOSSARY,
+  helpForMemoryType,
+  helpForMemoryStatus,
+} from '~/lib/observeGlossary';
 
 function asPreview(v: unknown): string | undefined {
   if (v == null) return undefined;
@@ -157,23 +164,25 @@ interface MemorySurfacePayload extends OverviewPayload {
       status?: string;
       updated_at?: string;
     }>;
-    type_mix?: Record<string, number>;
+    type_mix?: Record<string, number> | Array<{ type?: string; count?: number }>;
   };
 }
 
-const STATUS_ORDER = ['active', 'contested', 'learned', 'pruned', 'rejected', 'archived'];
+const STATUS_ORDER = ['active', 'contested', 'superseded', 'learned', 'pruned', 'rejected', 'archived', 'stale'];
 
 const STATUS_COPY: Record<string, { label: string; tone: ChipVariant; help: string }> = {
-  active: { label: 'Active', tone: 'ok', help: 'Durable memories trusted by the runtime.' },
+  active: { label: 'Active', tone: 'ok', help: helpForMemoryStatus('active') },
   contested: {
     label: 'Contested',
     tone: 'warn',
-    help: 'Memories with conflicting evidence — review or let auto-reviewer decide.',
+    help: helpForMemoryStatus('contested'),
   },
-  learned: { label: 'Learned', tone: 'warn', help: 'Per-context learnings the runtime is still trying out.' },
-  pruned: { label: 'Pruned', tone: 'danger', help: 'Removed during a recent prune cycle (reversible).' },
-  rejected: { label: 'Rejected', tone: 'danger', help: 'Operator-suppressed; will not surface in retrievals.' },
-  archived: { label: 'Archived', tone: 'neutral', help: 'Inactive but retained for forensic review.' },
+  superseded: { label: 'Superseded', tone: 'neutral', help: helpForMemoryStatus('superseded') },
+  learned: { label: 'Learned', tone: 'warn', help: helpForMemoryStatus('learned') },
+  pruned: { label: 'Pruned', tone: 'danger', help: helpForMemoryStatus('pruned') },
+  rejected: { label: 'Rejected', tone: 'danger', help: helpForMemoryStatus('rejected') },
+  archived: { label: 'Archived', tone: 'neutral', help: helpForMemoryStatus('archived') },
+  stale: { label: 'Stale', tone: 'neutral', help: helpForMemoryStatus('stale') },
 };
 
 function SurfaceDashboard(): JSX.Element {
@@ -206,10 +215,13 @@ function SurfaceDashboard(): JSX.Element {
 
   const typeEntries = (): Array<[string, number]> => {
     const tm = surface().type_mix;
-    const mix: Record<string, number> =
-      tm && Object.keys(tm).length > 0 ? tm : counts().by_type ?? {};
-    const list = Object.entries(mix).sort((a, b) => b[1] - a[1]);
-    return list as Array<[string, number]>;
+    if (Array.isArray(tm) && tm.length > 0) {
+      return tm
+        .map((entry) => [entry.type ?? 'unknown', Number(entry.count ?? 0)] as [string, number])
+        .sort((a, b) => b[1] - a[1]);
+    }
+    const mix: Record<string, number> = tm && Object.keys(tm).length > 0 ? tm : counts().by_type ?? {};
+    return Object.entries(mix).sort((a, b) => b[1] - a[1]) as Array<[string, number]>;
   };
   const typeMax = (): number => Math.max(1, ...typeEntries().map(([, v]) => v));
 
@@ -268,6 +280,53 @@ function SurfaceDashboard(): JSX.Element {
               />
             </Show>
           </section>
+
+          <details class="rounded-md hairline bg-surface px-4 py-3 text-[11.5px] text-text-muted">
+            <summary class="cursor-pointer text-[11.5px] font-medium text-text">
+              Memory glossary
+            </summary>
+            <div class="mt-3 grid gap-3 lg:grid-cols-3">
+              <div>
+                <div class="mb-1 text-[10px] uppercase tracking-[0.08em] text-text-subtle">Statuses</div>
+                <div class="flex flex-col gap-1.5">
+                  <For each={MEMORY_STATUS_GLOSSARY}>
+                    {(entry) => (
+                      <div>
+                        <span class="font-medium text-text" title={entry.help}>{entry.label}</span>{' '}
+                        <span>{entry.help}</span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+              <div>
+                <div class="mb-1 text-[10px] uppercase tracking-[0.08em] text-text-subtle">Common types</div>
+                <div class="flex flex-col gap-1.5">
+                  <For each={MEMORY_TYPE_GLOSSARY}>
+                    {(entry) => (
+                      <div>
+                        <span class="font-mono text-[10.5px] text-text" title={entry.help}>{entry.key}</span>{' '}
+                        <span>{entry.help}</span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+              <div>
+                <div class="mb-1 text-[10px] uppercase tracking-[0.08em] text-text-subtle">Common tags</div>
+                <div class="flex flex-col gap-1.5">
+                  <For each={MEMORY_TAG_GLOSSARY}>
+                    {(entry) => (
+                      <div>
+                        <span class="font-mono text-[10.5px] text-text" title={entry.help}>{entry.key}</span>{' '}
+                        <span>{entry.help}</span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </div>
+          </details>
 
           <section class="grid gap-3 lg:grid-cols-[1fr_1.4fr]">
             {/* Status distribution */}
@@ -335,7 +394,7 @@ function SurfaceDashboard(): JSX.Element {
                         type="button"
                         onClick={() => navigate(`/memories/explorer?type=${encodeURIComponent(k)}`)}
                         class="row-hover grid grid-cols-[180px_1fr_50px] items-center gap-3 rounded px-1 py-1 text-left"
-                        title={`Filter Explorer by type=${k}`}
+                        title={`Filter Explorer by type=${k}. ${helpForMemoryType(k)}`}
                       >
                         <span class="truncate text-[11px] text-text">
                           {memoryTypePresentation(k).label}

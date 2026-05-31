@@ -17,6 +17,7 @@ import { IdLink } from '~/components/IdLink';
 import { MemoryInspector } from '~/components/MemoryInspector';
 import { RawFormattedView } from '~/components/RawFormattedView';
 import { cachedFetch, peek } from '~/lib/cache';
+import { RUN_KIND_GLOSSARY, helpForRunKind } from '~/lib/observeGlossary';
 
 function asPreview(v: unknown): string | undefined {
   if (v == null) return undefined;
@@ -233,6 +234,7 @@ export default function RunsRoute(): JSX.Element {
         const k = (r as { kind?: string; type?: string }).kind ??
           (r as { type?: string }).type ??
           'run';
+        const help = helpForRunKind(k);
         return (
           <button
             type="button"
@@ -241,7 +243,7 @@ export default function RunsRoute(): JSX.Element {
               setKindFilter(k);
             }}
             class="cursor-pointer rounded px-1 -mx-1 font-mono text-xs text-text-muted transition-colors hover:bg-[color-mix(in_oklab,rgb(var(--c-accent))_8%,transparent)] hover:text-accent"
-            title={`Filter by kind: ${k}`}
+            title={`Filter by kind: ${k}. ${help}`}
           >
             {k}
           </button>
@@ -300,7 +302,7 @@ export default function RunsRoute(): JSX.Element {
   ];
 
   return (
-    <Page title="Runs" subtitle="Recent dream cycles and projection jobs">
+    <Page title="Runs" subtitle="Runtime activity log: consolidation jobs, dream cycles, and automation projections">
       <FilterBar
         search={search()}
         onSearchChange={setSearch}
@@ -324,6 +326,28 @@ export default function RunsRoute(): JSX.Element {
           </div>
         }
       />
+
+      <section class="rounded-md hairline bg-surface px-3 py-2 text-[11.5px] text-text-muted">
+        <div class="flex flex-col gap-2">
+          <p>
+            <span class="font-medium text-text">Runs are the audit log.</span>{' '}
+            A consolidation row means OpenDream processed memory inputs. Dream cycles are a smaller subset; use the Dreams page when you only want dream outcomes.
+          </p>
+          <details>
+            <summary class="cursor-pointer font-medium text-text">Run kind glossary</summary>
+            <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <For each={RUN_KIND_GLOSSARY}>
+                {(entry) => (
+                  <div class="rounded bg-surface-elevated/60 px-2 py-1.5">
+                    <div class="font-mono text-[10.5px] text-text" title={entry.help}>{entry.key}</div>
+                    <div>{entry.help}</div>
+                  </div>
+                )}
+              </For>
+            </div>
+          </details>
+        </div>
+      </section>
 
       <Show when={!runs.loading} fallback={<SkeletonRows rows={8} />}>
         <Show

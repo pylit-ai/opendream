@@ -14,7 +14,7 @@ Short recorded demos for command reference pages, docs, launch notes, and walkth
 
 ![OpenDream CLI quick start](../assets/demos/01-first-run-local-memory.gif)
 
-Creates a local OpenDream workspace, activates configured agent surfaces when present, and checks human-readable status.
+Creates a local OpenDream workspace, lets `init` activate configured agent surfaces by default, and checks human-readable status.
 
 ## Agent context and safety
 
@@ -36,7 +36,7 @@ Runs the coding-agent showcase eval and summarizes stateless score, memory-assis
 
 ![Dream and Observe](../assets/demos/05-dream-observe.gif)
 
-Runs a transcript-backed dream pass, then refreshes the read-only observability index.
+Imports local transcript sessions, runs a transcript-backed dream pass, then refreshes the read-only observability index.
 
 ![Agent contract export](../assets/demos/06-agent-contract.gif)
 

@@ -165,8 +165,8 @@ the index entry without touching anything else.
 
 ```bash
 uv tool install opendream   # or: pipx install opendream
-opendream init --workspace "$PWD" --activate-configured
-opendream status --workspace "$PWD"
+opendream init --workspace .
+opendream status --workspace .
 ```
 
 See the [README](../README.md) quickstart for the full walkthrough.

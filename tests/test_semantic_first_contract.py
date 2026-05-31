@@ -6,6 +6,8 @@ from pathlib import Path
 
 from opendream.activation import compressed_status, doctor_memory
 from opendream.contract_export import build_contract_export
+from opendream.integration import prepare_context
+from opendream.models import MemoryRecord
 from opendream.observability import index_observability
 from opendream.storage import MemoryStore
 
@@ -93,6 +95,56 @@ class SemanticFirstContractTests(unittest.TestCase):
         self.assertEqual(payload["semantic_capability_state"], "setup_required")
         self.assertIn("memory_quality", payload)
         self.assertIn("next_action", payload)
+
+    def test_prepare_context_exposes_prompt_block_provenance(self) -> None:
+        self.store.save_durable_records(
+            [
+                MemoryRecord(
+                    memory_id="mem_redis_retry_contract",
+                    type="project_decision",
+                    scope="project",
+                    title="Redis retry workflow",
+                    summary="Run Redis locally before retrying the worker integration tests.",
+                    body=(
+                        "Redis retry behavior depends on starting local Redis before running "
+                        "the worker integration tests."
+                    ),
+                    status="active",
+                    confidence=0.9,
+                    salience=0.8,
+                    source_event_ids=[],
+                    supersedes=[],
+                    conflicts_with=[],
+                    valid_from="2026-04-19T12:00:00Z",
+                    valid_to=None,
+                    access_count=0,
+                    last_accessed_at=None,
+                    created_at="2026-04-19T12:00:00Z",
+                    updated_at="2026-04-19T12:00:00Z",
+                    provenance_tier="runtime_verified",
+                    claim_class="externally_checkable",
+                )
+            ]
+        )
+
+        payload = prepare_context(
+            self.store,
+            query="How should I retry Redis worker tests?",
+            now="2026-04-19T12:05:00Z",
+        )
+
+        self.assertTrue(payload["session_id"])
+        durable_blocks = [
+            block
+            for block in payload["injected_blocks"]
+            if block["source_type"] == "durable_memory"
+        ]
+        self.assertTrue(durable_blocks)
+        block = durable_blocks[0]
+        self.assertEqual(block["source_id"], "mem_redis_retry_contract")
+        self.assertEqual(block["trust_class"], "canonical")
+        self.assertTrue(block["prompt_visible"])
+        self.assertEqual(block["store_kind"], "project")
 
     def test_contract_export_describes_semantic_read_model_fields(self) -> None:
         payload = build_contract_export(self.workspace)

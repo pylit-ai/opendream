@@ -107,7 +107,7 @@ opendream verify activation-capture --workspace "$WS" --targets all-supported
 If you only want surfaces for agents OpenDream **detects** in the tree:
 
 ```bash
-opendream init --workspace "$WS" --activate-configured
+opendream init --workspace "$WS"
 opendream activate --workspace "$WS" --repair
 opendream verify activation-capture --workspace "$WS" --targets configured
 opendream status --workspace "$WS"

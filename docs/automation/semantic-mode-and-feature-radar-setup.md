@@ -24,7 +24,7 @@ The core runtime is **stdlib-only**. Provider entries and API keys are **real** 
 
 ### Prerequisites
 
-- `opendream init --workspace "$PWD"` (or an existing initialized workspace).
+- `opendream init --workspace .` from the workspace directory (or an existing initialized workspace).
 - Know your **memory root** (usually `.opendream/memory` under the workspace). Config files below are relative to **`<memory-root>/state/`**.
 
 ### 1) Capture full default semantic config

@@ -15,7 +15,11 @@
 
 **Local-first memory for coding agents** — activate OpenDream inside the repo you already use, watch what memory is doing in a browser, and keep the advanced runtime machinery available when you need it.
 
-![OpenDream UI overview](./docs/assets/demos/ui/opendream-ui-overview.gif)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/demos/ui/opendream-ui-overview-dark.gif">
+  <source media="(prefers-color-scheme: light)" srcset="./docs/assets/demos/ui/opendream-ui-overview.gif">
+  <img alt="OpenDream UI overview" src="./docs/assets/demos/ui/opendream-ui-overview.gif">
+</picture>
 
 The observability UI shows recent agent activity, selected memories, context-use audit records, review decisions, and workspace health without making you read raw JSON first. Full light and dark demo cuts: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
 
@@ -34,12 +38,10 @@ The observability UI shows recent agent activity, selected memories, context-use
 
 ```bash
 uv tool install opendream   # or: pipx install opendream
-WS="$PWD"
-opendream init --workspace "$WS"
-opendream activate --workspace "$WS" --targets all-supported
-opendream verify activation-capture --workspace "$WS" --targets all-supported
-opendream status --workspace "$WS"
-opendream deactivate --workspace "$WS"
+opendream init --workspace .
+opendream verify activation-capture --workspace . --targets configured
+opendream status --workspace .
+opendream deactivate --workspace .
 ```
 
 If your installed CLI does not show `activate`, `verify`, `deactivate`, `semantic`, or
@@ -61,10 +63,10 @@ OpenDream's first-run path is intentionally small. These clips are useful beside
 
 | Demo | What it shows |
 |------|---------------|
-| ![OpenDream CLI quick start](./docs/assets/demos/01-first-run-local-memory.gif) | `init`, activation, status, and deactivation in a local workspace. |
+| ![OpenDream CLI quick start](./docs/assets/demos/01-first-run-local-memory.gif) | `init` with default activation, status, and deactivation in a local workspace. |
 | ![Agent context retrieval](./docs/assets/demos/02-agent-context-retrieval.gif) | `prepare-context` turns durable repo memory into prompt-ready agent context. |
 | ![Memory safety abstention](./docs/assets/demos/03-memory-safety-abstention.gif) | Unrelated prompts return an explicit no-match instead of injecting stale or irrelevant memory. |
-| ![Showcase evaluation proof](./docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
+| ![Showcase evaluation report](./docs/assets/demos/04-eval-proof.gif) | The showcase eval compares stateless vs memory-assisted answers and keeps negative controls in the report. |
 
 UI demo gallery: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md). CLI demo gallery: [`docs/showcase/cli-demos.md`](./docs/showcase/cli-demos.md).
 Brand motion assets: [`frontend/assets/animation/README.md`](./frontend/assets/animation/README.md).
@@ -122,12 +124,11 @@ sudo apt-get install jq
 OpenDream is an **activation-first CLI**. For normal use, the product contract is:
 
 ```bash
-opendream init --workspace "$PWD"
-opendream activate --workspace "$PWD" --targets all-supported
-opendream verify activation-capture --workspace "$PWD" --targets all-supported
-opendream status --workspace "$PWD"
-opendream activate --workspace "$PWD" --repair
-opendream deactivate --workspace "$PWD"
+opendream init --workspace .
+opendream verify activation-capture --workspace . --targets configured
+opendream status --workspace .
+opendream activate --workspace . --repair
+opendream deactivate --workspace .
 ```
 
 The lower-level runtime remains available, but it is not the main mental model.
@@ -143,13 +144,14 @@ Agent-oriented details (workspace vs cwd, `memory_layout`, `empty_reason` / `hin
 
 **Recommended activation workflow**
 
-1. `opendream init --workspace "$PWD"` — create the memory layout.
-2. `opendream activation-plan --workspace "$PWD" --targets configured` — dry-run: see which surfaces would change (no files written). Use `--targets all-supported` to preview every built-in agent target.
-3. `opendream activate --workspace "$PWD" --targets configured` — apply only targets OpenDream detects (Claude/Codex/OpenClaw/Cursor/Gemini/Copilot markers in the tree). For a tool that was not detected yet, run e.g. `opendream activate --workspace "$PWD" --targets cursor` once to create `.cursor/rules/opendream.mdc` and hook scripts.
-4. `opendream verify activation-capture --workspace "$PWD" --targets configured` — run generated hooks in the selected workspace and prove diagnostic memory capture.
-5. `opendream status --workspace "$PWD"` — report the latest capture verification state (`never_run`, `passed`, or `failed`) with the next action.
-6. `opendream activate --workspace "$PWD" --repair` — restore drifted managed files and hook entries.
-7. `opendream doctor --workspace "$PWD" --surface agents` — inspect managed surfaces without writing diagnostic memory.
+1. `opendream init --workspace .` — create the memory layout and activate configured agent surfaces by default.
+2. `opendream activation-plan --workspace . --targets configured` — optional dry-run: see which surfaces are detected. Use `--targets all-supported` to preview every built-in agent target.
+3. `opendream verify activation-capture --workspace . --targets configured` — run generated hooks in the selected workspace and prove diagnostic memory capture.
+4. `opendream status --workspace .` — report the latest capture verification state (`never_run`, `passed`, or `failed`) with the next action.
+5. `opendream activate --workspace . --repair` — restore drifted managed files and hook entries.
+6. `opendream doctor --workspace . --surface agents` — inspect managed surfaces without writing diagnostic memory.
+
+For a tool that was not detected yet, run e.g. `opendream activate --workspace . --targets cursor` once to create `.cursor/rules/opendream.mdc` and hook scripts.
 
 Instruction-only targets (Cursor rules, `GEMINI.md`, `.github/copilot-instructions.md`) ship the same pre/post shell hooks as Codex; the agent must still run those commands when the host has no native OpenDream hooks.
 
@@ -272,7 +274,7 @@ Built from the same on-disk artifacts as the runtime (read model is derived; fil
 - Health APIs: `/api/status`, `/api/health`, and `/api/health/live-check`
 - Audited writes: annotations, review decisions, exports
 - SSE at `/api/stream/status`
-- Desktop-first routes: `/overview`, `/memories`, `/runs`, `/retrievals`, `/sessions`, `/reviews`, `/graph`, `/evals`, `/exports`
+- Desktop-first routes: `/overview`, `/memories`, `/dreams`, `/runs`, `/retrievals`, `/sessions`, `/reviews`, `/graph`, `/evals`, `/exports`
 
 `prepare-context` persists context-assembly artifacts so the context viewer can show what the agent actually saw.
 
@@ -296,7 +298,7 @@ Use OpenDream as an **activation-first runtime**:
 <summary><strong>Layered stores</strong> (project + optional global)</summary>
 
 ```bash
-opendream init --workspace "$PWD"
+opendream init --workspace .
 opendream init --workspace ~/.opendream-global --store-kind global
 ```
 
@@ -365,13 +367,13 @@ depend on manual runs. Use `service enable|disable` or the observe UI
 For supported configured agents, the standard operator path is:
 
 ```bash
-opendream init --workspace "$PWD"
-opendream status --workspace "$PWD"
-opendream activate --workspace "$PWD" --repair
-opendream deactivate --workspace "$PWD"
+opendream init --workspace .
+opendream status --workspace .
+opendream activate --workspace . --repair
+opendream deactivate --workspace .
 ```
 
-Use `opendream init --workspace "$PWD" --no-activate-configured` only when
+Use `opendream init --workspace . --no-activate-configured` only when
 you need a storage-only layout and do not want OpenDream to install repo-local
 agent activation surfaces.
 

@@ -78,7 +78,7 @@ from .service import (
     uninstall_service,
     update_service,
 )
-from .sessions import cleanup_orphans
+from .sessions import cleanup_orphans, clear_session_id, current_session_id, set_session_id
 from .showcase import (
     DEFAULT_DEMO_SCENARIO,
     SHOWCASE_SCENARIO,
@@ -86,7 +86,16 @@ from .showcase import (
     showcase_report_path,
 )
 from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, store_sort_key
-from .util import CLI_JSON_VERSION, FIXTURE_ROOT, json_dumps, read_json, stable_id, to_iso, utc_now, write_json
+from .util import (
+    CLI_JSON_VERSION,
+    FIXTURE_ROOT,
+    json_dumps,
+    read_json,
+    stable_id,
+    to_iso,
+    utc_now,
+    write_json,
+)
 from .validation import validate_document
 from .verification import verify_activation_capture
 
@@ -511,6 +520,8 @@ def command_hook_claude_pre_task(args: argparse.Namespace) -> dict[str, Any]:
     payload = _read_hook_stdin()
     query = _string_field(payload, "prompt") or args.fallback_query
     store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    session_id = _string_field(payload, "session_id") or stable_id("session", query)
+    set_session_id(session_id, store=store)
     context = prepare_context(
         store,
         query=query,
@@ -538,33 +549,36 @@ def command_hook_claude_post_task(args: argparse.Namespace) -> dict[str, Any]:
         or _string_field(payload, "summary")
         or args.fallback_summary
     )
-    event = emit_event(
-        store,
-        kind="task_outcome",
-        content=summary,
-        scope="project",
-        channel="cli",
-        message_ref=args.message_ref,
-        session_id=_string_field(payload, "session_id"),
-        tags=args.tag,
-        reporting_agent=_resolve_reporting_agent(
-            fallback={
-                "agent_id": "claude-code",
-                "agent_label": "Claude Code",
-                "runtime": "claude-code",
-                "adapter_id": "claude-code",
-            }
-        ),
-    )
-    maintenance = maintain(store)
-    worker = dream_worker(store, max_polls=1)
-    return {
-        "status": "completed",
-        "workspace": str(store.workspace),
-        "event": event,
-        "maintain": maintenance,
-        "dream_worker": worker,
-    }
+    try:
+        event = emit_event(
+            store,
+            kind="task_outcome",
+            content=summary,
+            scope="project",
+            channel="cli",
+            message_ref=args.message_ref,
+            session_id=_string_field(payload, "session_id") or current_session_id(store),
+            tags=args.tag,
+            reporting_agent=_resolve_reporting_agent(
+                fallback={
+                    "agent_id": "claude-code",
+                    "agent_label": "Claude Code",
+                    "runtime": "claude-code",
+                    "adapter_id": "claude-code",
+                }
+            ),
+        )
+        maintenance = maintain(store)
+        worker = dream_worker(store, max_polls=1)
+        return {
+            "status": "completed",
+            "workspace": str(store.workspace),
+            "event": event,
+            "maintain": maintenance,
+            "dream_worker": worker,
+        }
+    finally:
+        clear_session_id(store=store)
 
 
 def command_extract(args: argparse.Namespace) -> dict[str, Any]:
@@ -668,6 +682,10 @@ def command_prepare_context(args: argparse.Namespace) -> dict[str, Any]:
         now=args.now,
         reporting_agent=_resolve_reporting_agent(args),
     )
+    if args.activate_session and stores:
+        session_id = str(context.get("session_id") or "").strip()
+        if session_id:
+            set_session_id(session_id, store=stores[0])
     if args.output == "prompt":
         return {"__raw_output__": context["prompt_context"]}
     if args.output == "compact-json":
@@ -679,6 +697,7 @@ def compact_prepare_context_output(context: dict[str, Any]) -> dict[str, Any]:
     keys = (
         "cli_output_version",
         "context_id",
+        "session_id",
         "workspace",
         "stores",
         "summary",
@@ -687,6 +706,7 @@ def compact_prepare_context_output(context: dict[str, Any]) -> dict[str, Any]:
         "selection",
         "context_pruning",
         "prompt_context_visibility",
+        "injected_blocks",
         "suppression_summary",
         "selected_memory_ids",
         "selected_learned_context_ids",
@@ -2106,6 +2126,11 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_context_parser.add_argument("--agent-model-version")
     prepare_context_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     prepare_context_parser.add_argument(
+        "--activate-session",
+        action="store_true",
+        help="Persist this context session id for the following managed post-task hook",
+    )
+    prepare_context_parser.add_argument(
         "--output",
         choices=["full-json", "compact-json", "prompt"],
         default="full-json",
@@ -2885,6 +2910,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(sessions_cleanup_parser)
     sessions_cleanup_parser.set_defaults(func=command_sessions_cleanup)
 
+    sessions_clear_parser = sessions_subparsers.add_parser(
+        "clear-active",
+        help="Clear the active session token for a workspace",
+    )
+    sessions_clear_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(sessions_clear_parser)
+    sessions_clear_parser.set_defaults(func=command_sessions_clear_active)
+
     return parser
 
 
@@ -2976,6 +3009,16 @@ def command_sessions_cleanup(args: argparse.Namespace) -> dict[str, Any]:
             raise SystemExit("Aborted.")
     result = cleanup_orphans(store, orphans=do_orphans, zero_events=do_zero, dry_run=dry_run)
     return result
+
+
+def command_sessions_clear_active(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=getattr(args, "memory_dir", None))
+    clear_session_id(store=store)
+    return {
+        "status": "completed",
+        "workspace": str(store.workspace),
+        "active_session_cleared": True,
+    }
 
 
 def main() -> int:

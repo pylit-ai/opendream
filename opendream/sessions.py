@@ -25,7 +25,7 @@ def _workspace_token_path(store: MemoryStore) -> Path:
     return store.memory_root / ".active_session"
 
 
-def current_session_id() -> str | None:
+def current_session_id(store: MemoryStore | None = None) -> str | None:
     """Return the current session id, or None if not set.
 
     Checks the contextvar first; falls back to the workspace token file when a
@@ -35,6 +35,12 @@ def current_session_id() -> str | None:
     val = _SESSION_ID_VAR.get()
     if val is not None:
         return val
+    if store is not None:
+        try:
+            session_id = _workspace_token_path(store).read_text(encoding="utf-8").strip()
+            return session_id or None
+        except Exception:
+            return None
     return None
 
 

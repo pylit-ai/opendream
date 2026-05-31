@@ -130,11 +130,11 @@ def pre_task_script(store: MemoryStore, target: str) -> str:
             'mkdir -p "$(dirname "$OUTPUT")"',
             'if [ -n "$GLOBAL" ]; then',
             (
-                f'  {command} --query "$QUERY" --output compact-json '
+                f'  {command} --query "$QUERY" --output compact-json --activate-session '
                 '--include-global --global-workspace "$GLOBAL" > "$OUTPUT"'
             ),
             "else",
-            f'  {command} --query "$QUERY" --output compact-json > "$OUTPUT"',
+            f'  {command} --query "$QUERY" --output compact-json --activate-session > "$OUTPUT"',
             "fi",
             'if [ "${OPENDREAM_QUERY_STRICT:-0}" = "1" ] && grep -q \'"code": "placeholder_query"\' "$OUTPUT"; then',
             '  cat "$OUTPUT"',
@@ -171,6 +171,7 @@ def post_task_script(store: MemoryStore, target: str) -> str:
     emit_command = opendream_command(store, "emit-event")
     maintain_command = opendream_command(store, "maintain")
     worker_command = opendream_command(store, "dream worker")
+    clear_session_command = opendream_command(store, "sessions clear-active")
     ref = f"{target}-post-task"
     return "\n".join(
         [
@@ -179,6 +180,7 @@ def post_task_script(store: MemoryStore, target: str) -> str:
             "",
             'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
             *workspace_guard_lines(store),
+            f"trap '{clear_session_command} >/dev/null 2>&1 || true' EXIT",
             'SUMMARY="${1:-${OPENDREAM_SUMMARY:-Task completed.}}"',
             f'MESSAGE_REF="${{OPENDREAM_REF:-{ref}}}"',
             *tag_args_lines(),
@@ -188,6 +190,7 @@ def post_task_script(store: MemoryStore, target: str) -> str:
             ),
             f"{maintain_command}",
             f"{worker_command} --once",
+            f"{clear_session_command}",
             "",
         ]
     )
@@ -207,17 +210,18 @@ def openclaw_hook_script(store: MemoryStore) -> str:
             'PAYLOAD="${2:-${OPENCLAW_TASK:-current task}}"',
             'WORKSPACE="${OPENDREAM_WORKSPACE:-$PWD}"',
             *workspace_guard_lines(store),
+            f'trap \'{opendream_command(store, "sessions clear-active")} >/dev/null 2>&1 || true\' EXIT',
             'GLOBAL="${OPENDREAM_GLOBAL_WORKSPACE:-}"',
             f'OUTPUT="$WORKSPACE/{CONTEXT_DIR}/openclaw-pre-task.json"',
             'mkdir -p "$(dirname "$OUTPUT")"',
             'if [ "$MODE" = "pre-plan" ]; then',
             '  if [ -n "$GLOBAL" ]; then',
             (
-                f'    {prepare_command} --query "$PAYLOAD" --output compact-json '
+                f'    {prepare_command} --query "$PAYLOAD" --output compact-json --activate-session '
                 '--include-global --global-workspace "$GLOBAL" > "$OUTPUT"'
             ),
             "  else",
-            f'    {prepare_command} --query "$PAYLOAD" --output compact-json > "$OUTPUT"',
+            f'    {prepare_command} --query "$PAYLOAD" --output compact-json --activate-session > "$OUTPUT"',
             "  fi",
             '  cat "$OUTPUT"',
             "  exit 0",
@@ -229,6 +233,7 @@ def openclaw_hook_script(store: MemoryStore) -> str:
             ),
             f"{maintain_command}",
             f"{worker_command} --once",
+            f'{opendream_command(store, "sessions clear-active")}',
             "",
         ]
     )

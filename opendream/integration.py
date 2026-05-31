@@ -344,7 +344,7 @@ def emit_event(
     event_timestamp = timestamp or to_iso(utc_now())
     computed_session_id = (
         session_id
-        or current_session_id()
+        or current_session_id(store)
         or stable_id("session", event_timestamp, store.store_kind, scope)
     )
     computed_turn_id = turn_id or stable_id("turn", event_timestamp, kind, message_ref)
@@ -992,6 +992,7 @@ def prepare_context(
     ).strip()
 
     primary_store = store_list[0]
+    session_id = current_session_id(primary_store) or stable_id("session", query)
     selected_learned_ids = [str(item.get("record_id") or "") for item in selected_learned_context]
     omitted = [item for item in excluded if item.get("memory_id") not in selected_ids]
     candidate_count = (
@@ -1138,6 +1139,63 @@ def prepare_context(
         *selected_learned_ids,
         *[item["record_id"] for item in selected_automation],
     ]
+    injected_blocks: list[dict[str, Any]] = []
+    for rank, item in enumerate(selected, start=1):
+        injected_blocks.append(
+            {
+                "rank": rank,
+                "source_type": "durable_memory",
+                "source_id": item.get("memory_id"),
+                "trust_class": "canonical",
+                "prompt_visible": True,
+                "store_kind": item.get("store_kind"),
+                "workspace": item.get("workspace"),
+                "title": item.get("title"),
+                "summary": item.get("summary"),
+            }
+        )
+    for rank, item in enumerate(filtered_startup_entries, start=1):
+        injected_blocks.append(
+            {
+                "rank": rank,
+                "source_type": "startup_index",
+                "source_id": item.get("memory_id"),
+                "trust_class": "pointer",
+                "prompt_visible": True,
+                "store_kind": item.get("store_kind"),
+                "workspace": item.get("workspace"),
+                "title": item.get("title"),
+                "summary": item.get("summary"),
+            }
+        )
+    for rank, item in enumerate(selected_learned_context, start=1):
+        injected_blocks.append(
+            {
+                "rank": rank,
+                "source_type": "learned_context",
+                "source_id": item.get("record_id"),
+                "trust_class": "verified_inferred",
+                "prompt_visible": True,
+                "verifier_status": item.get("verifier_status"),
+                "conflict_state": item.get("conflict_state"),
+                "title": item.get("summary"),
+                "summary": item.get("details") or item.get("summary"),
+            }
+        )
+    for rank, item in enumerate(selected_automation, start=1):
+        injected_blocks.append(
+            {
+                "rank": rank,
+                "source_type": "automation_projection",
+                "source_id": item.get("record_id"),
+                "trust_class": "non_canonical_projection",
+                "prompt_visible": True,
+                "store_kind": item.get("store_kind"),
+                "workspace": item.get("workspace"),
+                "title": item.get("title"),
+                "summary": item.get("summary"),
+            }
+        )
     memory_use_contract = {
         "context_id": context_id,
         "usage_required": bool(selected_context_ids),
@@ -1163,7 +1221,7 @@ def prepare_context(
 
     assembly = ContextAssembly(
         context_id=context_id,
-        session_id=current_session_id() or stable_id("session", query),
+        session_id=session_id,
         turn_id=stable_id("turn", timestamp, query),
         retrieval_run_id=retrieval_run_id,
         startup_index_snapshot=filtered_startup_entries,
@@ -1205,6 +1263,7 @@ def prepare_context(
             "saved_token_estimate": max((raw_character_count - injected_character_count) // 4, 0),
         },
         prompt_context_visibility=prompt_context_visibility,
+        injected_blocks=injected_blocks,
         selected_learned_context_items=selected_learned_context_items,
         suppressed_learned_context_items=suppressed_learned_context_items,
     )
@@ -1216,6 +1275,7 @@ def prepare_context(
         "workspace": str(store_list[0].workspace) if len(store_list) == 1 else None,
         "stores": [_store_descriptor(store) for store in store_list],
         "context_id": context_id,
+        "session_id": session_id,
         "audit": {
             "context_path": (
                 str(context_audit_path.relative_to(primary_store.workspace))
@@ -1257,6 +1317,7 @@ def prepare_context(
             "saved_token_estimate": max((raw_character_count - injected_character_count) // 4, 0),
         },
         "prompt_context_visibility": prompt_context_visibility,
+        "injected_blocks": injected_blocks,
         "memory_use_contract": memory_use_contract,
         "selected_memory_ids": selected_ids,
         "selected_learned_context_ids": selected_learned_ids,

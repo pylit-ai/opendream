@@ -726,6 +726,10 @@ class TestSemanticStatus(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["execution_strategy"], "direct-provider")
+        self.assertEqual(result["execution_owner"], "opendream-local")
+        self.assertEqual(result["auth_source"], "provider-api-key")
+        self.assertEqual(result["trust_boundary"], "operator-managed-api-key")
         self.assertGreater(result["query_families_selected"], 0)
         self.assertGreaterEqual(result["learned_context_created"], 1)
         self.assertGreaterEqual(len(self.store.load_learned_context_records()), 1)
@@ -737,6 +741,7 @@ class TestSemanticStatus(unittest.TestCase):
         self.assertGreaterEqual(trace["verification"]["verdict_counts"]["approve"], 1)
         self.assertGreaterEqual(len(trace["materialization"]["promoted_record_ids"]), 1)
         self.assertEqual(result["no_materialization_reason"], "")
+        validate_document("semantic-dream-report.schema.json", result)
 
         repeated = semantic_dream_run(
             self.store,
@@ -749,6 +754,7 @@ class TestSemanticStatus(unittest.TestCase):
         self.assertEqual(repeated["learned_context_created"], 0)
         self.assertIn("equivalent-active-learned-context", repeated["no_materialization_reason"])
         self.assertEqual(len(self.store.load_learned_context_records()), 1)
+        validate_document("semantic-dream-report.schema.json", repeated)
 
     def test_semantic_dream_run_explains_no_signal_noop_phase(self) -> None:
         from opendream.semantic_dreamer import semantic_dream_run

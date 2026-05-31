@@ -10,18 +10,19 @@
 
 These short recordings are the best first look at OpenDream's product surface. They use a disposable sample workspace and show the browser UI that sits on top of the local memory store.
 
-![OpenDream UI overview](../assets/demos/ui/opendream-ui-overview.gif)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/demos/ui/opendream-ui-overview-dark.gif">
+  <source media="(prefers-color-scheme: light)" srcset="../assets/demos/ui/opendream-ui-overview.gif">
+  <img alt="OpenDream UI overview" src="../assets/demos/ui/opendream-ui-overview.gif">
+</picture>
 
 ## Product tour
 
 | Demo | Light | Dark | What it shows |
 |------|-------|------|---------------|
-| Pick up context | [MP4](../assets/demos/ui/light-pick-up-context.mp4) | [MP4](../assets/demos/ui/dark-pick-up-context.mp4) | Recent activity, memory health, and retrieval evidence when an agent returns to a workspace. |
-| Observability tour | [MP4](../assets/demos/ui/light-observability-tour.mp4) | [MP4](../assets/demos/ui/dark-observability-tour.mp4) | The main dashboard, memory surfaces, and workspace status without opening raw JSON. |
-| Agent context | [MP4](../assets/demos/ui/light-agent-context.mp4) | [MP4](../assets/demos/ui/dark-agent-context.mp4) | How OpenDream assembles prompt-ready context and exposes the source memories behind it. |
-| Context-use proof | [MP4](../assets/demos/ui/light-context-use-proof.mp4) / [WebM](../assets/demos/ui/light-context-use-proof.webm) | [MP4](../assets/demos/ui/dark-context-use-proof.mp4) / [WebM](../assets/demos/ui/dark-context-use-proof.webm) | How OpenDream distinguishes selected context from recorded memory use after an agent runs. |
-| Human review | [MP4](../assets/demos/ui/light-human-review.mp4) | [MP4](../assets/demos/ui/dark-human-review.mp4) | Review surfaces for checking, accepting, or rejecting memory updates before they become durable. |
-| Docs walkthrough | [MP4](../assets/demos/ui/light-docs-walkthrough.mp4) | [MP4](../assets/demos/ui/dark-docs-walkthrough.mp4) | How the docs connect setup, memory workflow, and observability for a new operator. |
+| Current workspace overview | [MP4](../assets/demos/ui/light-current-overview.mp4) | [MP4](../assets/demos/ui/dark-current-overview.mp4) | Recent activity, Dream run results, prepared context, and reusable memory in one product loop. |
+| Dream import and run | [MP4](../assets/demos/ui/light-dream-import-and-run.mp4) | [MP4](../assets/demos/ui/dark-dream-import-and-run.mp4) | The Dreams page with transcript import controls, created records, and a step-by-step run timeline. |
+| Context and review | [MP4](../assets/demos/ui/light-context-and-review-proof.mp4) / [WebM](../assets/demos/ui/light-context-and-review-proof.webm) | [MP4](../assets/demos/ui/dark-context-and-review-proof.mp4) / [WebM](../assets/demos/ui/dark-context-and-review-proof.webm) | Prepared context, source links, and review decisions with populated current data. |
 
 ## Companion CLI clips
 
@@ -29,4 +30,4 @@ The CLI recordings remain useful as documentation accompaniments when a reader n
 
 ## Source media
 
-The README embeds a GIF preview for broad compatibility. Full MP4 cuts live under `docs/assets/demos/ui/`; the context-use proof cut also includes WebM alternatives for docs and social reuse.
+The README embeds light and dark GIF previews for broad compatibility. Full current MP4 cuts live under `docs/assets/demos/ui/`; the context and review cut also includes WebM alternatives for docs and social reuse.

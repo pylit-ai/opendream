@@ -28,6 +28,11 @@ import { DiffView } from '~/components/DiffView';
 import { IdLink } from '~/components/IdLink';
 import { RawFormattedView } from '~/components/RawFormattedView';
 import { cachedFetch, invalidate, peek } from '~/lib/cache';
+import {
+  REVIEW_QUEUE_GLOSSARY,
+  helpForReviewQueueType,
+  labelForReviewQueueType,
+} from '~/lib/observeGlossary';
 
 type ReviewAction = 'approve' | 'suppress' | 'merge' | 'split' | 'mark_stale' | 'attach_note' | 'escalate';
 
@@ -52,18 +57,21 @@ function asPreview(v: unknown): string | undefined {
 
 function queueTypeVariant(t: string): ChipVariant {
   if (t.includes('contested')) return 'warn';
+  if (t.includes('failed')) return 'danger';
+  if (t.includes('large_diff')) return 'warn';
   if (t.includes('suspicious')) return 'danger';
   return 'neutral';
 }
 
 function queueTypeLabel(t: string): string {
-  return t.replace(/_/g, ' ');
+  return labelForReviewQueueType(t);
 }
 
 const ALL_TYPES = [
   'contested_memory',
   'low_confidence_memory',
   'large_diff',
+  'failed_run',
   'suspicious_retrieval',
 ];
 
@@ -379,21 +387,25 @@ export default function ReviewsRoute(): JSX.Element {
       key: 'type',
       header: 'Type',
       width: '170px',
-      render: (r) => (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setTypeFilter(r.queue_item_type ?? '');
-          }}
-          class="cursor-pointer rounded transition-opacity hover:opacity-80"
-          title={`Filter by type: ${queueTypeLabel(r.queue_item_type ?? 'unknown')}`}
-        >
-          <Chip variant={queueTypeVariant(r.queue_item_type ?? '')}>
-            {queueTypeLabel(r.queue_item_type ?? 'unknown')}
-          </Chip>
-        </button>
-      ),
+      render: (r) => {
+        const queueType = r.queue_item_type ?? 'unknown';
+        const help = helpForReviewQueueType(queueType);
+        return (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTypeFilter(queueType);
+            }}
+            class="cursor-pointer rounded transition-opacity hover:opacity-80"
+            title={`Filter by type: ${queueTypeLabel(queueType)}. ${help}`}
+          >
+            <Chip variant={queueTypeVariant(queueType)} title={help}>
+              {queueTypeLabel(queueType)}
+            </Chip>
+          </button>
+        );
+      },
     },
     {
       key: 'item_id',
@@ -490,8 +502,28 @@ export default function ReviewsRoute(): JSX.Element {
   return (
     <Page
       title="Review queue"
-      subtitle="Optional. Memories the runtime is uncertain about. Reviewing improves recall quality but is not required — auto-reviewer rules can clear most items."
+      subtitle="Optional review backlog for uncertain memories, inspectable run diffs, and retrievals that need a spot check"
     >
+      <section class="rounded-md hairline bg-surface px-3 py-2 text-[11.5px] text-text-muted">
+        <p>
+          <span class="font-medium text-text">Review queue items are prompts for judgment, not automatic failures.</span>{' '}
+          Approve, suppress, mark stale, or attach notes when the evidence explains what should happen.
+        </p>
+        <details class="mt-2">
+          <summary class="cursor-pointer font-medium text-text">Review type glossary</summary>
+          <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <For each={REVIEW_QUEUE_GLOSSARY}>
+              {(entry) => (
+                <div class="rounded bg-surface-elevated/60 px-2 py-1.5">
+                  <div class="font-mono text-[10.5px] text-text" title={entry.help}>{entry.key}</div>
+                  <div>{entry.help}</div>
+                </div>
+              )}
+            </For>
+          </div>
+        </details>
+      </section>
+
       <Show when={!autoStats.loading && autoStats() !== null && autoAppliedCount() > 0}>
         <button
           type="button"

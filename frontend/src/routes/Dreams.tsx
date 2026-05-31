@@ -1002,10 +1002,10 @@ export default function DreamsRoute(): JSX.Element {
       <section class="flex flex-col gap-2">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="text-[10px] uppercase tracking-[0.08em] text-text-subtle">
-            Recent dream cycles · {filteredDreams().length}
+            Dream cycles · showing {filteredDreams().length} of {dreams().length}
             <Show when={viewFilter() !== 'all'}>
               <span class="ml-1 normal-case tracking-normal text-text-muted">
-                of {dreams().length}
+                ({viewFilter()})
               </span>
             </Show>
             <Show when={viewFilter() === 'all' && collapseIdle() && collapsedCount() > 0}>
@@ -1018,18 +1018,18 @@ export default function DreamsRoute(): JSX.Element {
             <div role="tablist" class="flex items-center rounded-md hairline bg-surface text-[11px]">
               {(
                 [
-                  ['all', `All · ${dreams().length}`],
+                  ['all', `All cycles · ${dreams().length}`],
                   [
                     'changes',
-                    `Change points · ${dreams().filter((c) => !isNoopCycle(c)).length}`,
+                    `Changed memory · ${dreams().filter((c) => !isNoopCycle(c)).length}`,
                   ],
                   [
                     'material',
-                    `Material · ${dreams().filter((c) => hasMaterialEffect(c)).length}`,
+                    `Material writes · ${dreams().filter((c) => hasMaterialEffect(c)).length}`,
                   ],
                   [
                     'failures',
-                    `Failures · ${dreams().filter((c) => isFailureCycle(c)).length}`,
+                    `Failures only · ${dreams().filter((c) => isFailureCycle(c)).length}`,
                   ],
                 ] as const
               ).map(([value, label]) => (
@@ -1038,6 +1038,15 @@ export default function DreamsRoute(): JSX.Element {
                   role="tab"
                   aria-selected={viewFilter() === value}
                   onClick={() => setViewFilter(value)}
+                  title={
+                    value === 'all'
+                      ? 'All dream cycles, including no-op and skipped cycles.'
+                      : value === 'changes'
+                        ? 'Dream cycles that produced a change point instead of a no-op.'
+                        : value === 'material'
+                          ? 'Dream cycles that wrote or changed memory records.'
+                          : 'Dream cycles that failed for a non-idle reason.'
+                  }
                   class={
                     viewFilter() === value
                       ? 'rounded-md bg-accent px-2.5 py-1 text-accent-fg'
@@ -1064,9 +1073,13 @@ export default function DreamsRoute(): JSX.Element {
         </div>
         <details class="rounded-md hairline bg-surface px-3 py-2 text-[11.5px] text-text-muted">
           <summary class="cursor-pointer text-[11.5px] font-medium text-text">
-            Scoring rubric and collapsed groups
+            Dream-cycle glossary
           </summary>
           <div class="mt-2 grid gap-2 sm:grid-cols-2">
+            <p>
+              <span class="font-medium text-text">Dream cycles</span> are only runs with kind <span class="font-mono">dream</span> or <span class="font-mono">semantic_dream</span>.
+              Background <span class="font-mono">consolidation</span> jobs are listed on Runs instead.
+            </p>
             <p>
               <span class="font-medium text-text">Collapsed groups</span> appear as table rows labeled <span class="font-mono">collapsed × N</span>.
               They are adjacent score-0 cycles with the same effect signature and expand from the Run column.

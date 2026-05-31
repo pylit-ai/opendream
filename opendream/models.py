@@ -172,6 +172,7 @@ class ContextAssembly:
     selection: dict[str, Any] = field(default_factory=dict)
     context_pruning: dict[str, Any] = field(default_factory=dict)
     prompt_context_visibility: dict[str, Any] = field(default_factory=dict)
+    injected_blocks: list[dict[str, Any]] = field(default_factory=list)
     selected_learned_context_items: list[dict[str, Any]] = field(default_factory=list)
     suppressed_learned_context_items: list[dict[str, Any]] = field(default_factory=list)
 
@@ -394,6 +395,10 @@ class SemanticDreamReport:
     ended_at: str = ""
     provider_id: str = ""
     model_id: str = ""
+    execution_strategy: str = "deterministic"
+    execution_owner: str = "opendream-local"
+    auth_source: str = "none"
+    trust_boundary: str = "no-model-call"
     query_families_considered: int = 0
     query_families_selected: int = 0
     proposals_generated: int = 0

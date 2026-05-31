@@ -8,6 +8,7 @@ import { LoadingPage } from './Loading';
 import { formatDateLong } from '~/lib/format';
 import { RawFormattedView } from './RawFormattedView';
 import { MemoryTypeChip } from './MemoryTypeChip';
+import { helpForMemoryStatus } from '~/lib/observeGlossary';
 import { stripMemoryPrefix } from '~/lib/memoryPresentation';
 
 export interface MemoryInspectorProps {
@@ -136,15 +137,27 @@ export function MemoryInspector(props: MemoryInspectorProps): JSX.Element {
             return (
               <>
                 <div class="flex flex-wrap items-center gap-1.5">
-                  <Chip variant={statusVariant(m.status)}>{m.status ?? 'unknown'}</Chip>
+                  <Chip variant={statusVariant(m.status)} title={helpForMemoryStatus(m.status)}>
+                    {m.status ?? 'unknown'}
+                  </Chip>
                   <Show when={m.type}>
                     <MemoryTypeChip type={m.type} />
                   </Show>
                   <Show when={typeof m.confidence === 'number'}>
-                    <Chip variant="accent">conf {(m.confidence ?? 0).toFixed(2)}</Chip>
+                    <Chip
+                      variant="accent"
+                      title="Confidence is OpenDream's estimate that this memory is correct and still useful."
+                    >
+                      conf {(m.confidence ?? 0).toFixed(2)}
+                    </Chip>
                   </Show>
                   <Show when={typeof m.salience === 'number'}>
-                    <Chip variant="neutral">sal {(m.salience ?? 0).toFixed(2)}</Chip>
+                    <Chip
+                      variant="neutral"
+                      title="Salience is the retrieval priority signal: higher values make a memory more likely to be surfaced."
+                    >
+                      sal {(m.salience ?? 0).toFixed(2)}
+                    </Chip>
                   </Show>
                 </div>
 

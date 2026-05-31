@@ -332,6 +332,65 @@ class ActivationCaptureVerifyTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("run from workspace root or set OPENDREAM_WORKSPACE", result.stderr)
 
+    def test_codex_hooks_share_and_clear_active_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_path = Path(tmp)
+            workspace = temp_path / "workspace"
+            workspace.mkdir()
+            env = self.sandbox_env(temp_path)
+            self.configure_target_marker(workspace, "codex")
+
+            self.load_json(self.run_cli("init", "--workspace", str(workspace), env=env))
+            self.load_json(
+                self.run_cli(
+                    "activate",
+                    "--workspace",
+                    str(workspace),
+                    "--targets",
+                    "codex",
+                    env=env,
+                )
+            )
+            pre_hook = workspace / ".opendream" / "hooks" / "codex-pre-task.sh"
+            post_hook = workspace / ".opendream" / "hooks" / "codex-post-task.sh"
+            active_session_path = workspace / ".opendream" / "memory" / ".active_session"
+
+            pre = subprocess.run(
+                ["sh", str(pre_hook), "Investigate Redis retry behavior"],
+                cwd=workspace,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=120,
+            )
+            self.assertEqual(pre.returncode, 0, pre.stderr)
+            context_path = workspace / ".opendream" / "context" / "codex-pre-task.json"
+            context = json.loads(context_path.read_text(encoding="utf-8"))
+            session_id = str(context["session_id"])
+            self.assertTrue(session_id)
+            self.assertEqual(active_session_path.read_text(encoding="utf-8").strip(), session_id)
+
+            post = subprocess.run(
+                ["sh", str(post_hook), "Redis retry behavior fixed."],
+                cwd=workspace,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=120,
+            )
+            self.assertEqual(post.returncode, 0, post.stderr)
+            self.assertFalse(active_session_path.exists())
+            captured = [
+                event
+                for event in self.load_events(workspace)
+                if event.get("message_ref") == "codex-post-task"
+                or event.get("source", {}).get("message_ref") == "codex-post-task"
+            ]
+            self.assertTrue(captured)
+            self.assertEqual(captured[-1]["session_id"], session_id)
+
     def test_codex_wrapper_preserves_child_exit_behavior(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             temp_path = Path(tmp)

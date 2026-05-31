@@ -2827,6 +2827,8 @@ class MemoryCliIntegrationTests(unittest.TestCase):
             self.assertEqual(refreshed["status"], "ok")
             self.assertEqual(refreshed["entry"]["status_kind"], "ok")
         finally:
+            run_cli_raw("service", "disable", "--workspace", str(self.workspace), check=False)
+            run_cli_raw("uninstall-service", "--workspace", str(self.workspace), "--purge", check=False)
             if previous_catalog_home is None:
                 os.environ.pop("OPENDREAM_CATALOG_HOME", None)
             else:
