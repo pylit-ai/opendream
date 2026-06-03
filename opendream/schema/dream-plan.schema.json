@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "required": ["plan_id", "run_id", "generated_at", "planner_mode", "actions", "warnings", "stats"],
+  "properties": {
+    "plan_id": {"type": "string"},
+    "run_id": {"type": "string"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "planner_mode": {"type": "string"},
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action_id", "op", "reason", "source_event_ids", "payload"],
+        "properties": {
+          "action_id": {"type": "string"},
+          "op": {"type": "string"},
+          "target_id": {"type": ["string", "null"]},
+          "reason": {"type": "string"},
+          "source_event_ids": {"type": "array", "items": {"type": "string"}},
+          "payload": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "stats": {"type": "object"}
+  },
+  "additionalProperties": false
+}

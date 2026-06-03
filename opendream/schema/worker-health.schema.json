@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "required": [
+    "active_job_id",
+    "active_phase",
+    "last_loop_at",
+    "last_success_at",
+    "pid",
+    "queue_backlog",
+    "recent_failures",
+    "restart_count",
+    "started_at",
+    "state"
+  ],
+  "properties": {
+    "pid": {"type": ["integer", "null"]},
+    "started_at": {"type": ["string", "null"], "format": "date-time"},
+    "last_loop_at": {"type": ["string", "null"], "format": "date-time"},
+    "last_success_at": {"type": ["string", "null"], "format": "date-time"},
+    "queue_backlog": {"type": "integer", "minimum": 0},
+    "active_job_id": {"type": ["string", "null"]},
+    "active_phase": {"type": ["string", "null"]},
+    "restart_count": {"type": "integer", "minimum": 0},
+    "recent_failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["at", "reason"],
+        "properties": {
+          "at": {"type": "string", "format": "date-time"},
+          "reason": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "state": {
+      "type": "string",
+      "enum": ["healthy", "idle", "draining", "degraded", "stuck", "crash_loop", "stopped", "unknown", "starting"]
+    },
+    "service_name": {"type": ["string", "null"]},
+    "supervisor_kind": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

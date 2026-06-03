@@ -1,0 +1,18 @@
+{
+  "id": "hermes",
+  "version": "1",
+  "title": "Hermes Agent",
+  "activation_mode": "managed_prompt_snippet",
+  "detection": {
+    "detected": { "any_path_exists": [".hermes.md", "HERMES.md", ".hermes"] },
+    "configured": { "any_path_exists": [".hermes.md", "HERMES.md", ".hermes"] }
+  },
+  "install_profile": "shell_hooks_markdown_block",
+  "install": {
+    "hook_tag": "hermes",
+    "markdown_relative_path": ".hermes.md",
+    "block_id": "hermes",
+    "markdown_kind": "hermes-context",
+    "initial_content_prefix": "# Hermes project context\n\n"
+  }
+}

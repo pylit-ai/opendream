@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "semantic-dream-report.schema.json",
+  "title": "SemanticDreamReport",
+  "type": "object",
+  "required": [
+    "run_id",
+    "mode",
+    "status",
+    "started_at",
+    "phases"
+  ],
+  "properties": {
+    "run_id": { "type": "string" },
+    "mode": {
+      "type": "string",
+      "enum": ["deterministic", "semantic", "hybrid"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "skipped", "failed", "partial"]
+    },
+    "reason": { "type": "string" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": "string", "format": "date-time" },
+    "provider_id": { "type": "string" },
+    "model_id": { "type": "string" },
+    "execution_strategy": { "type": "string" },
+    "execution_owner": {
+      "type": "string",
+      "enum": ["opendream-local", "vendor-runtime"]
+    },
+    "auth_source": { "type": "string" },
+    "trust_boundary": { "type": "string" },
+    "phases": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "query_families_considered": { "type": "integer" },
+    "query_families_selected": { "type": "integer" },
+    "proposals_generated": { "type": "integer" },
+    "proposals_approved": { "type": "integer" },
+    "proposals_rejected": { "type": "integer" },
+    "learned_context_created": { "type": "integer" },
+    "learned_context_superseded": { "type": "integer" },
+    "promoted_record_ids": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "tokens_used": { "type": "integer" },
+    "cost_usd": { "type": "number" },
+    "duration_ms": { "type": "integer" },
+    "deterministic_summary": { "type": "object" },
+    "semantic_summary": { "type": "object" },
+    "verifier_summary": { "type": "object" },
+    "harm_signals": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "trigger_class": { "type": "string" },
+    "latest_signal_source": {
+      "type": ["string", "null"],
+      "enum": ["transcript_episodes", "explicit_events", null]
+    },
+    "latest_signal_timestamp": { "type": ["string", "null"] },
+    "signal_row_count": { "type": "integer" },
+    "semantic_trace": {
+      "type": "object",
+      "required": ["signal", "planner", "synthesis", "verification", "materialization"],
+      "properties": {
+        "signal": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": ["string", "null"],
+              "enum": ["transcript_episodes", "explicit_events", null]
+            },
+            "latest_timestamp": { "type": ["string", "null"] },
+            "rows_scanned": { "type": "integer" },
+            "rows_gathered": { "type": "integer" },
+            "row_limit": { "type": "integer" }
+          },
+          "additionalProperties": true
+        },
+        "planner": {
+          "type": "object",
+          "properties": {
+            "families_considered": { "type": "integer" },
+            "families_selected": { "type": "integer" },
+            "selected_family_ids": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": true
+        },
+        "synthesis": {
+          "type": "object",
+          "properties": {
+            "family_results": {
+              "type": "array",
+              "items": { "type": "object" }
+            },
+            "fallback_reason": { "type": "string" },
+            "drop_reasons": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "proposal_count": { "type": "integer" },
+            "proposal_ids": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": true
+        },
+        "verification": {
+          "type": "object",
+          "properties": {
+            "verdict_counts": {
+              "type": "object",
+              "additionalProperties": { "type": "integer" }
+            },
+            "results": {
+              "type": "array",
+              "items": { "type": "object" }
+            }
+          },
+          "additionalProperties": true
+        },
+        "materialization": {
+          "type": "object",
+          "properties": {
+            "promoted_record_ids": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "created_count": { "type": "integer" },
+            "rejected_count": { "type": "integer" },
+            "retention_status": { "type": "string" },
+            "no_materialization_reason": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "no_materialization_reason": { "type": "string" },
+    "narrative": { "type": "string" },
+    "audit": { "type": "object" }
+  },
+  "additionalProperties": false
+}

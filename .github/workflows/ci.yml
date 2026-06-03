@@ -1,0 +1,28 @@
+# CI: lint, typecheck, tests, verification gate (same stages as `make verify`).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Sync dev dependencies
+        run: uv sync --group dev
+
+      - name: make verify
+        run: make verify

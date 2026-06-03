@@ -1,0 +1,61 @@
+{
+  "events": [
+    {
+      "kind": "project_decision",
+      "content": "Use npm in this repo.",
+      "message_ref": "eval-project-1",
+      "timestamp": "2026-03-26T08:00:00Z",
+      "tags": ["key:package-manager"]
+    },
+    {
+      "kind": "project_decision",
+      "content": "Use pnpm in this repo.",
+      "message_ref": "eval-project-2",
+      "timestamp": "2026-03-26T09:00:00Z",
+      "tags": ["key:package-manager"]
+    },
+    {
+      "kind": "preference_signal",
+      "content": "Prefer bat for paging output.",
+      "message_ref": "eval-pref-1",
+      "timestamp": "2026-03-26T09:10:00Z",
+      "scope": "global",
+      "tags": ["key:pager"]
+    },
+    {
+      "kind": "environment_requirement",
+      "content": "Redis is required for local jobs.",
+      "message_ref": "eval-env-1",
+      "timestamp": "2026-03-26T09:20:00Z",
+      "tags": ["key:redis"]
+    },
+    {
+      "kind": "workflow_step",
+      "content": "Schema migration workflow: generate the SQL first, then apply it after review.",
+      "message_ref": "eval-workflow-1",
+      "timestamp": "2026-03-26T09:30:00Z",
+      "tags": ["workflow:schema-migration", "success:true"]
+    },
+    {
+      "kind": "workflow_step",
+      "content": "Schema migration workflow: generate the SQL first, then apply it after review.",
+      "message_ref": "eval-workflow-2",
+      "timestamp": "2026-03-26T09:35:00Z",
+      "tags": ["workflow:schema-migration", "success:true"]
+    }
+  ],
+  "queries": [
+    {
+      "query": "Dependency engine choice?",
+      "expected_title": "Decision: package-manager"
+    },
+    {
+      "query": "How should schema updates run here?",
+      "expected_title": "Workflow: schema-migration"
+    },
+    {
+      "query": "Which pager do I prefer?",
+      "expected_title": "Preference: pager"
+    }
+  ]
+}

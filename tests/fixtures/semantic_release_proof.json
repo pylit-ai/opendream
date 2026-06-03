@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "scenarios": {
+    "unpruned_baseline": {
+      "product_posture": "semantic-first",
+      "semantic_capability_state": "ready",
+      "semantic_unavailability_reason": null,
+      "next_action": "Keep semantic pruning enabled for task-specific context expansion.",
+      "context_pruning": {
+        "profile": "task",
+        "candidate_count": 14,
+        "injected_count": 14,
+        "suppressed_count": 0,
+        "saved_characters": 0
+      },
+      "repeated_task": {
+        "success_rate": 0.67,
+        "procedural_reuse_hits": 1,
+        "resolution_latency_ms": 9200
+      }
+    },
+    "degraded_semantic_first": {
+      "product_posture": "semantic-first",
+      "semantic_capability_state": "degraded",
+      "semantic_unavailability_reason": "No runnable semantic path is configured for this workspace.",
+      "next_action": "Configure a semantic provider or switch to deterministic mode explicitly.",
+      "context_pruning": {
+        "profile": "startup",
+        "candidate_count": 9,
+        "injected_count": 5,
+        "suppressed_count": 4,
+        "saved_characters": 220
+      },
+      "repeated_task": {
+        "success_rate": 0.62,
+        "procedural_reuse_hits": 1,
+        "resolution_latency_ms": 9800
+      }
+    },
+    "semantic_ready_progressive": {
+      "product_posture": "semantic-first",
+      "semantic_capability_state": "ready",
+      "semantic_unavailability_reason": null,
+      "next_action": "Review pruning evidence and semantic run history during operator checks.",
+      "context_pruning": {
+        "profile": "task",
+        "candidate_count": 14,
+        "injected_count": 6,
+        "suppressed_count": 8,
+        "saved_characters": 760
+      },
+      "repeated_task": {
+        "success_rate": 0.89,
+        "procedural_reuse_hits": 3,
+        "resolution_latency_ms": 5400
+      }
+    }
+  }
+}

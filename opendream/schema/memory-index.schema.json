@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "memory-index.schema.json",
+  "title": "MemoryIndex",
+  "type": "object",
+  "required": ["generated_at", "entries"],
+  "properties": {
+    "generated_at": { "type": "string", "format": "date-time" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["memory_id", "title", "type", "summary", "path"],
+        "properties": {
+          "memory_id": { "type": "string" },
+          "title": { "type": "string" },
+          "type": { "type": "string" },
+          "summary": { "type": "string" },
+          "path": { "type": "string" },
+          "priority": { "type": "number" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

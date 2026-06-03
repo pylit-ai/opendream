@@ -1,0 +1,33 @@
+{
+  "name": "OpenDream Lucid Neon",
+  "gradient": [
+    {
+      "offset": 0.0,
+      "hex": "#35E7FF"
+    },
+    {
+      "offset": 0.26,
+      "hex": "#34B6FF"
+    },
+    {
+      "offset": 0.55,
+      "hex": "#7A5CFF"
+    },
+    {
+      "offset": 0.8,
+      "hex": "#C44DFF"
+    },
+    {
+      "offset": 1.0,
+      "hex": "#FF4FD8"
+    }
+  ],
+  "colors": {
+    "ink": "#0F172A",
+    "paper": "#FFFFFF",
+    "dark_bg": "#121826",
+    "dark_card": "#222C3F",
+    "mono_ink": "#111827",
+    "mono_white": "#F8FAFC"
+  }
+}

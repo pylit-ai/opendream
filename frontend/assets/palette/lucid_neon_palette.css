@@ -1,0 +1,17 @@
+:root {
+  --od-lucid-neon-1: #35E7FF;
+  --od-lucid-neon-2: #34B6FF;
+  --od-lucid-neon-3: #7A5CFF;
+  --od-lucid-neon-4: #C44DFF;
+  --od-lucid-neon-5: #FF4FD8;
+  --od-ink: #0F172A;
+  --od-paper: #FFFFFF;
+  --od-dark-bg: #121826;
+  --od-dark-card: #222C3F;
+  --od-brand-gradient: linear-gradient(90deg,
+    #35E7FF 0%,
+    #34B6FF 26%,
+    #7A5CFF 55%,
+    #C44DFF 80%,
+    #FF4FD8 100%);
+}

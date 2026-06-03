@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "required": [
+    "generated_at",
+    "workspace",
+    "repairs",
+    "status"
+  ],
+  "properties": {
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "repaired",
+        "noop",
+        "failed"
+      ]
+    },
+    "repairs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

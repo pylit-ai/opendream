@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ClaimVerificationReport",
+  "type": "object",
+  "required": [
+    "report_id",
+    "claim_id",
+    "claim_class",
+    "provenance_tier",
+    "result",
+    "checked_at"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string"
+    },
+    "claim_id": {
+      "type": "string"
+    },
+    "claim_class": {
+      "enum": [
+        "externally_checkable",
+        "derived_abstraction",
+        "speculative"
+      ]
+    },
+    "provenance_tier": {
+      "enum": [
+        "source_backed",
+        "runtime_verified",
+        "inferred",
+        "speculative"
+      ]
+    },
+    "result": {
+      "enum": [
+        "verified",
+        "downgraded",
+        "quarantined",
+        "rejected"
+      ]
+    },
+    "checked_at": {
+      "type": "string"
+    },
+    "verification_reads": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}

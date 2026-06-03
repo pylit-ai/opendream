@@ -1,0 +1,12 @@
+{
+  "id": "claude-code",
+  "version": "1",
+  "title": "Claude Code",
+  "activation_mode": "native_hooks",
+  "detection": {
+    "detected": { "any_path_exists": [".claude", "CLAUDE.md"] },
+    "configured": { "any_path_exists": [".claude", ".claude/settings.json"] }
+  },
+  "install_profile": "claude_code_hooks",
+  "install": {}
+}

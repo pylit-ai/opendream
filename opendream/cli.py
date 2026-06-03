@@ -1,0 +1,3058 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import tempfile
+from collections.abc import Sequence
+from contextlib import suppress
+from pathlib import Path
+from typing import Any, NoReturn
+
+from . import __version__, workspace_catalog
+from . import auto_reviewer as _auto_reviewer
+from .activation import (
+    SUPPORTED_TARGETS,
+    activate_agents,
+    compressed_status,
+    deactivate_agents,
+    doctor_agents,
+    doctor_memory,
+    format_compressed_status,
+    plan_agent_activation,
+)
+from .automation import (
+    load_job_spec,
+    register_job,
+    run_job,
+)
+from .automation import (
+    review as review_automation_job,
+)
+from .automation import (
+    status as automation_status,
+)
+from .automation import (
+    tick as automation_tick,
+)
+from .bootstrap import bootstrap_index
+from .consolidator import consolidate
+from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
+from .dream_narrative import synthesize_dream_narrative
+from .evaluation import (
+    run_advanced_runtime_report,
+    run_dream_fidelity_eval,
+    run_memory_excellence_eval,
+    run_memory_quality_eval,
+    run_performance_eval,
+    run_semantic_benchmark_eval,
+)
+from .extractor import extract_candidates
+from .integration import (
+    emit_event,
+    maintain,
+    maintain_stores,
+    prepare_context,
+    status_stores,
+    tick,
+    tick_stores,
+)
+from .models import MemoryEvent
+from .observability import _session_diagnostics, index_observability
+from .reconciliation import run_reconciliation_sweep
+from .retriever import retrieve
+from .service import (
+    autowire_adapters,
+    disable_background_runtime,
+    enable_background_runtime,
+    ensure_background_runtime,
+    format_service_doctor,
+    format_service_status,
+    install_service,
+    restart_service,
+    service_doctor,
+    service_status,
+    start_service,
+    stop_service,
+    uninstall_service,
+    update_service,
+)
+from .sessions import cleanup_orphans, clear_session_id, current_session_id, set_session_id
+from .showcase import (
+    DEFAULT_DEMO_SCENARIO,
+    SHOWCASE_SCENARIO,
+    run_showcase_demo,
+    showcase_report_path,
+)
+from .storage import VALID_STORE_KINDS, MemoryStore, load_store_group_manifest, store_sort_key
+from .util import (
+    CLI_JSON_VERSION,
+    FIXTURE_ROOT,
+    json_dumps,
+    read_json,
+    stable_id,
+    to_iso,
+    utc_now,
+    write_json,
+)
+from .validation import validate_document
+from .verification import verify_activation_capture
+
+COMPACT_CONTEXT_BUDGET_BYTES = 32768
+
+VALID_COMPAT_MODES = {"canonical", "project-user", "autodream"}
+
+ACTIVATION_TARGETS_HELP = (
+    "configured | all-detected | all-supported | <adapter-id> "
+    f"(built-in ids: {', '.join(SUPPORTED_TARGETS)}; "
+    "workspace adapters: .opendream/adapters/*.json)"
+)
+
+
+def build_server(*args: Any, **kwargs: Any) -> Any:
+    from .webapp import build_server as _build_server
+
+    return _build_server(*args, **kwargs)
+
+TOP_LEVEL_EXAMPLES = """Examples:
+  opendream init --workspace "$PWD"
+  opendream status --workspace "$PWD"
+  opendream activate --workspace "$PWD" --repair
+  opendream repair --workspace "$PWD"
+  opendream deactivate --workspace "$PWD"
+  opendream workspace upgrade --workspace "$PWD"
+  opendream reconcile --workspace "$PWD"
+  opendream eval memory-excellence --workspace "$PWD"
+  opendream eval advanced-runtime --workspace "$PWD"
+  opendream semantic setup --workspace "$PWD" --prefer no-extra-key --apply
+  opendream automation scaffold-dream --workspace "$PWD" --adapter claude-scheduled-task --kind feature-radar
+  opendream contract export --workspace "$PWD" --format json
+"""
+
+CONTRACT_EXAMPLES = """Examples:
+  opendream contract export --workspace "$PWD" --format json
+"""
+
+
+class _RejectDoctorMemoryShorthand(argparse.Action):
+    """`--memory` looks like `--surface memory` but previously abbreviated `--memory-dir`."""
+
+    def __init__(self, option_strings: Sequence[str], dest: str, **kwargs: Any) -> None:
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        parser.error(
+            "`--memory` is not a valid doctor flag; use `--surface memory` for the memory doctor surface "
+            "(use `--memory-dir` only for the relative memory directory under the workspace)."
+        )
+
+
+class OpenDreamArgumentParser(argparse.ArgumentParser):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # Avoid `--memory` silently abbreviating `--memory-dir` (and similar foot-guns).
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        detail = f"{self.prog}: error: {message}\n"
+        hint = _error_hint(self.prog, message)
+        if hint:
+            detail += f"Hint: {hint}\n"
+        self.exit(2, detail)
+
+
+def _error_hint(prog: str, message: str) -> str | None:
+    if prog == "opendream" and "required: command" in message:
+        return (
+            "try `opendream init --workspace \"$PWD\"` or "
+            "`opendream status --workspace \"$PWD\"`; use `opendream -h` "
+            "for the full command tree"
+        )
+    if prog == "opendream" and "invalid choice: 'upgrade'" in message:
+        return (
+            "upgrade the installed CLI with `uv tool upgrade opendream` (or your installer equivalent), "
+            'then refresh a workspace with `opendream workspace upgrade --workspace "$PWD"`'
+        )
+    if prog == "opendream dream" and "required: dream_command" in message:
+        return "try `opendream dream status --workspace .tmp/ws` or `opendream dream worker --workspace .tmp/ws --once`"
+    if prog == "opendream contract" and "invalid choice" in message and "contract_command" in message:
+        return (
+            "`contract` needs a subcommand; use "
+            '`opendream contract export --workspace "$PWD" --format json` '
+            "(do not pass the workspace path as the first token after `contract`)"
+        )
+    return None
+
+
+def load_event_payloads(path: Path) -> list[dict[str, Any]]:
+    text = path.expanduser().read_text(encoding="utf-8").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        payload = json.loads(text)
+        return payload if isinstance(payload, list) else [payload]
+    if text.startswith("{") and "\n" not in text:
+        payload = json.loads(text)
+        return payload if isinstance(payload, list) else [payload]
+    rows: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        rows.append(json.loads(line))
+    return rows
+
+
+def build_store(
+    workspace: str,
+    *,
+    store_kind_hint: str | None = None,
+    memory_dir: str | None = None,
+    compat_mode: str | None = None,
+) -> MemoryStore:
+    hint = store_kind_hint if store_kind_hint in VALID_STORE_KINDS else None
+    return MemoryStore(Path(workspace), store_kind_hint=hint, memory_dir=memory_dir, compat_mode=compat_mode)
+
+
+def resolve_episode_paths(store: MemoryStore, paths: list[str] | None) -> list[Path]:
+    if paths:
+        return [Path(path).expanduser() for path in paths]
+    store.ensure_layout()
+    return sorted(store.transcripts_dir.glob("*.jsonl"))
+
+
+def parse_compat_mode(value: str) -> str:
+    if value not in VALID_COMPAT_MODES:
+        raise argparse.ArgumentTypeError("expected one of: canonical, project-user")
+    return value
+
+
+def add_layout_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--memory-dir", help="Relative directory under the workspace for memory artifacts")
+    parser.add_argument("--compat-mode", type=parse_compat_mode, metavar="MODE", default=None)
+
+
+def add_service_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--backend", choices=["managed", "native"], default="managed")
+    parser.add_argument("--service-mode", choices=["user", "system"], default="user")
+    parser.add_argument("--install-root")
+    parser.add_argument("--interval-seconds", type=float, default=30.0)
+
+
+def add_store_group_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--stores-manifest")
+    parser.add_argument("--include-global", action="store_true")
+    parser.add_argument("--global-workspace")
+    parser.add_argument("--include-project", action="store_true")
+    parser.add_argument("--project-workspace")
+
+
+def resolve_store_group(args: argparse.Namespace) -> list[MemoryStore]:
+    if getattr(args, "stores_manifest", None):
+        return load_store_group_manifest(Path(args.stores_manifest))
+
+    stores: list[MemoryStore] = []
+    seen: set[str] = set()
+
+    def add_store(store: MemoryStore) -> None:
+        key = str(store.workspace)
+        if key in seen:
+            return
+        seen.add(key)
+        stores.append(store)
+
+    primary = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    add_store(primary)
+
+    include_global = getattr(args, "include_global", False)
+    global_workspace = getattr(args, "global_workspace", None)
+    if include_global:
+        if global_workspace:
+            add_store(
+                build_store(
+                    global_workspace,
+                    store_kind_hint="global",
+                    memory_dir=getattr(args, "memory_dir", None),
+                    compat_mode=getattr(args, "compat_mode", None),
+                )
+            )
+        elif primary.store_kind != "global":
+            raise ValueError("--include-global requires --global-workspace when the primary store is not global")
+
+    include_project = getattr(args, "include_project", False)
+    project_workspace = getattr(args, "project_workspace", None)
+    if include_project:
+        if project_workspace:
+            add_store(
+                build_store(
+                    project_workspace,
+                    store_kind_hint="project",
+                    memory_dir=getattr(args, "memory_dir", None),
+                    compat_mode=getattr(args, "compat_mode", None),
+                )
+            )
+        elif primary.store_kind != "project":
+            raise ValueError("--include-project requires --project-workspace when the primary store is not project")
+
+    return sorted(stores, key=store_sort_key)
+
+
+def resolve_emit_target(args: argparse.Namespace) -> MemoryStore:
+    route = args.route
+    if route == "global":
+        if args.global_workspace:
+            target = build_store(
+                args.global_workspace,
+                store_kind_hint="global",
+                memory_dir=args.memory_dir,
+                compat_mode=args.compat_mode,
+            )
+            if not target.is_initialized():
+                target.initialize(store_kind="global", compat_mode=args.compat_mode)
+            return target
+        target = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+        if target.store_kind != "global":
+            raise ValueError("--route global requires --global-workspace or a global primary workspace")
+        return target
+
+    target = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not target.is_initialized():
+        target.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return target
+
+
+def command_init(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        store_kind_hint=args.store_kind,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    metadata = store.initialize(store_kind=args.store_kind, compat_mode=args.compat_mode)
+    result = {
+        "workspace": str(store.workspace),
+        "memory_root": str(store.memory_root),
+        "store_id": metadata["store_id"],
+        "store_kind": metadata["store_kind"],
+        "compat_mode": metadata["layout"]["compat_mode"],
+        "status": "initialized",
+    }
+    if args.activate_configured:
+        result["activation"] = activate_agents(store, targets="configured", repair=False)
+    result["catalog_update"] = workspace_catalog.safe_update(store.workspace, discovered_by="init")
+    return result
+
+
+def command_activate(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = activate_agents(store, targets=args.targets, repair=args.repair)
+    if isinstance(result, dict):
+        result["catalog_update"] = workspace_catalog.safe_update(store.workspace, discovered_by="activate")
+    return result
+
+
+def command_repair(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = activate_agents(store, targets=args.targets, repair=True)
+    if isinstance(result, dict):
+        result["catalog_update"] = workspace_catalog.safe_update(store.workspace, discovered_by="activate")
+    return result
+
+
+def command_activation_plan(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return plan_agent_activation(store, targets=args.targets)
+
+
+def command_deactivate(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return deactivate_agents(store, targets=args.targets)
+
+
+def command_doctor(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if args.surface == "agents":
+        return doctor_agents(store)
+    if args.surface == "memory":
+        return doctor_memory(store)
+    raise ValueError(f"unsupported doctor surface: {args.surface}")
+
+
+def command_verify_activation_capture(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return verify_activation_capture(store, targets=args.targets)
+
+
+def command_append_event(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    store.ensure_layout()
+    event_payloads = load_event_payloads(Path(args.events))
+    written = []
+    before_snapshot = store.snapshot_store_text()
+    for payload in event_payloads:
+        validate_document("memory-event.schema.json", payload)
+        path = store.append_event(MemoryEvent(**payload))
+        written.append(str(path.relative_to(store.workspace)))
+    audit = store.write_mutation_audit(
+        action="append-event",
+        run_id=stable_id("append", args.events, len(event_payloads)),
+        target_paths=[store.events_dir],
+        summary={"events": len(event_payloads), "written_files": sorted(set(written))},
+        before_snapshot=before_snapshot,
+    )
+    return {
+        "workspace": str(store.workspace),
+        "written_files": sorted(set(written)),
+        "events": len(event_payloads),
+        "audit": audit,
+    }
+
+
+def command_emit_event(args: argparse.Namespace) -> dict[str, Any]:
+    store = resolve_emit_target(args)
+    return emit_event(
+        store,
+        kind=args.kind,
+        content=args.content,
+        scope=args.scope,
+        channel=args.channel,
+        message_ref=args.message_ref,
+        session_id=args.session_id,
+        turn_id=args.turn_id,
+        event_id=args.event_id,
+        timestamp=args.timestamp,
+        tags=args.tag,
+        confidence_hint=args.confidence_hint,
+        sensitivity=args.sensitivity,
+        reporting_agent=_resolve_reporting_agent(args),
+    )
+
+
+def _read_hook_stdin() -> dict[str, Any]:
+    text = sys.stdin.read().strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid Claude hook JSON on stdin: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Claude hook JSON on stdin must be an object")
+    return payload
+
+
+def _string_field(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _extract_text_from_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(part.strip() for part in parts if part.strip()).strip()
+    return ""
+
+
+def _assistant_text_from_transcript_row(row: dict[str, Any]) -> str:
+    role = row.get("role")
+    row_type = row.get("type")
+    message = row.get("message")
+    if isinstance(message, dict):
+        role = message.get("role", role)
+    if role != "assistant" and row_type != "assistant":
+        return ""
+    if isinstance(message, dict):
+        text = _extract_text_from_content(message.get("content"))
+        if text:
+            return text
+    return _extract_text_from_content(row.get("content") or row.get("text"))
+
+
+def _latest_assistant_transcript_text(transcript_path: str | None) -> str | None:
+    if not transcript_path:
+        return None
+    path = Path(transcript_path).expanduser()
+    if not path.exists() or not path.is_file():
+        return None
+    latest = ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        text = _assistant_text_from_transcript_row(row)
+        if text:
+            latest = text
+    return latest.strip() or None
+
+
+def command_hook_claude_pre_task(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _read_hook_stdin()
+    query = _string_field(payload, "prompt") or args.fallback_query
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    session_id = _string_field(payload, "session_id") or stable_id("session", query)
+    set_session_id(session_id, store=store)
+    context = prepare_context(
+        store,
+        query=query,
+        reporting_agent=_resolve_reporting_agent(
+            fallback={
+                "agent_id": "claude-code",
+                "agent_label": "Claude Code",
+                "runtime": "claude-code",
+                "adapter_id": "claude-code",
+            }
+        ),
+    )
+    output = store.workspace / ".opendream" / "context" / "claude-pre-task.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    compact = compact_prepare_context_output(context)
+    output.write_text(json_dumps(compact) + "\n", encoding="utf-8")
+    return compact
+
+
+def command_hook_claude_post_task(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _read_hook_stdin()
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    summary = (
+        _latest_assistant_transcript_text(_string_field(payload, "transcript_path"))
+        or _string_field(payload, "summary")
+        or args.fallback_summary
+    )
+    try:
+        event = emit_event(
+            store,
+            kind="task_outcome",
+            content=summary,
+            scope="project",
+            channel="cli",
+            message_ref=args.message_ref,
+            session_id=_string_field(payload, "session_id") or current_session_id(store),
+            tags=args.tag,
+            reporting_agent=_resolve_reporting_agent(
+                fallback={
+                    "agent_id": "claude-code",
+                    "agent_label": "Claude Code",
+                    "runtime": "claude-code",
+                    "adapter_id": "claude-code",
+                }
+            ),
+        )
+        maintenance = maintain(store)
+        worker = dream_worker(store, max_polls=1)
+        return {
+            "status": "completed",
+            "workspace": str(store.workspace),
+            "event": event,
+            "maintain": maintenance,
+            "dream_worker": worker,
+        }
+    finally:
+        clear_session_id(store=store)
+
+
+def command_extract(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    store.ensure_layout()
+    if args.events:
+        events = load_event_payloads(Path(args.events))
+        event_ids = [event["event_id"] for event in events]
+    else:
+        processed = store.load_processed_event_ids()
+        events = [event for event in store.load_events() if event["event_id"] not in processed]
+        event_ids = [event["event_id"] for event in events]
+    created_at = args.now or to_iso(utc_now())
+    candidates = extract_candidates(events, origin_mode="scheduled", now=created_at)
+    run_id = stable_id("extract", created_at, len(candidates), len(events))
+    before_snapshot = store.snapshot_store_text()
+    if candidates:
+        store.append_candidates(candidates, run_id)
+    if not args.events:
+        store.mark_events_processed(event_ids)
+    audit = store.write_mutation_audit(
+        action="extract",
+        run_id=run_id,
+        target_paths=[store.candidates_dir, store.extraction_state_path],
+        summary={"processed_events": len(events), "created_candidates": len(candidates)},
+        before_snapshot=before_snapshot,
+    )
+    return {
+        "workspace": str(store.workspace),
+        "run_id": run_id,
+        "processed_events": len(events),
+        "created_candidates": len(candidates),
+        "audit": audit,
+    }
+
+
+def command_bootstrap_index(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    store.ensure_layout()
+    events = load_event_payloads(Path(args.events))
+    report = bootstrap_index(store, events, now=args.now)
+    return {
+        "workspace": str(store.workspace),
+        "run_id": report["run_id"],
+        "categories": len(report["categories"]),
+        "candidates": len(report["candidates"]),
+        "raw_only_ids": len(report["raw_only_ids"]),
+        "quarantine_ids": len(report["quarantine_ids"]),
+    }
+
+
+def command_consolidate(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    store.ensure_layout()
+    result = consolidate(store, now=args.now, sleep_before_write=args.sleep_before_write)
+    result["workspace"] = str(store.workspace)
+    return result
+
+
+def command_retrieve(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    store.ensure_layout()
+    response = retrieve(
+        store,
+        query=args.query,
+        limit=args.limit,
+        now=args.now,
+        include_contested=args.include_contested,
+        query_source="cli",
+        caller_detail=((getattr(args, "caller_detail", "") or "").strip() or None),
+        reporting_agent=_resolve_reporting_agent(args),
+    )
+    response["workspace"] = str(store.workspace)
+    return response
+
+
+def command_maintain(args: argparse.Namespace) -> dict[str, Any]:
+    stores = resolve_store_group(args)
+    if len(stores) > 1 or args.stores_manifest:
+        return maintain_stores(
+            stores,
+            now=args.now,
+            min_new_events=args.min_new_events,
+            min_interval_seconds=args.min_interval_seconds,
+        )
+    return maintain(
+        stores[0],
+        now=args.now,
+        min_new_events=args.min_new_events,
+        min_interval_seconds=args.min_interval_seconds,
+    )
+
+
+def command_prepare_context(args: argparse.Namespace) -> dict[str, Any]:
+    stores = resolve_store_group(args)
+    selected_stores = stores if len(stores) > 1 or args.stores_manifest else stores[0]
+    context = prepare_context(
+        selected_stores,
+        query=args.query,
+        limit=args.limit,
+        now=args.now,
+        reporting_agent=_resolve_reporting_agent(args),
+    )
+    if args.activate_session and stores:
+        session_id = str(context.get("session_id") or "").strip()
+        if session_id:
+            set_session_id(session_id, store=stores[0])
+    if args.output == "prompt":
+        return {"__raw_output__": context["prompt_context"]}
+    if args.output == "compact-json":
+        return compact_prepare_context_output(context)
+    return context
+
+
+def compact_prepare_context_output(context: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "cli_output_version",
+        "context_id",
+        "session_id",
+        "workspace",
+        "stores",
+        "summary",
+        "audit",
+        "profile",
+        "selection",
+        "context_pruning",
+        "prompt_context_visibility",
+        "injected_blocks",
+        "suppression_summary",
+        "selected_memory_ids",
+        "selected_learned_context_ids",
+        "selected_automation_record_ids",
+        "memory_use_contract",
+        "prompt_context",
+        "empty_reason",
+        "hints",
+        "warnings",
+    )
+    compact = {key: context[key] for key in keys if key in context}
+    context_id = str(context.get("context_id") or "")
+    if context_id and "audit" not in compact:
+        compact["audit"] = {"context_path": f".opendream/memory/audit/context/{context_id}.json"}
+    compact_size = len(json_dumps(compact).encode("utf-8"))
+    if compact_size > COMPACT_CONTEXT_BUDGET_BYTES:
+        budget_warning = {
+            "code": "compact_context_budget_exceeded",
+            "severity": "warning",
+            "message": "compact prepare-context output exceeds the hook stdout budget",
+            "details": {
+                "compact_bytes": compact_size,
+                "budget_bytes": COMPACT_CONTEXT_BUDGET_BYTES,
+            },
+        }
+        compact.setdefault("warnings", []).append(budget_warning)
+    return compact
+
+
+def command_record_context_use(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    store.ensure_layout()
+    context_id = str(args.context_id or "").strip()
+    if not context_id:
+        raise ValueError("record-context-use requires --context-id")
+    timestamp = args.timestamp or to_iso(utc_now())
+    context_path = store.audit_context_dir / f"{context_id}.json"
+    context = read_json(context_path, {}) if context_path.exists() else {}
+    selected_memory_ids = [
+        str(item)
+        for item in context.get("selected_memory_ids", [])
+        if str(item).strip()
+    ] if isinstance(context, dict) else []
+    selected_learned_context_ids = []
+    if isinstance(context, dict):
+        for item in context.get("selected_learned_context_items", []):
+            if isinstance(item, dict) and str(item.get("record_id") or "").strip():
+                selected_learned_context_ids.append(str(item["record_id"]))
+    selected_automation_record_ids: list[str] = []
+    used_memory_ids = [str(item).strip() for item in (args.used_memory_id or []) if str(item).strip()]
+    if args.memory_use_state == "used" and not used_memory_ids:
+        used_memory_ids = selected_memory_ids
+    unknown_used = sorted(set(used_memory_ids) - set(selected_memory_ids))
+    if unknown_used and context:
+        raise ValueError(
+            "used memory id(s) were not selected in this context: " + ", ".join(unknown_used)
+        )
+    reporting_agent = _resolve_reporting_agent(args)
+    usage_id = stable_id(
+        "context-use",
+        context_id,
+        timestamp,
+        args.memory_use_state,
+        ",".join(used_memory_ids),
+        reporting_agent.get("agent_id", "unknown"),
+    )
+    payload = {
+        "usage_id": usage_id,
+        "context_id": context_id,
+        "timestamp": timestamp,
+        "workspace": str(store.workspace),
+        "memory_use_state": args.memory_use_state,
+        "selected_memory_ids": selected_memory_ids,
+        "selected_learned_context_ids": selected_learned_context_ids,
+        "selected_automation_record_ids": selected_automation_record_ids,
+        "used_memory_ids": used_memory_ids,
+        "usage_note": args.usage_note or "",
+        "visible_attestation": args.visible_attestation or "",
+        "retrieval_query": str(context.get("profile", {}).get("query", "") if isinstance(context, dict) else ""),
+        "reporting_agent": reporting_agent,
+        "source": "record-context-use",
+        "cli_output_version": CLI_JSON_VERSION,
+    }
+    path = store.write_context_use_audit(usage_id, payload)
+    return {
+        "status": "recorded",
+        "usage_id": usage_id,
+        "context_id": context_id,
+        "memory_use_state": args.memory_use_state,
+        "used_memory_ids": used_memory_ids,
+        "path": str(path.relative_to(store.workspace)),
+        "cli_output_version": CLI_JSON_VERSION,
+    }
+
+
+def _env_first(*keys: str) -> str | None:
+    for key in keys:
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _infer_agent_from_environment() -> dict[str, Any]:
+    explicit = {
+        "agent_id": _env_first("OPENDREAM_AGENT_ID"),
+        "agent_label": _env_first("OPENDREAM_AGENT_LABEL"),
+        "runtime": _env_first("OPENDREAM_AGENT_RUNTIME"),
+        "adapter_id": _env_first("OPENDREAM_AGENT_ADAPTER_ID"),
+        "model_id": _env_first("OPENDREAM_AGENT_MODEL_ID"),
+        "model_version": _env_first("OPENDREAM_AGENT_MODEL_VERSION"),
+    }
+    if explicit["agent_id"] or explicit["agent_label"] or explicit["runtime"]:
+        return {key: value for key, value in explicit.items() if value}
+    return {}
+
+
+def _resolve_reporting_agent(
+    args: argparse.Namespace | None = None,
+    *,
+    fallback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved = dict(fallback or {})
+    resolved.update(_infer_agent_from_environment())
+    if args is not None:
+        defaults = {
+            "agent_id": "unknown",
+            "agent_label": "Unknown",
+            "agent_runtime": "",
+            "agent_adapter_id": "",
+            "agent_model_id": "",
+            "agent_model_version": "",
+        }
+        mapping = {
+            "agent_id": "agent_id",
+            "agent_label": "agent_label",
+            "runtime": "agent_runtime",
+            "adapter_id": "agent_adapter_id",
+            "model_id": "agent_model_id",
+            "model_version": "agent_model_version",
+        }
+        for target_key, arg_key in mapping.items():
+            value = str(getattr(args, arg_key, "") or "").strip()
+            if value and value != defaults.get(arg_key, ""):
+                resolved[target_key] = value
+    from .models import normalize_reporting_agent
+    return normalize_reporting_agent(resolved)
+
+
+def command_status(args: argparse.Namespace) -> dict[str, Any]:
+    stores = resolve_store_group(args)
+    if len(stores) > 1 or args.stores_manifest:
+        payload = status_stores(
+            stores,
+            now=args.now,
+            min_new_events=args.min_new_events,
+            min_interval_seconds=args.min_interval_seconds,
+        )
+        return payload
+    store = stores[0]
+    if not store.is_initialized():
+        print(
+            "warning: store is not initialized at this workspace. "
+            "Run 'opendream init --workspace <path>' to set up.",
+            file=sys.stderr,
+        )
+    payload = compressed_status(
+        store,
+        now=args.now,
+        min_new_events=args.min_new_events,
+        min_interval_seconds=args.min_interval_seconds,
+    )
+    if not store.is_initialized():
+        payload.setdefault("warnings", []).append(
+            "store not initialized — run 'opendream init' first"
+        )
+    if args.format == "human":
+        payload["__raw_output__"] = format_compressed_status(payload)
+    return payload
+
+
+def command_tick(args: argparse.Namespace) -> dict[str, Any]:
+    stores = resolve_store_group(args)
+    if len(stores) > 1 or args.stores_manifest:
+        return tick_stores(
+            stores,
+            now=args.now,
+            min_new_events=args.min_new_events,
+            min_interval_seconds=args.min_interval_seconds,
+        )
+    return tick(
+        stores[0],
+        now=args.now,
+        min_new_events=args.min_new_events,
+        min_interval_seconds=args.min_interval_seconds,
+    )
+
+
+def command_contract_export(args: argparse.Namespace) -> dict[str, Any]:
+    from .contract_export import build_contract_export
+    from .validation import validate_document
+
+    workspace = Path(args.workspace)
+    payload = build_contract_export(workspace)
+    validate_document("contract-export.schema.json", payload)
+    return payload
+
+
+def command_automation_register(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    payload = load_job_spec(Path(args.spec))
+    result = register_job(store, payload, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_automation_run(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = run_job(store, args.job, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_automation_tick(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = automation_tick(store, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_automation_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = automation_status(store, job_id=args.job, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_automation_review(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = review_automation_job(store, args.job, limit=args.limit, now=args.now)
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_automation_scaffold_dream(args: argparse.Namespace) -> dict[str, Any]:
+    from .automation import scaffold_dream_job
+    return scaffold_dream_job(Path(args.workspace), adapter_id=args.adapter, kind=args.kind)
+
+
+def command_demo(args: argparse.Namespace) -> dict[str, Any]:
+    workspace = Path(args.workspace)
+    store = build_store(
+        str(workspace),
+        store_kind_hint="project",
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if getattr(args, "scenario", DEFAULT_DEMO_SCENARIO) == SHOWCASE_SCENARIO:
+        return run_showcase_demo(store, now=args.now)
+
+    store.ensure_layout()
+    fixture = FIXTURE_ROOT / "golden_events.jsonl"
+    events = load_event_payloads(fixture)
+    for event in events:
+        validate_document("memory-event.schema.json", event)
+        store.append_event(MemoryEvent(**event))
+
+    extraction = command_extract(
+        argparse.Namespace(
+            workspace=str(workspace),
+            events=None,
+            now=args.now,
+            memory_dir=args.memory_dir,
+            compat_mode=args.compat_mode,
+        )
+    )
+    consolidation = command_consolidate(
+        argparse.Namespace(
+            workspace=str(workspace),
+            now=args.now,
+            sleep_before_write=0.0,
+            memory_dir=args.memory_dir,
+            compat_mode=args.compat_mode,
+        )
+    )
+    retrieval = command_retrieve(
+        argparse.Namespace(
+            workspace=str(workspace),
+            query="What package manager, workflow, and environment requirements should I use?",
+            limit=5,
+            now=args.now,
+            include_contested=False,
+            memory_dir=args.memory_dir,
+            compat_mode=args.compat_mode,
+        )
+    )
+    return {
+        "workspace": str(workspace),
+        "memory_root": str(store.memory_root),
+        "fixture": fixture.name,
+        "events_appended": len(events),
+        "extract": extraction,
+        "consolidate": consolidation,
+        "retrieve": retrieval,
+    }
+
+
+def command_eval_showcase(args: argparse.Namespace) -> dict[str, Any]:
+    base_store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    base_store.ensure_layout()
+    with tempfile.TemporaryDirectory(prefix="opendream-showcase-eval-") as tmp:
+        isolated_workspace = Path(tmp) / "workspace"
+        isolated_store = build_store(
+            str(isolated_workspace),
+            store_kind_hint="project",
+            memory_dir=args.memory_dir,
+            compat_mode=args.compat_mode,
+        )
+        report = run_showcase_demo(isolated_store, now=args.now)
+
+    result = {
+        "status": report["status"],
+        "scenario": report["scenario"],
+        "workspace": str(base_store.workspace),
+        "memory_root": str(base_store.memory_root),
+        "isolated": True,
+        "checks": report["checks"],
+        "selected_memory_ids": report["selected_memory_ids"],
+        "agent_snippet": report["agent_snippet"],
+        "agent_answers": report.get("agent_answers", {}),
+        "negative_controls": report["negative_controls"],
+        "abstention_cases": report["abstention_cases"],
+        "memory_hurt_cases": report["memory_hurt_cases"],
+        "proof": report["proof"],
+        "source_report": {
+            "workspace": report["workspace"],
+            "memory_root": report["memory_root"],
+        },
+    }
+    report_path = showcase_report_path(base_store).with_name("showcase_eval_report.json")
+    result["report_path"] = str(report_path)
+    write_json(report_path, result)
+    return result
+
+
+def command_dream_run(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    episode_paths = resolve_episode_paths(store, getattr(args, "episodes", None))
+    mode = getattr(args, "mode", None)
+    if mode and mode in ("semantic", "hybrid"):
+        from .semantic_dreamer import semantic_dream_run
+        result = semantic_dream_run(
+            store,
+            episode_paths=episode_paths,
+            mode=mode,
+            now=args.now,
+            max_recent_episodes=args.max_recent_episodes,
+            min_episode_signals=args.min_episode_signals,
+        )
+    else:
+        result = dream_run(
+            store,
+            episode_paths=episode_paths,
+            now=args.now,
+            max_recent_episodes=args.max_recent_episodes,
+            min_episode_signals=args.min_episode_signals,
+        )
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_dream_backfill_narrative(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    updated = 0
+    scanned = 0
+    for audit_dir in (store.audit_dream_dir, store.audit_semantic_dream_dir):
+        for path in sorted(audit_dir.glob("*-summary.json")):
+            scanned += 1
+            payload = read_json(path, {})
+            summary = payload.get("summary") if isinstance(payload, dict) else None
+            if not isinstance(summary, dict) or summary.get("narrative"):
+                continue
+            summary["narrative"] = synthesize_dream_narrative(summary)
+            payload["summary"] = summary
+            write_json(path, payload)
+            updated += 1
+    if updated:
+        index_observability(store)
+    return {
+        "status": "ok",
+        "workspace": str(store.workspace),
+        "memory_root": str(store.memory_root),
+        "summary_files_scanned": scanned,
+        "narratives_backfilled": updated,
+    }
+
+
+def command_dream_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    snapshot = store.status_snapshot(now=args.now)
+    return {
+        "workspace": str(store.workspace),
+        "memory_root": str(store.memory_root),
+        "dream": snapshot["dream"],
+    }
+
+
+def command_dream_tick(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    episode_paths = resolve_episode_paths(store, getattr(args, "episodes", None))
+    result = dream_tick(
+        store,
+        episode_paths=episode_paths,
+        now=args.now,
+        max_recent_episodes=args.max_recent_episodes,
+        min_episode_signals=args.min_episode_signals,
+        min_interval_seconds=args.min_interval_seconds,
+    )
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_dream_enqueue(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    episode_paths = resolve_episode_paths(store, getattr(args, "episodes", None))
+    if not episode_paths:
+        return {
+            "status": "skipped",
+            "reason": "no-episodes",
+            "queue_depth": len([item for item in store.load_dream_queue() if item.get("status") == "queued"]),
+            "workspace": str(store.workspace),
+            "memory_root": str(store.memory_root),
+        }
+    result = enqueue_dream_job(
+        store,
+        episode_paths=episode_paths,
+        now=args.now,
+        max_recent_episodes=args.max_recent_episodes,
+        min_episode_signals=args.min_episode_signals,
+        trigger_class=args.trigger_class,
+    )
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_dream_worker(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = dream_worker(
+        store,
+        now=args.now,
+        interval_seconds=args.interval_seconds,
+        max_polls=1 if args.once else args.max_polls,
+        max_jobs_per_poll=args.max_jobs_per_poll,
+        idle_exit=args.idle_exit,
+        process_backlog=not args.no_backlog,
+        mode=args.mode,
+    )
+    result["workspace"] = str(store.workspace)
+    result["memory_root"] = str(store.memory_root)
+    return result
+
+
+def command_eval_memory_quality(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    fixture_path = Path(args.fixture) if args.fixture else None
+    return run_memory_quality_eval(store, fixture_path=fixture_path, now=args.now)
+
+
+def command_eval_dream_fidelity(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode or "project-user",
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode or "project-user")
+    fixture_path = Path(args.fixture) if args.fixture else None
+    return run_dream_fidelity_eval(store, fixture_path=fixture_path, now=args.now)
+
+
+def command_eval_performance(args: argparse.Namespace) -> dict[str, Any]:
+    """Run the performance scorecard against an isolated store so prior workspace memory cannot skew results."""
+    caller_workspace = Path(args.workspace).expanduser()
+    fixture_path = Path(args.fixture) if args.fixture else None
+    memory_dir = getattr(args, "memory_dir", None)
+    compat_mode = getattr(args, "compat_mode", None)
+    with tempfile.TemporaryDirectory(prefix="opendream-eval-performance-") as tmp:
+        isolated_root = Path(tmp) / "workspace"
+        isolated_root.mkdir(parents=True, exist_ok=True)
+        store = build_store(
+            str(isolated_root),
+            memory_dir=memory_dir,
+            compat_mode=compat_mode,
+        )
+        store.initialize(store_kind="project", compat_mode=compat_mode)
+        result = run_performance_eval(store, fixture_path=fixture_path, now=args.now)
+    result = dict(result)
+    result["workspace"] = str(caller_workspace.resolve())
+    return result
+
+
+def command_eval_memory_excellence(args: argparse.Namespace) -> dict[str, Any]:
+    """Run memory-excellence scorecard for release gating."""
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=getattr(args, "compat_mode", None))
+    result = run_memory_excellence_eval(store, now=args.now)
+    if not result.get("passed"):
+        failed_dimensions = []
+        scores = result.get("scores", {})
+        thresholds = result.get("thresholds", {})
+        for key, threshold in thresholds.items():
+            score = scores.get(key, 0.0)
+            if key in ("stale_claim_rate", "irrelevant_recall_rate"):
+                if score > threshold:
+                    failed_dimensions.append(f"  {key}: {score} > {threshold} (ceiling)")
+            else:
+                if score < threshold:
+                    failed_dimensions.append(f"  {key}: {score} < {threshold} (floor)")
+        if failed_dimensions:
+            hint = (
+                "memory-excellence scorecard did not pass. Failed dimensions:\n"
+                + "\n".join(failed_dimensions)
+                + "\nThis is expected on demo or sparse workspaces. "
+                "Thresholds are strict release gates — run against a workspace "
+                "with verified memory to see passing scores."
+            )
+            print(hint, file=sys.stderr)
+    return result
+
+
+def command_eval_advanced_runtime(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=getattr(args, "compat_mode", None))
+    return run_advanced_runtime_report(store, now=args.now)
+
+
+def command_reconcile(args: argparse.Namespace) -> dict[str, Any]:
+    """Run reconciliation sweep."""
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=getattr(args, "compat_mode", None))
+    report = run_reconciliation_sweep(store, now=args.now)
+    return report.to_dict()
+
+
+def command_index_observability(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    index = index_observability(store, now=args.now)
+    return {
+        "workspace": str(store.workspace),
+        "generated_at": index["generated_at"],
+        "entity_groups": sorted(index["entities"].keys()),
+        "index_path": str(store.observability_index_path),
+    }
+
+
+def command_observe_serve(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=args.memory_dir,
+        compat_mode=args.compat_mode,
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    index_observability(store, now=args.now)
+    server = build_server(store, host=args.host, port=args.port)
+    host = str(server.server_address[0])
+    port = int(server.server_address[1])
+    print(json_dumps({"status": "serving", "host": host, "port": port, "url": f"http://{host}:{port}"}))
+    try:
+        with suppress(KeyboardInterrupt):
+            server.serve_forever()
+    finally:
+        server.server_close()
+    return {"status": "stopped", "host": host, "port": port}
+
+
+def command_install_service(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    result = install_service(
+        store,
+        interval_seconds=args.interval_seconds,
+        backend_mode=args.backend,
+        service_mode=args.service_mode,
+        install_root=Path(args.install_root) if args.install_root else None,
+        start=not args.no_start,
+    )
+    if isinstance(result, dict):
+        result["catalog_update"] = workspace_catalog.safe_update(
+            store.workspace, discovered_by="install-service"
+        )
+    return result
+
+
+def command_uninstall_service(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return uninstall_service(store, purge=args.purge)
+
+
+def command_update_service(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return update_service(
+        store,
+        interval_seconds=args.interval_seconds,
+        backend_mode=args.backend,
+        service_mode=args.service_mode,
+        install_root=Path(args.install_root) if args.install_root else None,
+        restart=not args.no_restart,
+    )
+
+
+def command_workspace_list(args: argparse.Namespace) -> dict[str, Any]:
+    entries = workspace_catalog.list_entries()
+    result: dict[str, Any] = {"entries": entries, "count": len(entries)}
+    if getattr(args, "format", "text") == "text":
+        if not entries:
+            result["__raw_output__"] = (
+                "0 workspaces known on this machine.\n"
+                "  run `opendream init` in a repo, or "
+                "`opendream workspace scan --root <path>` to discover existing ones."
+            )
+            return result
+        # Compact human-readable table: status, path, activation, service.
+        rows = [("STATUS", "WORKSPACE", "ACTIVATION", "SERVICE")]
+        for entry in entries:
+            rows.append(
+                (
+                    str(entry.get("status_kind") or "-"),
+                    str(entry.get("workspace_path") or "-"),
+                    str(entry.get("activation_state_summary") or "-"),
+                    str(entry.get("service_state_summary") or "-"),
+                )
+            )
+        widths = [max(len(r[i]) for r in rows) for i in range(4)]
+        lines = [f"{len(entries)} workspaces"]
+        for row in rows:
+            lines.append("  " + "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)))
+        result["__raw_output__"] = "\n".join(lines)
+    return result
+
+
+def command_workspace_inspect(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.workspace:
+        raise ValueError("workspace inspect requires --workspace")
+    entry = workspace_catalog.inspect_entry(args.workspace)
+    if entry is None:
+        return {"status": "missing", "workspace": args.workspace}
+    return {"status": "ok", "entry": entry}
+
+
+def command_workspace_scan(args: argparse.Namespace) -> dict[str, Any]:
+    roots: list[Path | str] = list(args.root or [])
+    report = workspace_catalog.scan_roots(
+        roots if roots else None,
+        all_roots=args.all_roots,
+    )
+    status = "ok" if not report["errors"] else "partial"
+    return {"status": status, "report": report}
+
+
+def command_workspace_roots_list(args: argparse.Namespace) -> dict[str, Any]:  # noqa: ARG001
+    return {"roots": workspace_catalog.list_roots()}
+
+
+def command_workspace_roots_add(args: argparse.Namespace) -> dict[str, Any]:
+    added = workspace_catalog.add_root(args.path)
+    return {"status": "added" if added else "exists", "path": str(Path(args.path).expanduser().resolve())}
+
+
+def command_workspace_roots_remove(args: argparse.Namespace) -> dict[str, Any]:
+    removed = workspace_catalog.remove_root(args.path)
+    return {"status": "removed" if removed else "missing", "path": str(Path(args.path).expanduser().resolve())}
+
+
+def command_workspace_forget(args: argparse.Namespace) -> dict[str, Any]:
+    removed = workspace_catalog.forget_workspace(args.workspace)
+    return {
+        "status": "forgotten" if removed else "missing",
+        "workspace": str(Path(args.workspace).expanduser().resolve()),
+    }
+
+
+def command_workspace_prune(args: argparse.Namespace) -> dict[str, Any]:
+    return workspace_catalog.prune_tempdir_entries(dry_run=bool(args.dry_run))
+
+
+def command_transcripts_ingest(args: argparse.Namespace) -> dict[str, Any]:
+    from . import transcripts as _transcripts
+
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if args.from_dir:
+        return _transcripts.ingest_claude_sessions(
+            store, args.from_dir, overwrite=bool(args.overwrite)
+        )
+    return _transcripts.ingest_claude_for_workspace(
+        store, overwrite=bool(args.overwrite)
+    )
+
+
+def command_workspace_doctor(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.workspace and not args.all_workspaces:
+        raise ValueError("workspace doctor requires --workspace or --all")
+    return workspace_catalog.doctor(
+        workspace=args.workspace,
+        all_workspaces=bool(args.all_workspaces),
+    )
+
+
+def command_workspace_upgrade(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.workspace and not args.all_workspaces:
+        raise ValueError("workspace upgrade requires --workspace or --all")
+
+    workspaces: list[str]
+    if args.workspace:
+        workspaces = [str(Path(args.workspace).expanduser().resolve())]
+    else:
+        workspaces = [
+            str(entry.get("workspace_path"))
+            for entry in workspace_catalog.list_entries()
+            if isinstance(entry, dict) and entry.get("workspace_path")
+        ]
+
+    results: list[dict[str, Any]] = []
+    for workspace_path in workspaces:
+        store = build_store(workspace_path, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+        if not store.is_initialized():
+            results.append(
+                {
+                    "workspace": str(store.workspace),
+                    "status": "skipped",
+                    "reason": "workspace is not initialized",
+                }
+            )
+            continue
+        activate_result = activate_agents(store, targets="configured", repair=True)
+        runtime_result = ensure_background_runtime(store)
+        catalog_result = workspace_catalog.doctor(workspace=str(store.workspace))
+        entry = catalog_result["entries"][0] if catalog_result.get("entries") else {}
+        results.append(
+            {
+                "workspace": str(store.workspace),
+                "status": "completed",
+                "activation_repair_status": activate_result.get("status", "unknown"),
+                "runtime_management": runtime_result,
+                "catalog_status_kind": entry.get("status_kind"),
+            }
+        )
+
+    return {
+        "status": "completed",
+        "workspace_count": len(workspaces),
+        "upgraded_count": sum(1 for item in results if item["status"] == "completed"),
+        "skipped_count": sum(1 for item in results if item["status"] == "skipped"),
+        "workspaces": results,
+    }
+
+
+def command_service_start(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return start_service(store)
+
+
+def command_service_enable(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return enable_background_runtime(
+        store,
+        interval_seconds=args.interval_seconds,
+        backend_mode=args.backend,
+        service_mode=args.service_mode,
+        install_root=Path(args.install_root).expanduser() if args.install_root else None,
+    )
+
+
+def command_service_disable(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return disable_background_runtime(store)
+
+
+def command_service_stop(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return stop_service(store)
+
+
+def command_service_restart(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    return restart_service(store)
+
+
+def command_service_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    payload = service_status(store, now=args.now)
+    payload["migration_hint"] = f"prefer `opendream status --workspace {store.workspace}` for the primary health view"
+    if args.format == "human":
+        payload["__raw_output__"] = format_service_status(payload)
+    return payload
+
+
+def command_service_doctor(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    payload = service_doctor(store, now=args.now)
+    payload["migration_hint"] = (
+        "prefer "
+        f"`opendream activate --workspace {store.workspace} --repair` "
+        "before using service-specific diagnostics"
+    )
+    if args.format == "human":
+        payload["__raw_output__"] = format_service_doctor(payload)
+    return payload
+
+
+def command_service_autowire(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    payload = autowire_adapters(store, target=args.target, force=args.force, uninstall=args.uninstall)
+    payload["migration_hint"] = (
+        f"prefer `opendream activate --workspace {store.workspace}`"
+        if not args.uninstall
+        else f"prefer `opendream deactivate --workspace {store.workspace}`"
+    )
+    return payload
+
+
+def command_eval_semantic_benchmark(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    return run_semantic_benchmark_eval(store, mode=args.mode, now=args.now)
+
+
+def command_eval_memory_agent_bench(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    from .benchmark_adapters import run_memory_agent_bench
+    return run_memory_agent_bench(store, mode=args.mode, now=args.now)
+
+
+def command_eval_coding_task(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    from .benchmark_adapters import run_coding_task_eval
+    return run_coding_task_eval(store, mode=args.mode, now=args.now)
+
+
+def command_eval_harness_optimize(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    from .harness_optimizer import run_optimization
+    return run_optimization(store, max_iterations=args.max_iterations, now=args.now)
+
+
+def command_semantic_config(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .provider_registry import load_semantic_config
+    return load_semantic_config(store)
+
+
+def command_semantic_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .semantic_dreamer import dream_status_semantic
+    return dream_status_semantic(store)
+
+
+def command_semantic_provider_health(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .provider_registry import check_all_provider_health
+    return check_all_provider_health(store)
+
+
+def command_semantic_bootstrap(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .harness_optimizer import capture_environment_bootstrap
+    return capture_environment_bootstrap(Path(args.workspace), store=store)
+
+
+def command_semantic_setup(args: argparse.Namespace) -> dict[str, Any]:
+    from .dream import dream_worker
+    from .semantic_dreamer import dream_status_semantic
+    from .semantic_setup import apply_setup_recommendation, semantic_setup
+
+    report = semantic_setup(Path(args.workspace), preference=args.prefer)
+    if not args.apply:
+        return report
+
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=args.compat_mode)
+    applied = apply_setup_recommendation(store, report)
+    runtime_result = ensure_background_runtime(store)
+    initial_cycle = dream_worker(
+        store,
+        now=args.now,
+        max_polls=1,
+        idle_exit=True,
+        process_backlog=True,
+        mode="auto",
+    )
+    runtime_result = {
+        **runtime_result,
+        "service": service_status(store, now=args.now),
+    }
+    return {
+        **report,
+        "status": "applied",
+        "applied": applied,
+        "runtime_management": runtime_result,
+        "initial_cycle": initial_cycle,
+        "readiness": dream_status_semantic(store),
+    }
+
+
+def command_semantic_adapters_list(args: argparse.Namespace) -> dict[str, Any]:
+    from .semantic_adapters import list_adapter_manifests
+    return {"adapters": list_adapter_manifests()}
+
+
+def command_semantic_adapters_detect(args: argparse.Namespace) -> dict[str, Any]:
+    from .semantic_adapters import detect_all_tools
+    return detect_all_tools(Path(args.workspace))
+
+
+def command_semantic_adapters_scaffold(args: argparse.Namespace) -> dict[str, Any]:
+    from .semantic_adapters import scaffold_adapter
+    return scaffold_adapter(Path(args.workspace), args.adapter)
+
+
+def command_semantic_adapters_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    config = store.load_semantic_config()
+    from .semantic_adapters import adapter_status
+    return adapter_status(
+        Path(args.workspace),
+        active_strategy=config.get("execution_strategy", "deterministic"),
+        active_adapter=config.get("active_adapter"),
+    )
+
+
+def command_semantic_adapters_validate(args: argparse.Namespace) -> dict[str, Any]:
+    from .semantic_adapters import get_adapter_manifest, validate_adapter_manifest
+    manifest = get_adapter_manifest(args.adapter)
+    if manifest is None:
+        return {"valid": False, "error": f"unknown adapter: {args.adapter}"}
+    return validate_adapter_manifest(manifest)
+
+
+def command_semantic_ingest(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    from .semantic_ingest import ingest_file, scan_inbox
+    if args.scan_inbox:
+        return scan_inbox(store, now=args.now)
+    if args.path:
+        return ingest_file(store, Path(args.path), now=args.now)
+    return {"status": "error", "reason": "specify --path or --scan-inbox"}
+
+
+def command_review_auto_run(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    cfg = _auto_reviewer.load_config(store)
+    result = _auto_reviewer.run_auto_reviewer(store, config=cfg, dry_run=args.dry_run)
+    return result
+
+
+def command_review_auto_status(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    cfg = _auto_reviewer.load_config(store)
+    last_run = _auto_reviewer.load_last_run(store)
+    rules_status = []
+    for rule in _auto_reviewer.DEFAULT_RULES:
+        rc = cfg.rule(rule.rule_id)
+        rules_status.append({
+            "rule_id": rule.rule_id,
+            "description": rule.description,
+            "enabled": rc.enabled if rc else True,
+            "thresholds": rc.thresholds if rc else {},
+        })
+    cooldown_count = 0
+    if last_run:
+        cooldown_count = last_run.get("applied_count", 0)
+    return {
+        "enabled": cfg.enabled,
+        "run_in_dream_cycle": cfg.run_in_dream_cycle,
+        "rules": rules_status,
+        "last_run": last_run,
+        "cooldown_count": cooldown_count,
+    }
+
+
+def command_review_auto_config(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if args.show or not args.set:
+        cfg = _auto_reviewer.load_config(store)
+        rules_out = []
+        for rule in _auto_reviewer.DEFAULT_RULES:
+            rc = cfg.rule(rule.rule_id)
+            if rc is None:
+                continue
+            rules_out.append({"rule_id": rule.rule_id, "enabled": rc.enabled, "thresholds": rc.thresholds})
+        return {
+            "enabled": cfg.enabled,
+            "run_in_dream_cycle": cfg.run_in_dream_cycle,
+            "rules": rules_out,
+        }
+    # --set RULE.FIELD=VALUE [...]
+    cfg = _auto_reviewer.load_config(store)
+    for token in args.set:
+        if "=" not in token:
+            raise ValueError(f"--set value must be RULE.FIELD=VALUE, got: {token!r}")
+        lhs, _, rhs = token.partition("=")
+        if "." not in lhs:
+            raise ValueError(f"--set key must be RULE.FIELD, got: {lhs!r}")
+        rule_id, _, field_name = lhs.partition(".")
+        update: dict[str, Any] = {"rule_id": rule_id}
+        if field_name == "enabled":
+            update["enabled"] = rhs.lower() in ("1", "true", "yes")
+        else:
+            update["threshold_summary"] = {field_name: float(rhs)}
+        cfg = _auto_reviewer.apply_config_update(store, update)
+    rules_out = []
+    for rule in _auto_reviewer.DEFAULT_RULES:
+        rc = cfg.rule(rule.rule_id)
+        if rc is None:
+            continue
+        rules_out.append({"rule_id": rule.rule_id, "enabled": rc.enabled, "thresholds": rc.thresholds})
+    return {
+        "enabled": cfg.enabled,
+        "run_in_dream_cycle": cfg.run_in_dream_cycle,
+        "rules": rules_out,
+    }
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = OpenDreamArgumentParser(
+        prog="opendream",
+        description="Activation-first local memory runtime for agents in project workspaces.",
+        epilog=TOP_LEVEL_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--version", action="version", version=f"opendream {__version__}")
+    subparsers = parser.add_subparsers(dest="command", required=True, title="commands")
+
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Primary: create the memory layout and activate configured agents",
+    )
+    init_parser.add_argument("--workspace", required=True)
+    init_parser.add_argument("--store-kind", choices=sorted(VALID_STORE_KINDS), default="project")
+    init_parser.add_argument(
+        "--activate-configured",
+        dest="activate_configured",
+        action="store_true",
+        default=True,
+        help="Activate configured agents during init (default; kept for compatibility)",
+    )
+    init_parser.add_argument(
+        "--no-activate-configured",
+        dest="activate_configured",
+        action="store_false",
+        help="Only create the memory layout; do not install agent activation surfaces",
+    )
+    add_layout_arguments(init_parser)
+    init_parser.set_defaults(func=command_init)
+
+    activate_parser = subparsers.add_parser(
+        "activate",
+        help="Primary: install or repair managed agent activation surfaces",
+    )
+    activate_parser.add_argument("--workspace", required=True)
+    activate_parser.add_argument("--targets", default="configured", metavar="SELECTOR", help=ACTIVATION_TARGETS_HELP)
+    activate_parser.add_argument("--repair", action="store_true")
+    add_layout_arguments(activate_parser)
+    activate_parser.set_defaults(func=command_activate)
+
+    repair_parser = subparsers.add_parser(
+        "repair",
+        help="Primary: shorthand for `activate --repair` on configured targets",
+    )
+    repair_parser.add_argument("--workspace", required=True)
+    repair_parser.add_argument("--targets", default="configured", metavar="SELECTOR", help=ACTIVATION_TARGETS_HELP)
+    add_layout_arguments(repair_parser)
+    repair_parser.set_defaults(func=command_repair)
+
+    activation_plan_parser = subparsers.add_parser(
+        "activation-plan",
+        help="Dry-run: list managed surfaces that would change (no files written)",
+    )
+    activation_plan_parser.add_argument("--workspace", required=True)
+    activation_plan_parser.add_argument(
+        "--targets", default="configured", metavar="SELECTOR", help=ACTIVATION_TARGETS_HELP
+    )
+    add_layout_arguments(activation_plan_parser)
+    activation_plan_parser.set_defaults(func=command_activation_plan)
+
+    deactivate_parser = subparsers.add_parser("deactivate", help="Primary: remove managed activation surfaces")
+    deactivate_parser.add_argument("--workspace", required=True)
+    deactivate_parser.add_argument(
+        "--targets", default="configured", metavar="SELECTOR", help=ACTIVATION_TARGETS_HELP
+    )
+    add_layout_arguments(deactivate_parser)
+    deactivate_parser.set_defaults(func=command_deactivate)
+
+    doctor_parser = subparsers.add_parser("doctor", help="Advanced: diagnose managed surfaces and repair drift")
+    doctor_parser.add_argument("--workspace", required=True)
+    doctor_parser.add_argument("--surface", choices=["agents", "memory"], default="agents")
+    doctor_parser.add_argument(
+        "--memory",
+        action=_RejectDoctorMemoryShorthand,
+        help=argparse.SUPPRESS,
+    )
+    add_layout_arguments(doctor_parser)
+    doctor_parser.set_defaults(func=command_doctor)
+
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Primary: run setup, capture, quality, runtime, and release verification gates",
+    )
+    verify_subparsers = verify_parser.add_subparsers(dest="verify_command", required=True)
+    activation_capture_parser = verify_subparsers.add_parser(
+        "activation-capture",
+        help="Verify that selected agent activation surfaces can capture durable memory",
+    )
+    activation_capture_parser.add_argument("--workspace", required=True)
+    activation_capture_parser.add_argument(
+        "--targets",
+        default="configured",
+        metavar="SELECTOR",
+        help=(
+            "configured, all-supported, or a comma-separated list of bundled targets "
+            "(claude-code,codex,cursor,github-copilot,hermes,openclaw)"
+        ),
+    )
+    add_layout_arguments(activation_capture_parser)
+    activation_capture_parser.set_defaults(
+        func=command_verify_activation_capture,
+        result_failure_statuses=("failed",),
+    )
+    verify_memory_parser = verify_subparsers.add_parser(
+        "memory-quality",
+        help="Verify memory quality against the packaged replay fixture",
+    )
+    verify_memory_parser.add_argument("--workspace", required=True)
+    verify_memory_parser.add_argument("--fixture")
+    verify_memory_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_memory_parser)
+    verify_memory_parser.set_defaults(func=command_eval_memory_quality, result_failure_statuses=("failed",))
+
+    verify_dream_parser = verify_subparsers.add_parser(
+        "dream-layout",
+        help="Verify transcript-native memory layout checks",
+    )
+    verify_dream_parser.add_argument("--workspace", required=True)
+    verify_dream_parser.add_argument("--fixture")
+    verify_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_dream_parser)
+    verify_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
+    legacy_verify_dream_parser = verify_subparsers.add_parser(
+        "dream-fidelity",
+        help=argparse.SUPPRESS,
+    )
+    legacy_verify_dream_parser.add_argument("--workspace", required=True)
+    legacy_verify_dream_parser.add_argument("--fixture")
+    legacy_verify_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(legacy_verify_dream_parser)
+    legacy_verify_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
+
+    verify_performance_parser = verify_subparsers.add_parser(
+        "performance",
+        help="Verify composite performance scorecard",
+    )
+    verify_performance_parser.add_argument("--workspace", required=True)
+    verify_performance_parser.add_argument("--fixture")
+    verify_performance_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_performance_parser)
+    verify_performance_parser.set_defaults(func=command_eval_performance, result_failure_statuses=("failed",))
+
+    verify_runtime_parser = verify_subparsers.add_parser(
+        "runtime",
+        help="Verify advanced runtime proof report",
+    )
+    verify_runtime_parser.add_argument("--workspace", required=True)
+    verify_runtime_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_runtime_parser)
+    verify_runtime_parser.set_defaults(func=command_eval_advanced_runtime)
+
+    verify_release_parser = verify_subparsers.add_parser(
+        "release",
+        help="Verify release memory-excellence gate",
+    )
+    verify_release_parser.add_argument("--workspace", required=True)
+    verify_release_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(verify_release_parser)
+    verify_release_parser.set_defaults(func=command_eval_memory_excellence, result_failure_statuses=("failed",))
+
+    append_parser = subparsers.add_parser("append-event")
+    append_parser.add_argument("--workspace", required=True)
+    append_parser.add_argument("--events", required=True, help="JSON, JSON array, or JSONL file")
+    add_layout_arguments(append_parser)
+    append_parser.set_defaults(func=command_append_event)
+
+    emit_parser = subparsers.add_parser("emit-event")
+    emit_parser.add_argument("--workspace", required=True)
+    emit_parser.add_argument("--kind", required=True)
+    emit_parser.add_argument("--content", required=True)
+    emit_parser.add_argument("--scope", default="project")
+    emit_parser.add_argument("--channel", default="cli")
+    emit_parser.add_argument("--message-ref", required=True)
+    emit_parser.add_argument("--session-id")
+    emit_parser.add_argument("--turn-id")
+    emit_parser.add_argument("--event-id")
+    emit_parser.add_argument("--timestamp")
+    emit_parser.add_argument("--tag", action="append", default=[])
+    emit_parser.add_argument("--confidence-hint", type=float)
+    emit_parser.add_argument("--sensitivity", default="normal")
+    emit_parser.add_argument("--agent-id", default="unknown")
+    emit_parser.add_argument("--agent-label", default="Unknown")
+    emit_parser.add_argument("--agent-runtime")
+    emit_parser.add_argument("--agent-adapter-id")
+    emit_parser.add_argument("--agent-model-id")
+    emit_parser.add_argument("--agent-model-version")
+    emit_parser.add_argument("--route", choices=["project", "global"], default="project")
+    emit_parser.add_argument("--global-workspace")
+    add_layout_arguments(emit_parser)
+    emit_parser.set_defaults(func=command_emit_event)
+
+    hook_parser = subparsers.add_parser("hook", help="Internal: run managed agent hook entrypoints")
+    hook_subparsers = hook_parser.add_subparsers(dest="hook_command", required=True)
+    claude_pre_parser = hook_subparsers.add_parser(
+        "claude-pre-task",
+        help="Internal: prepare context from Claude Code UserPromptSubmit hook JSON",
+    )
+    claude_pre_parser.add_argument("--workspace", required=True)
+    claude_pre_parser.add_argument("--fallback-query", default="current task")
+    add_layout_arguments(claude_pre_parser)
+    claude_pre_parser.set_defaults(func=command_hook_claude_pre_task)
+
+    claude_post_parser = hook_subparsers.add_parser(
+        "claude-post-task",
+        help="Internal: emit outcome from Claude Code Stop hook JSON",
+    )
+    claude_post_parser.add_argument("--workspace", required=True)
+    claude_post_parser.add_argument("--fallback-summary", default="Task completed.")
+    claude_post_parser.add_argument("--message-ref", default="claude-post-task")
+    claude_post_parser.add_argument("--tag", action="append", default=[])
+    add_layout_arguments(claude_post_parser)
+    claude_post_parser.set_defaults(func=command_hook_claude_post_task)
+
+    extract_parser = subparsers.add_parser("extract")
+    extract_parser.add_argument("--workspace", required=True)
+    extract_parser.add_argument("--events", help="Optional JSON, JSON array, or JSONL file")
+    extract_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(extract_parser)
+    extract_parser.set_defaults(func=command_extract)
+
+    bootstrap_parser = subparsers.add_parser("bootstrap-index")
+    bootstrap_parser.add_argument("--workspace", required=True)
+    bootstrap_parser.add_argument("--events", required=True)
+    bootstrap_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(bootstrap_parser)
+    bootstrap_parser.set_defaults(func=command_bootstrap_index)
+
+    consolidate_parser = subparsers.add_parser("consolidate", help="Apply planned durable-memory consolidation")
+    consolidate_parser.add_argument("--workspace", required=True)
+    consolidate_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    consolidate_parser.add_argument("--sleep-before-write", type=float, default=0.0, help=argparse.SUPPRESS)
+    add_layout_arguments(consolidate_parser)
+    consolidate_parser.set_defaults(func=command_consolidate)
+
+    maintain_parser = subparsers.add_parser(
+        "maintain",
+        help="Advanced: run extract plus consolidate when policy allows",
+    )
+    maintain_parser.add_argument("--workspace", required=True)
+    maintain_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    maintain_parser.add_argument("--min-new-events", type=int)
+    maintain_parser.add_argument("--min-interval-seconds", type=int)
+    add_layout_arguments(maintain_parser)
+    add_store_group_arguments(maintain_parser)
+    maintain_parser.set_defaults(func=command_maintain)
+
+    retrieve_parser = subparsers.add_parser("retrieve", help="Retrieve relevant durable memory records")
+    retrieve_parser.add_argument("--workspace", required=True)
+    retrieve_parser.add_argument(
+        "--query",
+        required=True,
+        help=(
+            "Natural-language query. Very short queries may be intentionally gated: JSON includes "
+            '"gated": true and a reason when there are fewer than gating_min_content_tokens '
+            "(default 3) meaningful tokens after stopwords."
+        ),
+    )
+    retrieve_parser.add_argument("--limit", type=int, default=5)
+    retrieve_parser.add_argument("--include-contested", action="store_true")
+    retrieve_parser.add_argument(
+        "--caller-detail",
+        metavar="TEXT",
+        help="Optional free-text tag stored on the retrieval audit (e.g. agent session id, operator id).",
+    )
+    retrieve_parser.add_argument("--agent-id", default="unknown")
+    retrieve_parser.add_argument("--agent-label", default="Unknown")
+    retrieve_parser.add_argument("--agent-runtime")
+    retrieve_parser.add_argument("--agent-adapter-id")
+    retrieve_parser.add_argument("--agent-model-id")
+    retrieve_parser.add_argument("--agent-model-version")
+    retrieve_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(retrieve_parser)
+    retrieve_parser.set_defaults(func=command_retrieve)
+
+    prepare_context_parser = subparsers.add_parser("prepare-context", help="Assemble prompt-ready memory context")
+    prepare_context_parser.add_argument("--workspace", required=True)
+    prepare_context_parser.add_argument("--query", required=True)
+    prepare_context_parser.add_argument("--limit", type=int, default=5)
+    prepare_context_parser.add_argument("--agent-id", default="unknown")
+    prepare_context_parser.add_argument("--agent-label", default="Unknown")
+    prepare_context_parser.add_argument("--agent-runtime")
+    prepare_context_parser.add_argument("--agent-adapter-id")
+    prepare_context_parser.add_argument("--agent-model-id")
+    prepare_context_parser.add_argument("--agent-model-version")
+    prepare_context_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    prepare_context_parser.add_argument(
+        "--activate-session",
+        action="store_true",
+        help="Persist this context session id for the following managed post-task hook",
+    )
+    prepare_context_parser.add_argument(
+        "--output",
+        choices=["full-json", "compact-json", "prompt"],
+        default="full-json",
+        help="Output shape: full audit JSON, compact hook-safe JSON, or prompt text",
+    )
+    add_layout_arguments(prepare_context_parser)
+    add_store_group_arguments(prepare_context_parser)
+    prepare_context_parser.set_defaults(func=command_prepare_context)
+
+    record_context_use_parser = subparsers.add_parser(
+        "record-context-use",
+        help="Record audit-only acknowledgement of how an agent used prepared memory context",
+    )
+    record_context_use_parser.add_argument("--workspace", required=True)
+    record_context_use_parser.add_argument("--context-id", required=True)
+    record_context_use_parser.add_argument(
+        "--memory-use-state",
+        choices=["used", "checked-none", "ignored", "unknown", "conflicted", "stale"],
+        required=True,
+    )
+    record_context_use_parser.add_argument("--used-memory-id", action="append", default=[])
+    record_context_use_parser.add_argument("--usage-note")
+    record_context_use_parser.add_argument("--visible-attestation")
+    record_context_use_parser.add_argument("--timestamp")
+    record_context_use_parser.add_argument("--agent-id", default="unknown")
+    record_context_use_parser.add_argument("--agent-label", default="Unknown")
+    record_context_use_parser.add_argument("--agent-runtime")
+    record_context_use_parser.add_argument("--agent-adapter-id")
+    record_context_use_parser.add_argument("--agent-model-id")
+    record_context_use_parser.add_argument("--agent-model-version")
+    add_layout_arguments(record_context_use_parser)
+    record_context_use_parser.set_defaults(func=command_record_context_use)
+
+    status_parser = subparsers.add_parser("status", help="Primary: summarize activation, drift, and runtime health")
+    status_parser.add_argument("--workspace", required=True)
+    status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    status_parser.add_argument("--min-new-events", type=int)
+    status_parser.add_argument("--min-interval-seconds", type=int)
+    status_parser.add_argument("--format", choices=["json", "human"], default="json")
+    add_layout_arguments(status_parser)
+    add_store_group_arguments(status_parser)
+    status_parser.set_defaults(func=command_status)
+
+    tick_parser = subparsers.add_parser("tick", help="Advanced: run one scheduler-safe maintenance poll")
+    tick_parser.add_argument("--workspace", required=True)
+    tick_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    tick_parser.add_argument("--min-new-events", type=int)
+    tick_parser.add_argument("--min-interval-seconds", type=int)
+    add_layout_arguments(tick_parser)
+    add_store_group_arguments(tick_parser)
+    tick_parser.set_defaults(func=command_tick)
+
+    contract_parser = subparsers.add_parser(
+        "contract",
+        help="Agent-facing machine-readable contracts (schemas, command inventory)",
+        epilog=CONTRACT_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    contract_subparsers = contract_parser.add_subparsers(dest="contract_command", required=True)
+    contract_export_parser = contract_subparsers.add_parser(
+        "export",
+        help="Emit versioned JSON describing CLI commands, schemas, and output versions",
+        description=(
+            "Canonical invocation: pass the workspace with --workspace on this subcommand, "
+            "not as the first argument after `contract`."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    contract_export_parser.add_argument("--workspace", required=True)
+    contract_export_parser.add_argument("--format", choices=["json"], default="json")
+    contract_export_parser.set_defaults(func=command_contract_export)
+
+    automation_parser = subparsers.add_parser(
+        "automation",
+        help="Advanced: managed automation jobs and projection outputs",
+    )
+    automation_subparsers = automation_parser.add_subparsers(dest="automation_command", required=True)
+
+    automation_register_parser = automation_subparsers.add_parser("register", help="Register a managed automation job")
+    automation_register_parser.add_argument("--workspace", required=True)
+    automation_register_parser.add_argument("--spec", required=True)
+    automation_register_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_register_parser)
+    automation_register_parser.set_defaults(func=command_automation_register)
+
+    automation_run_parser = automation_subparsers.add_parser("run", help="Run one automation job immediately")
+    automation_run_parser.add_argument("--workspace", required=True)
+    automation_run_parser.add_argument("--job", required=True)
+    automation_run_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_run_parser)
+    automation_run_parser.set_defaults(func=command_automation_run)
+
+    automation_tick_parser = automation_subparsers.add_parser("tick", help="Run every due automation job once")
+    automation_tick_parser.add_argument("--workspace", required=True)
+    automation_tick_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_tick_parser)
+    automation_tick_parser.set_defaults(func=command_automation_tick)
+
+    automation_status_parser = automation_subparsers.add_parser("status", help="Inspect automation health and jobs")
+    automation_status_parser.add_argument("--workspace", required=True)
+    automation_status_parser.add_argument("--job")
+    automation_status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_status_parser)
+    automation_status_parser.set_defaults(func=command_automation_status)
+
+    automation_review_parser = automation_subparsers.add_parser(
+        "review",
+        help="Review active and stale projection records for one automation job",
+    )
+    automation_review_parser.add_argument("--workspace", required=True)
+    automation_review_parser.add_argument("--job", required=True)
+    automation_review_parser.add_argument("--limit", type=int, default=10)
+    automation_review_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(automation_review_parser)
+    automation_review_parser.set_defaults(func=command_automation_review)
+
+    automation_scaffold_parser = automation_subparsers.add_parser(
+        "scaffold-dream",
+        help="Generate adapter-specific dream job scaffolds (feature-radar, bug-radar, fix-radar, semantic-refresh)",
+    )
+    automation_scaffold_parser.add_argument("--workspace", required=True)
+    automation_scaffold_parser.add_argument(
+        "--adapter", required=True,
+        choices=["codex-account", "claude-scheduled-task", "cursor-automation"],
+        help="Semantic adapter to scaffold for",
+    )
+    automation_scaffold_parser.add_argument(
+        "--kind", required=True,
+        choices=["feature-radar", "bug-radar", "fix-radar", "semantic-refresh"],
+        help="Kind of dream job to scaffold",
+    )
+    automation_scaffold_parser.set_defaults(func=command_automation_scaffold_dream)
+
+    demo_parser = subparsers.add_parser("demo", help="Seed a deterministic demo workspace")
+    demo_parser.add_argument("--workspace", required=True)
+    demo_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    demo_parser.add_argument(
+        "--scenario",
+        choices=[DEFAULT_DEMO_SCENARIO, SHOWCASE_SCENARIO],
+        default=DEFAULT_DEMO_SCENARIO,
+        help="Demo scenario to seed; default preserves the historical golden-events demo",
+    )
+    add_layout_arguments(demo_parser)
+    demo_parser.set_defaults(func=command_demo)
+
+    dream_parser = subparsers.add_parser("dream", help="Advanced: transcript-native dream runtime commands")
+    dream_subparsers = dream_parser.add_subparsers(dest="dream_command", required=True)
+    dream_run_parser = dream_subparsers.add_parser(
+        "run",
+        help="Run a single dream pass from explicit episodes or transcript files",
+    )
+    dream_run_parser.add_argument("--workspace", required=True)
+    dream_run_parser.add_argument("--episodes", nargs="*")
+    dream_run_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    dream_run_parser.add_argument("--max-recent-episodes", type=int)
+    dream_run_parser.add_argument("--min-episode-signals", type=int)
+    dream_run_parser.add_argument(
+        "--mode",
+        choices=["deterministic", "semantic", "hybrid"],
+        default=None,
+        help="Dream mode: deterministic (default), semantic, or hybrid",
+    )
+    add_layout_arguments(dream_run_parser)
+    dream_run_parser.set_defaults(func=command_dream_run)
+    dream_backfill_parser = dream_subparsers.add_parser(
+        "backfill-narrative",
+        help="Backfill deterministic narratives into existing dream audit summaries",
+    )
+    dream_backfill_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(dream_backfill_parser)
+    dream_backfill_parser.set_defaults(func=command_dream_backfill_narrative)
+    dream_status_parser = dream_subparsers.add_parser("status", help="Inspect dream, queue, and worker state")
+    dream_status_parser.add_argument("--workspace", required=True)
+    dream_status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(dream_status_parser)
+    dream_status_parser.set_defaults(func=command_dream_status)
+    dream_tick_parser = dream_subparsers.add_parser("tick", help="Run one scheduler-safe transcript backlog poll")
+    dream_tick_parser.add_argument("--workspace", required=True)
+    dream_tick_parser.add_argument("--episodes", nargs="*")
+    dream_tick_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    dream_tick_parser.add_argument("--max-recent-episodes", type=int)
+    dream_tick_parser.add_argument("--min-episode-signals", type=int)
+    dream_tick_parser.add_argument("--min-interval-seconds", type=int, default=0)
+    add_layout_arguments(dream_tick_parser)
+    dream_tick_parser.set_defaults(func=command_dream_tick)
+    dream_enqueue_parser = dream_subparsers.add_parser(
+        "enqueue",
+        help="Queue dream work for later worker or daemon processing",
+    )
+    dream_enqueue_parser.add_argument("--workspace", required=True)
+    dream_enqueue_parser.add_argument("--episodes", nargs="*")
+    dream_enqueue_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    dream_enqueue_parser.add_argument("--max-recent-episodes", type=int)
+    dream_enqueue_parser.add_argument("--min-episode-signals", type=int)
+    dream_enqueue_parser.add_argument("--trigger-class", default="queued-manual")
+    add_layout_arguments(dream_enqueue_parser)
+    dream_enqueue_parser.set_defaults(func=command_dream_enqueue)
+    dream_worker_parser = dream_subparsers.add_parser(
+        "worker",
+        help="Drain queued jobs in a one-shot or bounded worker poll",
+        description=(
+            "Drain queued dream jobs. Use `--once` for a single poll. "
+            "Use `dream daemon` for a supervisor-style loop."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    dream_worker_parser.add_argument("--workspace", required=True)
+    dream_worker_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    dream_worker_parser.add_argument("--interval-seconds", type=float, default=0.0)
+    dream_worker_parser.add_argument("--max-polls", type=int, default=1)
+    dream_worker_parser.add_argument("--max-jobs-per-poll", type=int)
+    dream_worker_parser.add_argument("--idle-exit", action="store_true", default=False)
+    dream_worker_parser.add_argument("--once", action="store_true")
+    dream_worker_parser.add_argument("--no-backlog", action="store_true")
+    dream_worker_parser.add_argument(
+        "--mode",
+        choices=["auto", "deterministic", "semantic", "hybrid"],
+        default="auto",
+        help="Worker mode: auto (follow workspace posture), deterministic, semantic, or hybrid",
+    )
+    add_layout_arguments(dream_worker_parser)
+    dream_worker_parser.set_defaults(func=command_dream_worker)
+    dream_daemon_parser = dream_subparsers.add_parser(
+        "daemon",
+        help="Run the dream worker in a supervisor-friendly looping mode",
+        description=(
+            "Alias over the worker loop for longer-running supervision. "
+            "Use `worker --once` for single-poll automation."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    dream_daemon_parser.add_argument("--workspace", required=True)
+    dream_daemon_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    dream_daemon_parser.add_argument("--interval-seconds", type=float, default=30.0)
+    dream_daemon_parser.add_argument("--max-polls", type=int, default=1)
+    dream_daemon_parser.add_argument("--max-jobs-per-poll", type=int)
+    dream_daemon_parser.add_argument("--idle-exit", action="store_true", default=False)
+    dream_daemon_parser.add_argument("--once", action="store_true")
+    dream_daemon_parser.add_argument("--no-backlog", action="store_true")
+    dream_daemon_parser.add_argument(
+        "--mode",
+        choices=["auto", "deterministic", "semantic", "hybrid"],
+        default="auto",
+        help="Daemon mode: auto (follow workspace posture), deterministic, semantic, or hybrid",
+    )
+    add_layout_arguments(dream_daemon_parser)
+    dream_daemon_parser.set_defaults(func=command_dream_worker)
+
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Run machine-readable quality and layout evaluations",
+    )
+    eval_subparsers = eval_parser.add_subparsers(dest="eval_command", required=True)
+    eval_memory_parser = eval_subparsers.add_parser(
+        "memory-quality",
+        help="Run retrieval and contradiction quality checks",
+        description=(
+            "Replays the packaged memory-quality fixture into the **current** store (emit-event + maintain), "
+            "then scores retrieval. Not hermetic: existing memories (e.g. after `demo`) can cause failure. "
+            "Use a fresh workspace (or clean memory dir) for a clean pass/fail signal like CI; "
+            "compare `eval performance`, which uses an isolated store."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    eval_memory_parser.add_argument("--workspace", required=True)
+    eval_memory_parser.add_argument("--fixture")
+    eval_memory_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_memory_parser)
+    eval_memory_parser.set_defaults(func=command_eval_memory_quality, result_failure_statuses=("failed",))
+    eval_dream_parser = eval_subparsers.add_parser(
+        "dream-layout",
+        help="Run transcript-native memory layout checks",
+        description=(
+            "Runs the packaged transcript fixture and checks project/user compatibility views among other signals. "
+            "Uses the workspace you pass in: an existing store keeps its layout (e.g. `demo` without `--compat-mode "
+            "project-user` leaves canonical mode, so compatibility_views may fail). Prefer a fresh workspace or pass "
+            "`--compat-mode project-user` consistently (and the same `--memory-dir`) for green runs."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    eval_dream_parser.add_argument("--workspace", required=True)
+    eval_dream_parser.add_argument("--fixture")
+    eval_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_dream_parser)
+    eval_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
+    legacy_eval_dream_parser = eval_subparsers.add_parser(
+        "dream-fidelity",
+        help=argparse.SUPPRESS,
+        description=argparse.SUPPRESS,
+    )
+    legacy_eval_dream_parser.add_argument("--workspace", required=True)
+    legacy_eval_dream_parser.add_argument("--fixture")
+    legacy_eval_dream_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(legacy_eval_dream_parser)
+    legacy_eval_dream_parser.set_defaults(func=command_eval_dream_fidelity, result_failure_statuses=("failed",))
+    eval_performance_parser = eval_subparsers.add_parser(
+        "performance",
+        help="Run composite performance evaluation with scorecard",
+    )
+    eval_performance_parser.add_argument("--workspace", required=True)
+    eval_performance_parser.add_argument("--fixture")
+    eval_performance_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_performance_parser)
+    eval_performance_parser.set_defaults(func=command_eval_performance, result_failure_statuses=("failed",))
+
+    eval_showcase_parser = eval_subparsers.add_parser(
+        "showcase",
+        help="Run the project-agent memory showcase evaluation",
+    )
+    eval_showcase_parser.add_argument("--workspace", required=True)
+    eval_showcase_parser.add_argument(
+        "--scenario",
+        choices=[SHOWCASE_SCENARIO],
+        default=SHOWCASE_SCENARIO,
+        help="Showcase scenario to evaluate",
+    )
+    eval_showcase_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_showcase_parser)
+    eval_showcase_parser.set_defaults(func=command_eval_showcase, result_failure_statuses=("failed",))
+
+    eval_semantic_parser = eval_subparsers.add_parser(
+        "semantic-benchmark",
+        help="Run semantic benchmark suite (internal + MAB + coding-task)",
+    )
+    eval_semantic_parser.add_argument("--workspace", required=True)
+    eval_semantic_parser.add_argument(
+        "--mode", choices=["deterministic", "semantic", "hybrid"], default="hybrid",
+    )
+    eval_semantic_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_semantic_parser)
+    eval_semantic_parser.set_defaults(func=command_eval_semantic_benchmark, result_failure_statuses=("failed",))
+
+    eval_mab_parser = eval_subparsers.add_parser(
+        "memory-agent-bench",
+        help="Run MemoryAgentBench-style competency benchmarks",
+    )
+    eval_mab_parser.add_argument("--workspace", required=True)
+    eval_mab_parser.add_argument("--config")
+    eval_mab_parser.add_argument(
+        "--mode", choices=["deterministic", "semantic", "hybrid"], default="hybrid",
+    )
+    eval_mab_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_mab_parser)
+    eval_mab_parser.set_defaults(func=command_eval_memory_agent_bench, result_failure_statuses=("failed",))
+
+    eval_coding_parser = eval_subparsers.add_parser(
+        "coding-task",
+        help="Run coding-task evaluation with memory-hurt accounting",
+    )
+    eval_coding_parser.add_argument("--workspace", required=True)
+    eval_coding_parser.add_argument(
+        "--mode", choices=["deterministic", "semantic", "hybrid"], default="hybrid",
+    )
+    eval_coding_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_coding_parser)
+    eval_coding_parser.set_defaults(func=command_eval_coding_task, result_failure_statuses=("failed",))
+
+    eval_harness_parser = eval_subparsers.add_parser(
+        "harness-optimize",
+        help="Run harness optimization search",
+    )
+    eval_harness_parser.add_argument("--workspace", required=True)
+    eval_harness_parser.add_argument("--max-iterations", type=int, default=10)
+    eval_harness_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_harness_parser)
+    eval_harness_parser.set_defaults(func=command_eval_harness_optimize)
+
+    eval_excellence_parser = eval_subparsers.add_parser(
+        "memory-excellence",
+        help="Run memory-excellence scorecard for release gating",
+    )
+    eval_excellence_parser.add_argument("--workspace", required=True)
+    eval_excellence_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_excellence_parser)
+    eval_excellence_parser.set_defaults(func=command_eval_memory_excellence, result_failure_statuses=("failed",))
+
+    eval_runtime_parser = eval_subparsers.add_parser(
+        "advanced-runtime",
+        help="Generate advanced-runtime report with cross-mode excellence proof",
+    )
+    eval_runtime_parser.add_argument("--workspace", required=True)
+    eval_runtime_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(eval_runtime_parser)
+    eval_runtime_parser.set_defaults(func=command_eval_advanced_runtime)
+
+    # Reconciliation subcommand
+    reconciliation_parser = subparsers.add_parser(
+        "reconcile",
+        help="Run reconciliation sweep to detect and repair staleness, orphan views, and drift",
+    )
+    reconciliation_parser.add_argument("--workspace", required=True)
+    reconciliation_parser.add_argument("--now", help="Fixed ISO timestamp")
+    add_layout_arguments(reconciliation_parser)
+    reconciliation_parser.set_defaults(func=command_reconcile)
+
+    # Semantic config inspection
+    semantic_parser = subparsers.add_parser(
+        "semantic",
+        help="Advanced: semantic sleep-time mode config and provider management",
+    )
+    semantic_subparsers = semantic_parser.add_subparsers(dest="semantic_command", required=True)
+
+    semantic_config_parser = semantic_subparsers.add_parser("config", help="Show semantic mode config")
+    semantic_config_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_config_parser)
+    semantic_config_parser.set_defaults(func=command_semantic_config)
+
+    semantic_status_parser = semantic_subparsers.add_parser("status", help="Show semantic mode status")
+    semantic_status_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_status_parser)
+    semantic_status_parser.set_defaults(func=command_semantic_status)
+
+    semantic_provider_parser = semantic_subparsers.add_parser("provider-health", help="Check provider health")
+    semantic_provider_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_provider_parser)
+    semantic_provider_parser.set_defaults(func=command_semantic_provider_health)
+
+    semantic_bootstrap_parser = semantic_subparsers.add_parser("bootstrap", help="Capture environment bootstrap")
+    semantic_bootstrap_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_bootstrap_parser)
+    semantic_bootstrap_parser.set_defaults(func=command_semantic_bootstrap)
+
+    semantic_setup_parser = semantic_subparsers.add_parser(
+        "setup",
+        help="Run the setup wizard to detect and recommend a semantic execution strategy",
+    )
+    semantic_setup_parser.add_argument("--workspace", required=True)
+    semantic_setup_parser.add_argument(
+        "--prefer",
+        choices=["no-extra-key", "direct-provider"],
+        default="no-extra-key",
+        help="Execution preference: no-extra-key (default) or direct-provider",
+    )
+    semantic_setup_parser.add_argument("--apply", action="store_true")
+    semantic_setup_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(semantic_setup_parser)
+    semantic_setup_parser.set_defaults(func=command_semantic_setup)
+
+    semantic_adapters_parser = semantic_subparsers.add_parser(
+        "adapters",
+        help="Manage semantic execution adapters",
+    )
+    semantic_adapters_subparsers = semantic_adapters_parser.add_subparsers(
+        dest="adapters_command", required=True,
+    )
+
+    semantic_adapters_list_parser = semantic_adapters_subparsers.add_parser("list", help="List all builtin adapters")
+    semantic_adapters_list_parser.set_defaults(func=command_semantic_adapters_list)
+
+    semantic_adapters_detect_parser = semantic_adapters_subparsers.add_parser("detect", help="Detect available tools")
+    semantic_adapters_detect_parser.add_argument("--workspace", required=True)
+    semantic_adapters_detect_parser.set_defaults(func=command_semantic_adapters_detect)
+
+    semantic_adapters_scaffold_parser = semantic_adapters_subparsers.add_parser(
+        "scaffold", help="Generate adapter artifacts for a workspace",
+    )
+    semantic_adapters_scaffold_parser.add_argument("--workspace", required=True)
+    semantic_adapters_scaffold_parser.add_argument(
+        "--adapter",
+        required=True,
+        choices=["codex-account", "claude-scheduled-task", "cursor-automation"],
+    )
+    semantic_adapters_scaffold_parser.set_defaults(func=command_semantic_adapters_scaffold)
+
+    semantic_adapters_status_parser = semantic_adapters_subparsers.add_parser(
+        "status", help="Show adapter status and active execution strategy",
+    )
+    semantic_adapters_status_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(semantic_adapters_status_parser)
+    semantic_adapters_status_parser.set_defaults(func=command_semantic_adapters_status)
+
+    semantic_adapters_validate_parser = semantic_adapters_subparsers.add_parser(
+        "validate", help="Validate a builtin adapter manifest",
+    )
+    semantic_adapters_validate_parser.add_argument(
+        "--adapter",
+        required=True,
+        choices=["codex-account", "claude-scheduled-task", "cursor-automation"],
+    )
+    semantic_adapters_validate_parser.set_defaults(func=command_semantic_adapters_validate)
+
+    semantic_ingest_parser = semantic_subparsers.add_parser(
+        "ingest",
+        help="Ingest delegated semantic envelopes from the inbox",
+    )
+    semantic_ingest_parser.add_argument("--workspace", required=True)
+    semantic_ingest_parser.add_argument("--path", help="Path to a specific envelope file")
+    semantic_ingest_parser.add_argument("--scan-inbox", action="store_true", help="Scan and ingest all inbox envelopes")
+    semantic_ingest_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(semantic_ingest_parser)
+    semantic_ingest_parser.set_defaults(func=command_semantic_ingest)
+
+    observe_parser = subparsers.add_parser("observe", help="Advanced: observability index and local web UI")
+    observe_subparsers = observe_parser.add_subparsers(dest="observe_command", required=True)
+
+    observe_index_parser = observe_subparsers.add_parser(
+        "index",
+        help="Build or refresh the observability index JSON for the workspace store",
+    )
+    observe_index_parser.add_argument("--workspace", required=True)
+    observe_index_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(observe_index_parser)
+    observe_index_parser.set_defaults(func=command_index_observability)
+
+    observe_serve_parser = observe_subparsers.add_parser(
+        "serve",
+        help="Run the local read-only observability web UI (blocks until interrupted)",
+    )
+    observe_serve_parser.add_argument("--workspace", required=True)
+    observe_serve_parser.add_argument("--host", default="127.0.0.1")
+    observe_serve_parser.add_argument("--port", type=int, default=8000)
+    observe_serve_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(observe_serve_parser)
+    observe_serve_parser.set_defaults(func=command_observe_serve)
+
+    install_service_parser = subparsers.add_parser(
+        "install-service",
+        help="Advanced: render and install a background worker service",
+    )
+    install_service_parser.add_argument("--workspace", required=True)
+    install_service_parser.add_argument("--no-start", action="store_true")
+    add_layout_arguments(install_service_parser)
+    add_service_arguments(install_service_parser)
+    install_service_parser.set_defaults(func=command_install_service)
+
+    uninstall_service_parser = subparsers.add_parser(
+        "uninstall-service",
+        help="Advanced: remove a previously installed OpenDream service",
+    )
+    uninstall_service_parser.add_argument("--workspace", required=True)
+    uninstall_service_parser.add_argument("--purge", action="store_true")
+    add_layout_arguments(uninstall_service_parser)
+    uninstall_service_parser.set_defaults(func=command_uninstall_service)
+
+    update_service_parser = subparsers.add_parser(
+        "update-service",
+        help="Advanced: re-render a service manifest and optionally restart it",
+    )
+    update_service_parser.add_argument("--workspace", required=True)
+    update_service_parser.add_argument("--no-restart", action="store_true")
+    add_layout_arguments(update_service_parser)
+    add_service_arguments(update_service_parser)
+    update_service_parser.set_defaults(func=command_update_service)
+
+    service_parser = subparsers.add_parser("service", help="Advanced: inspect and control background service lifecycle")
+    service_subparsers = service_parser.add_subparsers(dest="service_command", required=True)
+
+    service_start_parser = service_subparsers.add_parser("start", help="Start the installed background service")
+    service_start_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_start_parser)
+    service_start_parser.set_defaults(func=command_service_start)
+
+    service_enable_parser = service_subparsers.add_parser(
+        "enable",
+        help="Enable managed background runtime policy and ensure the worker is running",
+    )
+    service_enable_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_enable_parser)
+    add_service_arguments(service_enable_parser)
+    service_enable_parser.set_defaults(func=command_service_enable)
+
+    service_disable_parser = service_subparsers.add_parser(
+        "disable",
+        help="Disable managed background runtime policy and stop the worker if it is running",
+    )
+    service_disable_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_disable_parser)
+    service_disable_parser.set_defaults(func=command_service_disable)
+
+    service_stop_parser = service_subparsers.add_parser("stop", help="Stop the installed background service")
+    service_stop_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_stop_parser)
+    service_stop_parser.set_defaults(func=command_service_stop)
+
+    service_restart_parser = service_subparsers.add_parser("restart", help="Restart the installed background service")
+    service_restart_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(service_restart_parser)
+    service_restart_parser.set_defaults(func=command_service_restart)
+
+    service_status_parser = service_subparsers.add_parser("status", help="Inspect service install and health state")
+    service_status_parser.add_argument("--workspace", required=True)
+    service_status_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    service_status_parser.add_argument("--format", choices=["json", "human"], default="json")
+    add_layout_arguments(service_status_parser)
+    service_status_parser.set_defaults(func=command_service_status)
+
+    service_doctor_parser = service_subparsers.add_parser("doctor", help="Explain background service problems")
+    service_doctor_parser.add_argument("--workspace", required=True)
+    service_doctor_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    service_doctor_parser.add_argument("--format", choices=["json", "human"], default="json")
+    add_layout_arguments(service_doctor_parser)
+    service_doctor_parser.set_defaults(func=command_service_doctor)
+
+    service_autowire_parser = service_subparsers.add_parser(
+        "autowire",
+        help="Install or remove supported adapter hook glue for OpenDream",
+    )
+    service_autowire_parser.add_argument("--workspace", required=True)
+    service_autowire_parser.add_argument(
+        "--target",
+        default="auto",
+        metavar="SELECTOR",
+        help=(
+            "auto | all | <adapter-id> "
+            f"(built-in: {', '.join(SUPPORTED_TARGETS)}; merged with .opendream/adapters/)"
+        ),
+    )
+    service_autowire_parser.add_argument("--force", action="store_true")
+    service_autowire_parser.add_argument("--uninstall", action="store_true")
+    add_layout_arguments(service_autowire_parser)
+    service_autowire_parser.set_defaults(func=command_service_autowire)
+
+    review_parser = subparsers.add_parser(
+        "review",
+        help="Auto-review rules for the OpenDream queue",
+    )
+    review_subparsers = review_parser.add_subparsers(dest="review_command", required=True)
+
+    review_auto_run_parser = review_subparsers.add_parser(
+        "auto-run", help="Run auto-reviewer rules against the workspace"
+    )
+    review_auto_run_parser.add_argument("--workspace", required=True)
+    review_auto_run_parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=False)
+    add_layout_arguments(review_auto_run_parser)
+    review_auto_run_parser.set_defaults(func=command_review_auto_run)
+
+    review_auto_status_parser = review_subparsers.add_parser(
+        "auto-status", help="Show last-run summary and per-rule config"
+    )
+    review_auto_status_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(review_auto_status_parser)
+    review_auto_status_parser.set_defaults(func=command_review_auto_status)
+
+    review_auto_config_parser = review_subparsers.add_parser(
+        "auto-config", help="Show or update auto-reviewer config"
+    )
+    review_auto_config_parser.add_argument("--workspace", required=True)
+    review_auto_config_parser.add_argument("--show", action="store_true", default=False)
+    review_auto_config_parser.add_argument("--set", dest="set", nargs="+", metavar="RULE.FIELD=VALUE")
+    add_layout_arguments(review_auto_config_parser)
+    review_auto_config_parser.set_defaults(func=command_review_auto_config)
+
+    workspace_parser = subparsers.add_parser(
+        "workspace",
+        help="Primary: machine-local workspace catalog and dashboard",
+    )
+    workspace_subparsers = workspace_parser.add_subparsers(dest="workspace_command", required=True)
+
+    ws_list_parser = workspace_subparsers.add_parser(
+        "list", help="List all known OpenDream workspaces on this machine"
+    )
+    ws_list_parser.add_argument("--format", choices=["text", "json"], default="text")
+    ws_list_parser.set_defaults(func=command_workspace_list)
+
+    ws_inspect_parser = workspace_subparsers.add_parser(
+        "inspect", help="Inspect one catalog entry"
+    )
+    ws_inspect_parser.add_argument("--workspace", help="Workspace path")
+    ws_inspect_parser.add_argument("--entry-id", dest="entry_id", help="(reserved) stable entry id")
+    ws_inspect_parser.set_defaults(func=command_workspace_inspect)
+
+    ws_scan_parser = workspace_subparsers.add_parser(
+        "scan", help="Scan configured roots for .opendream workspaces"
+    )
+    ws_scan_parser.add_argument("--root", action="append", default=[], help="Explicit scan root (repeatable)")
+    ws_scan_parser.add_argument("--all-roots", action="store_true", help="Scan every configured root")
+    ws_scan_parser.set_defaults(func=command_workspace_scan)
+
+    ws_roots_parser = workspace_subparsers.add_parser(
+        "roots", help="Manage configured scan roots"
+    )
+    ws_roots_subparsers = ws_roots_parser.add_subparsers(dest="roots_command", required=True)
+
+    ws_roots_list_parser = ws_roots_subparsers.add_parser("list", help="List configured scan roots")
+    ws_roots_list_parser.set_defaults(func=command_workspace_roots_list)
+
+    ws_roots_add_parser = ws_roots_subparsers.add_parser("add", help="Add a scan root")
+    ws_roots_add_parser.add_argument("--path", required=True)
+    ws_roots_add_parser.set_defaults(func=command_workspace_roots_add)
+
+    ws_roots_remove_parser = ws_roots_subparsers.add_parser("remove", help="Remove a scan root")
+    ws_roots_remove_parser.add_argument("--path", required=True)
+    ws_roots_remove_parser.set_defaults(func=command_workspace_roots_remove)
+
+    ws_forget_parser = workspace_subparsers.add_parser(
+        "forget", help="Remove a catalog entry (does not touch workspace state)"
+    )
+    ws_forget_parser.add_argument("--workspace", required=True)
+    ws_forget_parser.set_defaults(func=command_workspace_forget)
+
+    transcripts_parser = subparsers.add_parser(
+        "transcripts",
+        help="Ingest external session JSONLs into the workspace transcripts dir for dream",
+    )
+    transcripts_subparsers = transcripts_parser.add_subparsers(
+        dest="transcripts_command", required=True
+    )
+    ts_ingest_parser = transcripts_subparsers.add_parser(
+        "ingest",
+        help=(
+            "Flatten Claude Code session JSONL into transcripts/. "
+            "Auto-detects ~/.claude/projects/<slug>/ from --workspace; pass --from to override."
+        ),
+    )
+    ts_ingest_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(ts_ingest_parser)
+    ts_ingest_parser.add_argument("--from", dest="from_dir", help="Explicit source dir of *.jsonl files")
+    ts_ingest_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace existing transcripts/<name>.jsonl files",
+    )
+    ts_ingest_parser.set_defaults(func=command_transcripts_ingest)
+
+    ws_prune_parser = workspace_subparsers.add_parser(
+        "prune",
+        help="Remove tempdir catalog entries (test fixture leftovers under /tmp, /private/var/folders)",
+    )
+    ws_prune_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview candidates without modifying the catalog",
+    )
+    ws_prune_parser.set_defaults(func=command_workspace_prune)
+
+    ws_doctor_parser = workspace_subparsers.add_parser(
+        "doctor", help="Diagnose catalog entries"
+    )
+    ws_doctor_parser.add_argument("--workspace", help="Specific workspace to diagnose")
+    ws_doctor_parser.add_argument("--all", dest="all_workspaces", action="store_true")
+    ws_doctor_parser.set_defaults(func=command_workspace_doctor)
+
+    ws_upgrade_parser = workspace_subparsers.add_parser(
+        "upgrade", help="Refresh one or more workspaces after upgrading the CLI"
+    )
+    ws_upgrade_parser.add_argument("--workspace", help="Specific workspace to refresh")
+    ws_upgrade_parser.add_argument("--all", dest="all_workspaces", action="store_true")
+    add_layout_arguments(ws_upgrade_parser)
+    ws_upgrade_parser.set_defaults(func=command_workspace_upgrade)
+
+    sessions_parser = subparsers.add_parser(
+        "sessions",
+        help="Advanced: session integrity diagnostics and cleanup",
+    )
+    sessions_subparsers = sessions_parser.add_subparsers(dest="sessions_command", required=True)
+
+    sessions_diagnose_parser = sessions_subparsers.add_parser(
+        "diagnose",
+        help="Report orphan events, count mismatches, and zero-event sessions",
+    )
+    sessions_diagnose_parser.add_argument("--workspace", required=True)
+    sessions_diagnose_parser.add_argument(
+        "--format", choices=["text", "json"], default="json", help="Output format"
+    )
+    add_layout_arguments(sessions_diagnose_parser)
+    sessions_diagnose_parser.set_defaults(func=command_sessions_diagnose)
+
+    sessions_cleanup_parser = sessions_subparsers.add_parser(
+        "cleanup",
+        help="Remove orphan event records and/or zero-event session records",
+    )
+    sessions_cleanup_parser.add_argument("--workspace", required=True)
+    sessions_cleanup_parser.add_argument(
+        "--orphans", action="store_true", help="Remove orphan event records"
+    )
+    sessions_cleanup_parser.add_argument(
+        "--zero-events", dest="zero_events", action="store_true",
+        help="Remove zero-event session records",
+    )
+    sessions_cleanup_parser.add_argument(
+        "--dry-run", dest="dry_run", action="store_true",
+        help="Print what would be removed without mutating the store",
+    )
+    sessions_cleanup_parser.add_argument(
+        "--yes", action="store_true", help="Skip confirmation prompt"
+    )
+    add_layout_arguments(sessions_cleanup_parser)
+    sessions_cleanup_parser.set_defaults(func=command_sessions_cleanup)
+
+    sessions_clear_parser = sessions_subparsers.add_parser(
+        "clear-active",
+        help="Clear the active session token for a workspace",
+    )
+    sessions_clear_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(sessions_clear_parser)
+    sessions_clear_parser.set_defaults(func=command_sessions_clear_active)
+
+    return parser
+
+
+def _dream_fidelity_failure_hint(result: dict[str, Any]) -> str | None:
+    if str(result.get("status", "")) != "failed":
+        return None
+    checks = result.get("checks")
+    if not isinstance(checks, dict):
+        return None
+    failed = sorted(name for name, ok in checks.items() if ok is False)
+    if not failed:
+        return None
+    msg = f"failing checks: {', '.join(failed)}"
+    if "compatibility_views" in failed:
+        msg += (
+            ". For compatibility_views, `project.md` and `user.md` must exist under the active memory root "
+            "(project/user compatibility layout). Use `--compat-mode project-user` consistently with "
+            "`demo`/init, the same "
+            "`--memory-dir`, or a fresh workspace."
+        )
+    return msg
+
+
+def _memory_quality_failure_hint(result: dict[str, Any]) -> str | None:
+    if str(result.get("status", "")) != "failed":
+        return None
+    detail_parts: list[str] = []
+    dup = result.get("duplicate_active_titles")
+    if isinstance(dup, list) and dup:
+        detail_parts.append(f"duplicate_active_titles={dup!r}")
+    contested = result.get("contested_titles")
+    if isinstance(contested, list) and contested:
+        detail_parts.append(f"contested_titles={contested!r}")
+    tail = (
+        "This eval mutates the current store with its packaged fixture (not hermetic). "
+        "Use a fresh workspace for a clean pass/fail signal; `eval performance` uses an isolated store."
+    )
+    if detail_parts:
+        return f"{'; '.join(detail_parts)}. {tail}"
+    return tail
+
+
+def command_sessions_diagnose(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=getattr(args, "memory_dir", None))
+    result = _session_diagnostics(store)
+    fmt = getattr(args, "format", "json")
+    if fmt == "text":
+        lines = [
+            f"total_sessions:    {result['total_sessions']}",
+            f"total_events:      {result['total_events']}",
+            f"orphan_events:     {result['orphan_events_total']}",
+            f"mismatch_records:  {result['mismatch_records_total']}",
+            f"zero_event_sessions: {result['zero_event_sessions_total']}",
+        ]
+        if result["orphan_events"]:
+            lines.append("  orphan_event samples:")
+            for item in result["orphan_events"]:
+                lines.append(f"    event_id={item['event_id']} session_id={item['session_id']}")
+        if result["mismatch_records"]:
+            lines.append("  mismatch_record samples:")
+            for item in result["mismatch_records"]:
+                lines.append(
+                    f"    session_id={item['session_id']} "
+                    f"recorded={item['recorded_event_count']} actual={item['actual_event_count']}"
+                )
+        if result["zero_event_sessions"]:
+            lines.append("  zero_event_session samples:")
+            for sid in result["zero_event_sessions"]:
+                lines.append(f"    {sid}")
+        result["__raw_output__"] = "\n".join(lines)
+    return result
+
+
+def command_sessions_cleanup(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=getattr(args, "memory_dir", None))
+    do_orphans = args.orphans
+    do_zero = args.zero_events
+    if not do_orphans and not do_zero:
+        raise ValueError("specify at least one of --orphans or --zero-events")
+    dry_run = args.dry_run
+    yes = getattr(args, "yes", False)
+    if not dry_run and not yes:
+        diag = _session_diagnostics(store)
+        orphan_count = diag["orphan_events_total"] if do_orphans else 0
+        zero_count = diag["zero_event_sessions_total"] if do_zero else 0
+        print(f"Would remove: {orphan_count} orphan event record(s), {zero_count} zero-event session record(s).")
+        answer = input("Type DELETE to confirm: ").strip()
+        if answer != "DELETE":
+            raise SystemExit("Aborted.")
+    result = cleanup_orphans(store, orphans=do_orphans, zero_events=do_zero, dry_run=dry_run)
+    return result
+
+
+def command_sessions_clear_active(args: argparse.Namespace) -> dict[str, Any]:
+    store = build_store(args.workspace, memory_dir=getattr(args, "memory_dir", None))
+    clear_session_id(store=store)
+    return {
+        "status": "completed",
+        "workspace": str(store.workspace),
+        "active_session_cleared": True,
+    }
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        result = args.func(args)
+    except ValueError as exc:
+        sys.stderr.write(f"{parser.prog}: error: {exc}\n")
+        return 2
+    except OSError as exc:
+        sys.stderr.write(f"{parser.prog}: error: cannot initialize workspace layout ({exc})\n")
+        return 2
+    raw_output = None
+    if isinstance(result, dict):
+        raw_output = result.pop("__raw_output__", None)
+    if raw_output is not None:
+        print(raw_output)
+    else:
+        print(json_dumps(result))
+    if isinstance(result, dict):
+        if args.func is command_eval_dream_fidelity:
+            hint = _dream_fidelity_failure_hint(result)
+            if hint:
+                sys.stderr.write(f"{parser.prog}: {hint}\n")
+        elif args.func is command_eval_memory_quality:
+            hint = _memory_quality_failure_hint(result)
+            if hint:
+                sys.stderr.write(f"{parser.prog}: {hint}\n")
+        failure_statuses = set(getattr(args, "result_failure_statuses", ()))
+        if failure_statuses and str(result.get("status", "")) in failure_statuses:
+            return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

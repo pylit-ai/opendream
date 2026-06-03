@@ -1,0 +1,5 @@
+{"timestamp":"2026-03-26T09:00:00Z","speaker":"user","text":"Use pnpm in this repo."}
+{"timestamp":"2026-03-26T09:05:00Z","speaker":"assistant","text":"Redis is required for local jobs."}
+{"timestamp":"2026-03-26T09:10:00Z","speaker":"user","text":"Remember that tomorrow we freeze the schema."}
+{"timestamp":"2026-03-26T09:15:00Z","speaker":"assistant","text":"Schema migration workflow: generate the SQL first, then apply it after review."}
+{"timestamp":"2026-03-26T09:20:00Z","speaker":"assistant","text":"Schema migration workflow: generate the SQL first, then apply it after review."}

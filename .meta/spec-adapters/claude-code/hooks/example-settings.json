@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env OPENDREAM_WORKSPACE=\"$CLAUDE_PROJECT_DIR\" sh \"$CLAUDE_PROJECT_DIR\"/.meta/spec-adapters/claude-code/scripts/opendream-pre-task.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env OPENDREAM_WORKSPACE=\"$CLAUDE_PROJECT_DIR\" sh \"$CLAUDE_PROJECT_DIR\"/.meta/spec-adapters/claude-code/scripts/opendream-post-task.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

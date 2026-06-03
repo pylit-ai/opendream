@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opendream"
+version = "0.3.19"
+description = "Local-first memory subsystem for agents in project workspaces"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+authors = [
+  {name = "OpenDream Maintainers"}
+]
+keywords = ["agents", "memory", "agent-memory", "local-first"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/pylit-ai/opendream"
+Repository = "https://github.com/pylit-ai/opendream"
+Issues = "https://github.com/pylit-ai/opendream/issues"
+Changelog = "https://github.com/pylit-ai/opendream/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2.2",
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "ruff>=0.11",
+]
+
+# Mirrored for `uv sync --group dev` (CI and local uv workflows).
+[dependency-groups]
+dev = [
+    "build>=1.2.2",
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "ruff>=0.11",
+]
+
+[project.scripts]
+opendream = "opendream.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["opendream*"]
+
+[tool.setuptools.package-data]
+opendream = ["package_boundaries.json", "schema/*.json", "bundled_adapters/*.json", "fixtures/*.json", "fixtures/*.jsonl", "templates/*.tmpl", "static/**"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["dist", ".tmp", "opendream/webapp.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["opendream", "scripts"]
+pretty = true
+show_error_codes = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+no_implicit_optional = true
+disallow_any_generics = true
+exclude = ["^dist/", "^\\.tmp/", "^opendream/webapp\\.py$", "^opendream/observability\\.py$"]
+
+[[tool.mypy.overrides]]
+module = ["opendream.webapp", "opendream.observability", "tests.*"]
+ignore_errors = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

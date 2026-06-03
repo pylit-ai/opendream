@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+[data-theme='light'] {
+  /* Warm white, not clinical */
+  --c-bg: 252 252 250;
+  --c-surface: 255 255 254;
+  --c-surface-elevated: 250 250 247;
+  --c-border: 224 226 230;
+  --c-border-subtle: 236 237 240;
+  --c-text: 17 19 23;
+  --c-text-muted: 92 99 110;
+  --c-text-subtle: 140 147 158;
+  --c-accent: 88 101 196;
+  --c-accent-fg: 255 255 255;
+  --c-success: 22 145 78;
+  --c-warn: 178 122 11;
+  --c-danger: 198 50 50;
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  /* Layered: bg < surface < elevated, ≤4% L delta */
+  --c-bg: 11 12 14;
+  --c-surface: 17 19 22;
+  --c-surface-elevated: 23 25 29;
+  --c-border: 34 37 43;
+  --c-border-subtle: 22 24 28;
+  --c-text: 232 233 236;
+  --c-text-muted: 158 164 172;
+  --c-text-subtle: 110 116 125;
+  --c-accent: 134 144 248;
+  --c-accent-fg: 14 16 19;
+  --c-success: 96 200 142;
+  --c-warn: 220 188 86;
+  --c-danger: 232 116 116;
+  color-scheme: dark;
+}
+
+:root {
+  /* Apple's standard easing */
+  --ease-apple: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --shadow-elevated: 0 24px 60px -16px rgba(0, 0, 0, 0.4),
+                     0 4px 12px -4px rgba(0, 0, 0, 0.2);
+  --hairline-color: color-mix(in oklab, rgb(var(--c-border)) 60%, transparent);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html {
+  background: rgb(var(--c-bg));
+}
+
+body {
+  font-family: theme('fontFamily.sans');
+  font-size: 14px;
+  line-height: 20px;
+  font-feature-settings: 'cv11', 'ss01', 'tnum';
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 160ms var(--ease-apple), color 160ms var(--ease-apple);
+}
+
+h1 {
+  letter-spacing: -0.014em;
+}
+h2 {
+  letter-spacing: -0.011em;
+}
+h3 {
+  letter-spacing: -0.008em;
+}
+
+::selection {
+  background: rgb(var(--c-accent) / 0.28);
+}
+
+* {
+  border-color: rgb(var(--c-border));
+}
+
+/* Hairline utility — single-pixel inset that respects color-mix */
+.hairline {
+  box-shadow: inset 0 0 0 1px var(--hairline-color);
+}
+.hairline-b {
+  border-bottom: 1px solid var(--hairline-color);
+}
+.hairline-t {
+  border-top: 1px solid var(--hairline-color);
+}
+.hairline-r {
+  border-right: 1px solid var(--hairline-color);
+}
+.hairline-l {
+  border-left: 1px solid var(--hairline-color);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-border)) transparent;
+}
+
+/* Route-level page transition */
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.page-enter {
+  animation: pageEnter 140ms var(--ease-apple) both;
+}
+
+@keyframes paletteEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.palette-enter {
+  animation: paletteEnter 220ms var(--ease-apple) both;
+}
+
+@keyframes slideOverIn {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes loadingProgressSweep {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(220%);
+  }
+}
+
+.loading-progress-sweep {
+  animation: loadingProgressSweep 1450ms var(--ease-out-soft) infinite;
+}
+
+@keyframes overlayFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.overlay-fade {
+  animation: overlayFade 200ms var(--ease-apple) both;
+}
+
+/* Subtle row hover for tables */
+.row-hover {
+  transition: background-color 120ms var(--ease-out-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
