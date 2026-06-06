@@ -13,7 +13,13 @@
 [![Python versions](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-**Local-first memory for agents in project workspaces** — activate OpenDream inside the directory you already use, watch what memory is doing in a browser, and keep advanced runtime integrations available when you need them.
+## Agent context that improves between sessions.
+
+**Open, local-first memory for AI agents.**
+
+Capture what happened, retrieve what matters, and review what changed. OpenDream helps agents carry useful context across projects, tools, and sessions while keeping boundaries, sources, and review visible.
+
+Closed products are starting to dream. OpenDream makes agent memory open, local, portable, and reviewable. "Dreaming" means background memory review and cleanup, not an opaque model behavior.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/demos/ui/opendream-ui-overview-dark.gif">
@@ -28,6 +34,8 @@ The observability UI shows recent agent activity, selected memories, context-use
 | Try it in a few commands | [Quick start](#quick-start) |
 | Watch the product surface | [UI demo gallery](./docs/showcase/ui-demos.md) |
 | Run the memory demo | [90-second memory showcase](./docs/showcase/memory-showcase.md) |
+| Understand the memory lifecycle | [Dreaming memory change control](./docs/technical-notes/dreaming-memory-change-control.md) |
+| Compare memory approaches | [Comparison guide](./docs/comparison.md) |
 | Wire it into an agent runtime | [Integration at a glance](#integration-at-a-glance) |
 | Browse memory in a browser | [Observability UI](#observability-ui) |
 | Contribute | [Contributing](#contributing) (expandable) |
@@ -122,6 +130,8 @@ sudo apt-get install jq
 ## Integration at a glance
 
 OpenDream is an **activation-first CLI**. For normal use, the product contract is:
+
+Codex is currently the most tested path. Other integrations expose context through CLI commands, rules, hooks, or generated files depending on host support. A built-in target means OpenDream can generate the integration surface; it does not mean every host executes hooks natively.
 
 ```bash
 opendream init --workspace .
@@ -469,6 +479,10 @@ Activation and compressed-status metadata (for the standard `init` / `status` pa
 
 | Doc | Purpose |
 |-----|---------|
+| [docs/technical-notes/dreaming-memory-change-control.md](./docs/technical-notes/dreaming-memory-change-control.md) | Canonical memory lifecycle and review model |
+| [docs/comparison.md](./docs/comparison.md) | Capability-level comparison with static files, RAG, hosted APIs, and managed memory |
+| [docs/security-local-first.md](./docs/security-local-first.md) | Local-first defaults, explicit provider paths, and trust boundaries |
+| [docs/design-partner-workloads.md](./docs/design-partner-workloads.md) | Real workflows needed to validate where memory helps or fails |
 | [docs/showcase/memory-showcase.md](./docs/showcase/memory-showcase.md) | 90-second memory demo |
 | [docs/agent-integrations.md](./docs/agent-integrations.md) | Agent integration guide |
 | [docs/automation/dream-task-playbook.md](./docs/automation/dream-task-playbook.md) | Automation and recurring memory tasks |

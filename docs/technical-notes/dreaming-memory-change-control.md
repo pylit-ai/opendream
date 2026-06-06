@@ -4,6 +4,11 @@ OpenDream treats "dreaming" as a controlled local transformation: raw events
 are narrowed into candidates, reviewed against existing records, and then
 materialized as durable memory only when validation passes.
 
+In product language, dreaming means **background memory review and cleanup**.
+The goal is not to add mythology to the runtime. The goal is to make memory
+change-control explicit: capture what happened, retrieve what matters, and
+review what changed.
+
 ## Control Flow
 
 | Step | Input | Control | Evidence |

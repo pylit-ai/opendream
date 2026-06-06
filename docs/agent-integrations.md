@@ -1,5 +1,10 @@
 # OpenDream for agents in project workspaces
 
+Codex is currently the most tested integration. Other agent integrations are
+available or experimental depending on the host's support for hooks, rules,
+context files, or CLI workflows. A generated target is an integration surface,
+not a claim that every host executes OpenDream automatically.
+
 Short reference for tools that drive the CLI (hooks, IDE agents, scripts, and custom runtimes).
 
 ![OpenDream agent context retrieval](./assets/demos/02-agent-context-retrieval.gif)
