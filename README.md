@@ -32,8 +32,8 @@ The observability UI shows recent agent activity, selected memories, context-use
 | If you want to… | Start here |
 |-----------------|------------|
 | Try it in a few commands | [Quick start](#quick-start) |
-| View the app demos | [UI demo gallery](./docs/showcase/ui-demos.md) |
-| Run the memory demo | [90-second memory showcase](./docs/showcase/memory-showcase.md) |
+| View the UI app demos | [UI demo gallery](./docs/showcase/ui-demos.md) |
+| Run the CLI memory demo | [90-second memory showcase](./docs/showcase/memory-showcase.md) |
 | Understand the memory lifecycle | [Dreaming memory change control](./docs/technical-notes/dreaming-memory-change-control.md) |
 | Compare memory approaches | [Comparison guide](./docs/comparison.md) |
 | Wire it into an agent runtime | [Integration at a glance](#integration-at-a-glance) |
