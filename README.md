@@ -32,7 +32,7 @@ The observability UI shows recent agent activity, selected memories, context-use
 | If you want to… | Start here |
 |-----------------|------------|
 | Try it in a few commands | [Quick start](#quick-start) |
-| Watch the product surface | [UI demo gallery](./docs/showcase/ui-demos.md) |
+| View the app demos | [UI demo gallery](./docs/showcase/ui-demos.md) |
 | Run the memory demo | [90-second memory showcase](./docs/showcase/memory-showcase.md) |
 | Understand the memory lifecycle | [Dreaming memory change control](./docs/technical-notes/dreaming-memory-change-control.md) |
 | Compare memory approaches | [Comparison guide](./docs/comparison.md) |
@@ -67,7 +67,7 @@ in [`docs/launch-readiness.md`](./docs/launch-readiness.md),
 <details>
 <summary><strong>CLI demos for docs and operators</strong></summary>
 
-OpenDream's first-run path is intentionally small. These clips are useful beside command reference docs; the product UI tour above is the better first look.
+OpenDream's first-run path is intentionally small. These clips are useful beside command reference docs; the UI application tour above is the better first look.
 
 | Demo | What it shows |
 |------|---------------|
@@ -129,7 +129,7 @@ sudo apt-get install jq
 
 ## Integration at a glance
 
-OpenDream is an **activation-first CLI**. For normal use, the product contract is:
+OpenDream is an **activation-first CLI**. 
 
 Codex is currently the most tested path. Other integrations expose context through CLI commands, rules, hooks, or generated files depending on host support. A built-in target means OpenDream can generate the integration surface; it does not mean every host executes hooks natively.
 
@@ -630,7 +630,7 @@ opendream prepare-context --workspace "$PWD" --query "your task"
 | `opendream/schema/` | Machine-readable runtime contracts |
 | `docs/` | Architecture, governance, and user-facing guides |
 
-Optional, **non-normative** framework examples may live under `.meta/spec-adapters/` (see [`AGENTS.md`](./AGENTS.md)). They are not part of the packaged product API; `scripts/check_adapters.py` keeps example paths and documented CLI strings consistent.
+Optional, **non-normative** framework examples may live under `.meta/spec-adapters/` (see [`AGENTS.md`](./AGENTS.md)). They are not part of the packaged API; `scripts/check_adapters.py` keeps example paths and documented CLI strings consistent.
 
 </details>
 
