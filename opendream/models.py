@@ -168,6 +168,7 @@ class ContextAssembly:
     character_count: int
     token_estimate: int
     created_at: str
+    reporting_agent: dict[str, Any] = field(default_factory=default_reporting_agent)
     profile: dict[str, Any] = field(default_factory=dict)
     selection: dict[str, Any] = field(default_factory=dict)
     context_pruning: dict[str, Any] = field(default_factory=dict)

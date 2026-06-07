@@ -5,8 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from opendream.episodes import row_to_event
 from opendream.storage import MemoryStore
-from opendream.transcripts import flatten_codex_row, ingest_codex_sessions
+from opendream.transcripts import (
+    flatten_claude_row,
+    flatten_codex_row,
+    ingest_codex_sessions,
+)
 
 
 class TranscriptIngestTests(unittest.TestCase):
@@ -24,6 +29,8 @@ class TranscriptIngestTests(unittest.TestCase):
         assert flattened is not None
         self.assertEqual(flattened["speaker"], "assistant")
         self.assertEqual(flattened["text"], "Use the dream dashboard.")
+        self.assertEqual(flattened["reporting_agent"]["agent_id"], "codex")
+        self.assertEqual(flattened["reporting_agent"]["agent_label"], "Codex")
 
     def test_flatten_codex_row_supports_response_item_payload_shape(self) -> None:
         row = {
@@ -43,6 +50,29 @@ class TranscriptIngestTests(unittest.TestCase):
         self.assertEqual(flattened["timestamp"], "2026-05-23T04:00:00Z")
         self.assertEqual(flattened["speaker"], "user")
         self.assertEqual(flattened["text"], "Rerun the dream worker.")
+        self.assertEqual(flattened["reporting_agent"]["agent_id"], "codex")
+
+    def test_flatten_claude_row_preserves_agent_identity_in_memory_event(self) -> None:
+        flattened = flatten_claude_row(
+            {
+                "type": "assistant",
+                "timestamp": "2026-05-23T04:00:00Z",
+                "message": {"content": "Use pnpm for the frontend workflow."},
+                "sessionId": "claude-session",
+                "uuid": "claude-turn",
+            }
+        )
+
+        self.assertIsNotNone(flattened)
+        assert flattened is not None
+        self.assertEqual(flattened["reporting_agent"]["agent_id"], "claude-code")
+        self.assertEqual(flattened["reporting_agent"]["agent_label"], "Claude Code")
+
+        event = row_to_event(flattened)
+        self.assertIsNotNone(event)
+        assert event is not None
+        self.assertEqual(event.reporting_agent["agent_id"], "claude-code")
+        self.assertEqual(event.reporting_agent["agent_label"], "Claude Code")
 
     def test_ingest_codex_sessions_walks_well_known_nested_layout(self) -> None:
         with tempfile.TemporaryDirectory() as td:

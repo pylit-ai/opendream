@@ -192,7 +192,18 @@ def run_showcase_demo(store: MemoryStore, *, now: str | None = None) -> dict[str
         caller_detail="agent-workspace-showcase stability probe",
     )
     trace_spans.append(_trace_span("memory_read", "stability_retrieve", stability_probe))
-    context = prepare_context(store, query=SHOWCASE_QUERY, limit=SHOWCASE_RETRIEVAL_LIMIT, now=timestamp)
+    context = prepare_context(
+        store,
+        query=SHOWCASE_QUERY,
+        limit=SHOWCASE_RETRIEVAL_LIMIT,
+        now=timestamp,
+        reporting_agent={
+            "agent_id": "codex",
+            "agent_label": "Codex",
+            "runtime": "codex-cli",
+            "adapter_id": "codex-account",
+        },
+    )
     trace_spans.append(
         {
             "operation": "context_read",

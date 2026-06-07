@@ -17,6 +17,12 @@ from opendream.util import write_json  # noqa: E402
 DEFAULT_REPORT_PATH = REPO_ROOT / ".tmp" / "verification" / "verification_report.json"
 
 
+def _text_output(value: str | bytes | None) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value or ""
+
+
 def run_command(command: list[str], *, timeout_seconds: int) -> dict[str, Any]:
     started_at = time.time()
     try:
@@ -34,8 +40,8 @@ def run_command(command: list[str], *, timeout_seconds: int) -> dict[str, Any]:
             "status": "FAIL",
             "returncode": None,
             "duration_seconds": round(time.time() - started_at, 3),
-            "stdout": exc.stdout or "",
-            "stderr": exc.stderr or "",
+            "stdout": _text_output(exc.stdout),
+            "stderr": _text_output(exc.stderr),
             "error": "timeout",
         }
     return {

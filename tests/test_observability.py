@@ -393,6 +393,42 @@ class ObservabilityIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(row["reporting_agent"]["model_id"], "unknown")
 
+    def test_session_summary_omits_unknown_when_known_agent_exists(self) -> None:
+        session_id = "session-mixed-attribution"
+        emit_event(
+            self.store,
+            kind="workflow_step",
+            content="Legacy event without agent metadata.",
+            scope="project",
+            channel="chat",
+            message_ref="legacy-message",
+            session_id=session_id,
+            timestamp="2026-03-27T12:06:00Z",
+        )
+        emit_event(
+            self.store,
+            kind="task_outcome",
+            content="Claude Code completed the shared workflow.",
+            scope="project",
+            channel="chat",
+            message_ref="claude-code-message",
+            session_id=session_id,
+            timestamp="2026-03-27T12:07:00Z",
+            reporting_agent={
+                "agent_id": "claude-code",
+                "agent_label": "Claude Code",
+                "runtime": "claude-code",
+            },
+        )
+        index_observability(self.store, now=FIXED_NOW)
+
+        sessions = self.get_json("/api/sessions")
+        session = next(item for item in sessions["items"] if item["session_id"] == session_id)
+        self.assertEqual(
+            [agent["agent_id"] for agent in session["reporting_agents"]],
+            ["claude-code"],
+        )
+
     def test_context_and_retrieval_surfaces_are_available(self) -> None:
         retrievals = self.get_json("/api/retrievals")
         self.assertGreaterEqual(len(retrievals["items"]), 1)
@@ -432,7 +468,12 @@ class ObservabilityIntegrationTests(unittest.TestCase):
             if item.get("kind") == "memory.context.assembled"
         )
         self.assertEqual(context_event["label"], "package manager and redis")
+        self.assertEqual(context_event["reporting_agent"]["agent_id"], "codex")
         self.assertEqual(context_event["payload"]["display_name"], "package manager and redis")
+        self.assertEqual(
+            [agent["agent_id"] for agent in context_session["reporting_agents"]],
+            ["codex"],
+        )
 
     def test_context_use_records_are_indexed(self) -> None:
         payload = {

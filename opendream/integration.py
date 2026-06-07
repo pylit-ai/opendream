@@ -1232,6 +1232,7 @@ def prepare_context(
         character_count=len(prompt_context),
         token_estimate=max(1, len(prompt_context.split())),
         created_at=timestamp,
+        reporting_agent=normalize_reporting_agent(reporting_agent),
         profile=profile,
         selection={
             "startup_index": {

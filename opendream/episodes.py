@@ -7,7 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from .models import MemoryEvent
+from .models import MemoryEvent, normalize_reporting_agent
 from .sessions import current_session_id
 from .util import parse_timestamp, semantic_tokens, stable_id, to_iso
 
@@ -125,5 +125,6 @@ def row_to_event(row: dict[str, Any], *, scope: str = "project") -> MemoryEvent 
             "file_refs": [str(row.get("source_path", ""))],
         },
         content=normalized_content,
+        reporting_agent=normalize_reporting_agent(row.get("reporting_agent")),
         tags=[tag for tag in tags if tag],
     )

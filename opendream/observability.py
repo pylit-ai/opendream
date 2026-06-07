@@ -14,7 +14,13 @@ from typing import Any
 from .dream_change_points import score_dream_change_points
 from .dream_narrative import synthesize_dream_narrative
 from .memory_quality import LOW_SIGNAL_TYPES, analyze_memory_quality
-from .models import Annotation, ObservabilityConsolidationOp, PhaseTrace, ReviewDecision
+from .models import (
+    Annotation,
+    ObservabilityConsolidationOp,
+    PhaseTrace,
+    ReviewDecision,
+    normalize_reporting_agent,
+)
 from .semantic_readiness import empty_context_pruning
 from .storage import MemoryStore
 from .util import parse_timestamp, read_json, sha256_path, stable_id, to_iso, utc_now
@@ -2943,12 +2949,15 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
             context_id = str(context.get("context_id") or "")
             context_query = _context_query_text(context)
             context_label = _compact_display_label(context_query, context_id or "context")
+            agent = normalize_reporting_agent(context.get("reporting_agent"))
+            session_agents.setdefault(agent["agent_id"], agent)
             timeline.append(
                 {
                     "timestamp": context.get("created_at"),
                     "kind": "memory.context.assembled",
                     "label": context_label,
                     "object_id": context_id,
+                    "reporting_agent": agent,
                     "payload": {**context, "display_name": context_label},
                 }
             )
@@ -2966,6 +2975,9 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
         latest_context = latest_contexts[0] if latest_contexts else None
         latest_context_query = _context_query_text(latest_context)
         session_display_name = _compact_display_label(latest_context_query, session_id)
+        known_session_agents = [
+            agent for agent_id, agent in session_agents.items() if agent_id != "unknown"
+        ]
         sessions.append(
             {
                 "id": session_id,
@@ -2977,7 +2989,7 @@ def _build_session_entities(store: MemoryStore, contexts: list[dict[str, Any]]) 
                 "ended_at": ended_at,
                 "last_activity_at": ended_at,
                 "reporting_agents": sorted(
-                    session_agents.values(),
+                    known_session_agents or session_agents.values(),
                     key=lambda item: (item["agent_label"].casefold(), item["agent_id"]),
                 )
                 or [{"agent_id": "unknown", "agent_label": "Unknown"}],

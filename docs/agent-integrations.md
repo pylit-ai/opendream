@@ -9,6 +9,17 @@ Short reference for tools that drive the CLI (hooks, IDE agents, scripts, and cu
 
 ![OpenDream agent context retrieval](./assets/demos/02-agent-context-retrieval.gif)
 
+## Shared workspace memory across agents
+
+Different agents can use the same OpenDream store across sessions when they
+target the same workspace root. Events and prepared contexts preserve
+`reporting_agent` metadata, so the Sessions view can distinguish contributions
+from Codex, Claude Code, Cursor, and other integrations.
+
+This does not merge or replace each product's built-in memory. OpenDream is the
+shared project-memory layer, while each agent keeps its own runtime behavior and
+private state. See the [light and dark demo](showcase/ui-demos.md#multiple-agents-one-memory-plane).
+
 ## Workspace and working directory
 
 - Pass **`--workspace`** explicitly; it must be the **repository root** (or the root you initialized).

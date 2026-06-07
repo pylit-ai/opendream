@@ -10,11 +10,27 @@ import unittest
 from pathlib import Path
 
 from opendream.adapter_loader import load_bundled_adapters
+from opendream.verification import _run_command
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ActivationCaptureVerifyTests(unittest.TestCase):
+    def test_verification_commands_receive_closed_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            result = _run_command(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; raise SystemExit(0 if sys.stdin.read() == '' else 1)",
+                ],
+                workspace=workspace,
+                env=dict(os.environ),
+            )
+
+        self.assertEqual(result["returncode"], 0)
+
     def run_cli(
         self,
         *args: str,

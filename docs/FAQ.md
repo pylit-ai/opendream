@@ -19,6 +19,12 @@ This lets you compare what each system recalls instead of making an up-front
 migration decision. OpenDream focuses on source-linked, reviewable context; it
 does not disable, import, or replace another product's built-in memory.
 
+Multiple agents can also use the same workspace-local OpenDream store across
+sessions. For example, Codex can record a project decision, Claude Code can
+reuse it later, and Cursor can add another attributable event. This is a shared
+project memory layer, not a claim that the agents' own private memory systems
+are merged or replaced.
+
 Agent activation is additive but not read-only. Depending on the selected
 target, OpenDream may add managed hooks, wrappers, generated files, or marked
 instruction blocks. Use these controls when adopting it in an existing repo:

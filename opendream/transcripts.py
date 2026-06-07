@@ -4,7 +4,8 @@
 Claude Code session JSONL files (under ``~/.claude/projects/<slug>/``) carry
 nested message structures that ``opendream/episodes.py`` cannot parse directly.
 This module flattens them to ``{timestamp, speaker, text, session_id,
-source_path}`` so the existing episode loader works without modification.
+source_path, reporting_agent}`` so the episode loader can preserve which
+coding agent contributed each session.
 
 Exported surface:
     flatten_claude_row(row)            -> dict | None
@@ -142,6 +143,12 @@ def flatten_claude_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "text": text,
         "session_id": row.get("sessionId") or row.get("session_id"),
         "id": row.get("uuid") or row.get("id"),
+        "reporting_agent": {
+            "agent_id": "claude-code",
+            "agent_label": "Claude Code",
+            "runtime": "claude-code",
+            "adapter_id": "claude-code",
+        },
     }
 
 
@@ -168,6 +175,12 @@ def flatten_codex_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "text": text,
         "session_id": row.get("session_id") or row.get("id"),
         "id": row.get("uuid") or row.get("id"),
+        "reporting_agent": {
+            "agent_id": "codex",
+            "agent_label": "Codex",
+            "runtime": "codex-cli",
+            "adapter_id": "codex-account",
+        },
     }
 
 

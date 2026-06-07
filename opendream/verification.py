@@ -313,6 +313,7 @@ def _run_command(args: list[str], *, workspace: Path, env: dict[str, str]) -> di
         cwd=workspace,
         env={**env, "OPENDREAM_WORKSPACE": str(workspace)},
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         text=True,
         check=False,
         timeout=CAPTURE_TIMEOUT_SECONDS,

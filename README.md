@@ -29,6 +29,24 @@ Closed products are starting to dream. OpenDream makes agent memory open, local,
 
 The observability UI shows recent agent activity, selected memories, context-use audit records, review decisions, and workspace health without making you read raw JSON first. Full light and dark demo cuts: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
 
+### Multiple agents, one workspace memory plane
+
+Codex, Claude Code, Cursor, and other agents can contribute across sessions in
+the same workspace. OpenDream keeps those events and prepared contexts in one
+local store with agent attribution, so a later agent can inspect and reuse what
+came before without replacing its built-in memory.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/demos/ui/dark-shared-memory-sessions.png">
+  <source media="(prefers-color-scheme: light)" srcset="./docs/assets/demos/ui/light-shared-memory-sessions.png">
+  <img alt="OpenDream session history attributed to Codex, Claude Code, and Cursor" src="./docs/assets/demos/ui/light-shared-memory-sessions.png">
+</picture>
+
+Watch the full session and diff flow:
+[light MP4](./docs/assets/demos/ui/light-sessions-and-diff.mp4),
+[dark MP4](./docs/assets/demos/ui/dark-sessions-and-diff.mp4), or the
+[UI demo gallery](./docs/showcase/ui-demos.md).
+
 **OpenDream memory in real agent sessions**
 
 <p align="center">
@@ -42,7 +60,7 @@ The observability UI shows recent agent activity, selected memories, context-use
 | If you want to… | Start here |
 |-----------------|------------|
 | Try it in a few commands | [Quick start](#quick-start) |
-| View the UI app demos | [UI demo gallery](./docs/showcase/ui-demos.md) |
+| See multiple agents share workspace memory | [Shared agent memory demo](./docs/showcase/ui-demos.md#multiple-agents-one-memory-plane) |
 | Run the CLI memory demo | [90-second memory showcase](./docs/showcase/memory-showcase.md) |
 | Understand the memory lifecycle | [Dreaming memory change control](./docs/technical-notes/dreaming-memory-change-control.md) |
 | Compare memory approaches | [Comparison guide](./docs/comparison.md) |
