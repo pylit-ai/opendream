@@ -29,6 +29,16 @@ Closed products are starting to dream. OpenDream makes agent memory open, local,
 
 The observability UI shows recent agent activity, selected memories, context-use audit records, review decisions, and workspace health without making you read raw JSON first. Full light and dark demo cuts: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
 
+**OpenDream memory in real agent sessions**
+
+<p align="center">
+  <img alt="OpenDream recovered prior unfinished work" src="./docs/assets/proof/prior-memory-recovery.png" width="92%">
+  <br>
+  <img alt="OpenDream context shaped an implementation recommendation" src="./docs/assets/proof/context-shaped-implementation.png" width="92%">
+  <br>
+  <img alt="OpenDream prevented duplicate stale work" src="./docs/assets/proof/duplicate-work-prevention.png" width="92%">
+</p>
+
 | If you want to… | Start here |
 |-----------------|------------|
 | Try it in a few commands | [Quick start](#quick-start) |
@@ -132,6 +142,8 @@ sudo apt-get install jq
 OpenDream is an **activation-first CLI**. 
 
 Codex is currently the most tested path. Other integrations expose context through CLI commands, rules, hooks, or generated files depending on host support. A built-in target means OpenDream can generate the integration surface; it does not mean every host executes hooks natively.
+
+**You do not need to replace existing agent memory.** OpenDream keeps a separate workspace-local store and can run alongside built-in memory from Codex, Claude Code, or another agent. Activation adds OpenDream-managed integration surfaces; preview them with `activation-plan`, skip them with `init --no-activate-configured`, or remove them later with `deactivate`. See the [FAQ](./docs/FAQ.md#do-i-need-to-replace-my-existing-memory-system).
 
 ```bash
 opendream init --workspace .
@@ -483,6 +495,7 @@ Activation and compressed-status metadata (for the standard `init` / `status` pa
 | [docs/comparison.md](./docs/comparison.md) | Capability-level comparison with static files, RAG, hosted APIs, and managed memory |
 | [docs/security-local-first.md](./docs/security-local-first.md) | Local-first defaults, explicit provider paths, and trust boundaries |
 | [docs/design-partner-workloads.md](./docs/design-partner-workloads.md) | Real workflows needed to validate where memory helps or fails |
+| [docs/FAQ.md](./docs/FAQ.md) | Adoption, coexistence, privacy, benchmarks, and setup questions |
 | [docs/showcase/memory-showcase.md](./docs/showcase/memory-showcase.md) | 90-second memory demo |
 | [docs/agent-integrations.md](./docs/agent-integrations.md) | Agent integration guide |
 | [docs/automation/dream-task-playbook.md](./docs/automation/dream-task-playbook.md) | Automation and recurring memory tasks |

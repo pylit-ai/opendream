@@ -2,6 +2,9 @@
 
 OpenDream stores runtime memory in the selected workspace by default. It does not require a hosted account, hidden cloud memory layer, or background home-directory crawl.
 
+The current runtime has no OpenDream Cloud upload path. Future cloud features
+would be separately configured and opt-in.
+
 ## Defaults
 
 - Workspace memory remains local unless the operator configures an external path.

@@ -8,6 +8,66 @@ OpenDream is a local-first memory subsystem for agents working in project direct
 
 Agents lose context between sessions. OpenDream provides durable memory with typed records, contradiction handling, and retrieval that gets better over time, so agents stop re-asking questions you already answered.
 
+## Do I need to replace my existing memory system?
+
+No. OpenDream keeps its canonical memory in a separate workspace-local store,
+normally `.opendream/memory/`. It can run alongside built-in memory from Codex,
+Claude Code, or another agent, as well as your existing instruction and notes
+files.
+
+This lets you compare what each system recalls instead of making an up-front
+migration decision. OpenDream focuses on source-linked, reviewable context; it
+does not disable, import, or replace another product's built-in memory.
+
+Agent activation is additive but not read-only. Depending on the selected
+target, OpenDream may add managed hooks, wrappers, generated files, or marked
+instruction blocks. Use these controls when adopting it in an existing repo:
+
+```bash
+# Preview detected targets and planned integration surfaces.
+opendream activation-plan --workspace . --targets configured
+
+# Initialize the store without activating detected agent integrations.
+opendream init --workspace . --no-activate-configured
+
+# Remove OpenDream-generated integration later.
+opendream deactivate --workspace .
+```
+
+Keep agent configuration under version control and review the activation plan
+before applying it in a sensitive workspace.
+
+## Will OpenDream overwrite my existing agent configuration?
+
+OpenDream is designed to merge or isolate its integration rather than replace
+the whole agent configuration. For example, Claude Code activation adds
+OpenDream hook entries to `.claude/settings.json`, while Codex uses generated
+OpenDream scripts and a marked block where applicable. Repeated activation is
+idempotent, and `doctor --surface agents` reports drift.
+
+The exact files depend on the target. Run `activation-plan` first if you want
+to inspect the paths and actions before writing anything.
+
+## Can I try OpenDream without connecting it to an agent?
+
+Yes. Initialize with `--no-activate-configured`, then use `emit-event`,
+`maintain`, `prepare-context`, and the local observability UI directly. You can
+activate one or more agent targets later after you have inspected the store and
+retrieval behavior.
+
+## Does OpenDream send my workspace to a cloud service?
+
+No. OpenDream does not send your workspace to OpenDream Cloud, and the current
+runtime has no OpenDream Cloud upload path. The memory store, deterministic
+consolidation, retrieval, automation, and observability workflows run locally.
+The package also does not ship a hidden telemetry client.
+
+Future OpenDream Cloud features would be separately configured and opt-in.
+Model-provider integrations are a separate boundary: they require explicit
+operator configuration. In the current package, outbound LLM calls are not
+implemented; provider entries and API keys currently gate setup and health
+status rather than uploading workspace data.
+
 ## How is it different from managed agent memory systems?
 
 OpenDream focuses on local-first, inspectable memory for agent workflows:
@@ -28,7 +88,14 @@ systems. Scorecards are limited to OpenDream's own fixture-driven evidence.
 
 ## Is it local-first?
 
-Yes for **data**: artifacts stay under your workspace memory root (default `.opendream/memory/`). The default **deterministic** consolidation and **automation** paths do not open network connections from this package. **Optional** semantic provider configuration is intended for future outbound API calls to your chosen vendor; today the bundled semantic path still runs **without** those calls (heuristic synthesis/verification). The observability UI listens on `localhost` only when you start it. Operators: [semantic-mode-and-feature-radar-setup.md](automation/semantic-mode-and-feature-radar-setup.md).
+Yes. Artifacts stay under your workspace memory root (default
+`.opendream/memory/`). OpenDream does not send your workspace to OpenDream
+Cloud, and the default deterministic consolidation and automation paths do not
+open network connections from this package. Optional semantic provider
+configuration is intended for future outbound calls to your chosen vendor;
+today the bundled semantic path still runs without those calls. The
+observability UI listens on `localhost` only when you start it. Operators:
+[semantic-mode-and-feature-radar-setup.md](automation/semantic-mode-and-feature-radar-setup.md).
 
 ## What is the license?
 
