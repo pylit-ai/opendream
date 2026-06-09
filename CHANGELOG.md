@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.21 - 2026-06-09
+
+- Shorten the README for Hacker News launch traffic while preserving the
+  detailed operator and contributor references under `docs/`.
+- Add visible alpha, integration-maturity, and fixture-eval caveats near the
+  top of the README.
+- Add install, integration, memory-failure, and real-world eval issue templates
+  for launch feedback.
+
 ## 0.3.19 - 2026-06-02
 
 - Relaunch from clean public Git history after the pre-public `0.3.18` soft

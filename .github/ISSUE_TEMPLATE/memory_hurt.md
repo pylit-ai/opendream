@@ -10,7 +10,15 @@ labels: memory, bug
 - Command or integration used:
 - Agent target:
 - Workspace OS:
-- Memory quality impact: stale, contradicted, over-selected, under-selected, or unsafe:
+- Memory quality impact: stale, missing, over-broad, conflicting, over-selected, under-selected, or unsafe:
+
+## What Should Have Happened?
+
+- What should the agent have remembered?
+- What did it remember instead?
+- Was the memory stale, missing, over-broad, or conflicting?
+- Which agent/tool were you using?
+- Can this be reproduced in a public repo?
 
 ## Memory Used
 
