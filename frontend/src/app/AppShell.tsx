@@ -1,8 +1,21 @@
 import { A, useLocation } from '@solidjs/router';
-import { ChevronLeft, ChevronRight, Laptop, Moon, MousePointer2, Pin, PinOff, Search, Sun, type LucideProps } from 'lucide-solid';
+import {
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  Laptop,
+  Moon,
+  MousePointer2,
+  Pin,
+  PinOff,
+  Search,
+  Sun,
+  type LucideProps,
+} from 'lucide-solid';
 import {
   createEffect,
   createMemo,
+  createResource,
   createSignal,
   For,
   onCleanup,
@@ -33,6 +46,7 @@ import {
   getShowcase,
   getWorkspaces,
 } from '~/api/client';
+import type { WorkspaceDashboard } from '~/api/types';
 
 // 446-observability-perf: hover-prefetch primary endpoint per route so
 // the panel renders from cache when the user clicks.
@@ -343,20 +357,42 @@ function Sidebar(): JSX.Element {
   );
 }
 
-function WorkspaceCrumb(props: { path: string }): JSX.Element {
-  const display = createMemo(() => truncateMiddle(props.path, 56));
+function basename(path: string): string {
+  const normalized = path.replace(/\/+$/, '');
+  if (!normalized || normalized === '/') return normalized || path;
+  return normalized.split('/').pop() ?? path;
+}
+
+function workspaceLabelFromDashboard(dashboard?: WorkspaceDashboard): { label: string; path: string; status: string } {
+  const current = dashboard?.current_context;
+  const active = dashboard?.active;
+  const path = active?.path ?? current?.workspace_path ?? current?.current_path ?? '~/workspace';
+  const label = active?.label ?? (path === '~/workspace' ? 'Workspace' : basename(path));
+  const status = current?.status === 'not_initialized' ? 'Not initialized' : 'Viewing';
+  return { label, path, status };
+}
+
+function WorkspaceCrumb(props: { label: string; path: string; status: string }): JSX.Element {
+  const display = createMemo(() => truncateMiddle(props.label, 34));
   return (
-    <span
+    <div
       title={props.path}
-      class="font-mono text-[11px] tracking-[-0.01em] text-text-subtle"
+      class="flex min-w-0 items-center gap-2 rounded-md bg-surface px-2.5 py-1.5 text-xs text-text-muted hairline"
     >
-      {display()}
-    </span>
+      <FolderOpen size={12} class="shrink-0 text-text-subtle" />
+      <span class="shrink-0 text-[10px] font-medium uppercase tracking-[0.08em] text-text-subtle">
+        {props.status}
+      </span>
+      <span class="min-w-0 max-w-[22rem] truncate font-mono text-[11px] tracking-[-0.01em] text-text">
+        {display()}
+      </span>
+    </div>
   );
 }
 
-function TopBar(props: { workspacePath?: string }): JSX.Element {
-  const path = () => props.workspacePath ?? '~/workspace';
+function TopBar(): JSX.Element {
+  const [dashboard] = createResource(getWorkspaces);
+  const workspace = createMemo(() => workspaceLabelFromDashboard(dashboard()));
   return (
     <header
       class={cn(
@@ -365,7 +401,7 @@ function TopBar(props: { workspacePath?: string }): JSX.Element {
         'hairline-b',
       )}
     >
-      <WorkspaceCrumb path={path()} />
+      <WorkspaceCrumb label={workspace().label} path={workspace().path} status={workspace().status} />
       <div class="flex-1" />
       <button
         type="button"
