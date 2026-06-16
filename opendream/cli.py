@@ -10,7 +10,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, NoReturn
 
-from . import __version__, workspace_catalog
+from . import __version__, workspace_catalog, workspace_instances
 from . import auto_reviewer as _auto_reviewer
 from .activation import (
     SUPPORTED_TARGETS,
@@ -117,6 +117,7 @@ def build_server(*args: Any, **kwargs: Any) -> Any:
 
 TOP_LEVEL_EXAMPLES = """Examples:
   opendream init --workspace "$PWD"
+  opendream serve
   opendream status --workspace "$PWD"
   opendream activate --workspace "$PWD" --repair
   opendream repair --workspace "$PWD"
@@ -1348,7 +1349,10 @@ def command_observe_serve(args: argparse.Namespace) -> dict[str, Any]:
     if not store.is_initialized():
         store.initialize(store_kind="project", compat_mode=args.compat_mode)
     index_observability(store, now=args.now)
-    server = build_server(store, host=args.host, port=args.port)
+    try:
+        server = build_server(store, host=args.host, port=args.port)
+    except OSError as exc:
+        raise ValueError(f"cannot bind observe server on {args.host}:{args.port}: {exc}") from exc
     host = str(server.server_address[0])
     port = int(server.server_address[1])
     print(json_dumps({"status": "serving", "host": host, "port": port, "url": f"http://{host}:{port}"}))
@@ -1358,6 +1362,69 @@ def command_observe_serve(args: argparse.Namespace) -> dict[str, Any]:
     finally:
         server.server_close()
     return {"status": "stopped", "host": host, "port": port}
+
+
+def command_serve(args: argparse.Namespace) -> dict[str, Any]:
+    explicit_workspace = getattr(args, "workspace", None)
+    context = (
+        {
+            "status": "explicit",
+            "current_path": str(Path.cwd().resolve()),
+            "workspace_path": str(Path(explicit_workspace).expanduser().resolve()),
+            "source": "argument",
+            "not_initialized": False,
+        }
+        if explicit_workspace
+        else workspace_instances.resolve_current_context(Path.cwd())
+    )
+    workspace_path = context.get("workspace_path") or context.get("current_path")
+    if not workspace_path:
+        raise ValueError("could not resolve a workspace or current directory")
+
+    store = build_store(
+        str(workspace_path),
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if explicit_workspace and not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=getattr(args, "compat_mode", None))
+
+    initialized = store.is_initialized()
+    if initialized:
+        index_observability(store, now=getattr(args, "now", None))
+        workspace_catalog.safe_update(str(store.workspace), discovered_by="status")
+
+    port = int(args.port) if args.port is not None else 0
+    try:
+        server = build_server(store, host=args.host, port=port)
+    except OSError as exc:
+        requested = args.port if args.port is not None else "auto"
+        raise ValueError(f"cannot bind serve server on {args.host}:{requested}: {exc}") from exc
+    host = str(server.server_address[0])
+    actual_port = int(server.server_address[1])
+    path = "" if initialized else "/workspaces"
+    url = f"http://{host}:{actual_port}{path}"
+    serving = {
+        "status": "serving",
+        "kind": "workspace" if initialized else "hub",
+        "host": host,
+        "port": actual_port,
+        "url": url,
+        "workspace": str(store.workspace),
+        "current_context": context,
+    }
+    print(json_dumps(serving))
+    if not getattr(args, "no_open", False) and not getattr(args, "json", False):
+        import webbrowser
+
+        with suppress(Exception):
+            webbrowser.open(url)
+    try:
+        with suppress(KeyboardInterrupt):
+            server.serve_forever()
+    finally:
+        server.server_close()
+    return {"status": "stopped", "host": host, "port": actual_port, "url": url}
 
 
 def command_install_service(args: argparse.Namespace) -> dict[str, Any]:
@@ -1847,6 +1914,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"opendream {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True, title="commands")
+
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Primary: open the local OpenDream web UI for this directory or workspace catalog",
+    )
+    serve_parser.add_argument("--workspace", help="Workspace path to open; defaults to the current directory context")
+    serve_parser.add_argument("--host", default="127.0.0.1")
+    serve_parser.add_argument("--port", type=int, default=None, help="Port to bind; defaults to an available port")
+    serve_parser.add_argument("--no-open", action="store_true", help="Print the URL without opening a browser")
+    serve_parser.add_argument("--json", action="store_true", help="Machine-readable mode; implies --no-open")
+    serve_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(serve_parser)
+    serve_parser.set_defaults(func=command_serve)
 
     init_parser = subparsers.add_parser(
         "init",
@@ -2645,6 +2725,23 @@ def build_parser() -> argparse.ArgumentParser:
     observe_serve_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(observe_serve_parser)
     observe_serve_parser.set_defaults(func=command_observe_serve)
+
+    observe_hub_parser = observe_subparsers.add_parser(
+        "hub",
+        help="Advanced: run the local workspace hub with automatic current-directory detection",
+    )
+    observe_hub_parser.add_argument("--host", default="127.0.0.1")
+    observe_hub_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Port to bind; defaults to an available port",
+    )
+    observe_hub_parser.add_argument("--no-open", action="store_true", help="Print the URL without opening a browser")
+    observe_hub_parser.add_argument("--json", action="store_true", help="Machine-readable mode; implies --no-open")
+    observe_hub_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
+    add_layout_arguments(observe_hub_parser)
+    observe_hub_parser.set_defaults(func=command_serve)
 
     install_service_parser = subparsers.add_parser(
         "install-service",

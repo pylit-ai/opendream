@@ -51,6 +51,7 @@ import type {
   UiContext,
   UiMeta,
   WorkspaceDashboard,
+  WorkspaceInstanceActionResponse,
   WorkspaceInspectResponse,
 } from './types';
 
@@ -140,6 +141,31 @@ export const getSemanticChange = (sourceId: string) =>
 export const getWorkspaces = () => api<WorkspaceDashboard>('/api/workspaces');
 export const inspectWorkspace = (workspaceArg: string) =>
   api<WorkspaceInspectResponse>(`/api/workspaces/${encodeURIComponent(workspaceArg)}`);
+const LOCAL_ACTION_HEADERS = { 'X-OpenDream-Local-Action': '1' };
+export const launchWorkspaceInstance = (workspaceArg: string) =>
+  api<WorkspaceInstanceActionResponse>('/api/workspace-instances/launch', {
+    method: 'POST',
+    headers: LOCAL_ACTION_HEADERS,
+    body: JSON.stringify({ workspace: workspaceArg }),
+  });
+export const stopWorkspaceInstance = (workspaceArg: string) =>
+  api<WorkspaceInstanceActionResponse>('/api/workspace-instances/stop', {
+    method: 'POST',
+    headers: LOCAL_ACTION_HEADERS,
+    body: JSON.stringify({ workspace: workspaceArg }),
+  });
+export const restartWorkspaceInstance = (workspaceArg: string) =>
+  api<WorkspaceInstanceActionResponse>('/api/workspace-instances/restart', {
+    method: 'POST',
+    headers: LOCAL_ACTION_HEADERS,
+    body: JSON.stringify({ workspace: workspaceArg }),
+  });
+export const initializeCurrentWorkspace = () =>
+  api<WorkspaceInstanceActionResponse>('/api/workspace-instances/initialize-current', {
+    method: 'POST',
+    headers: LOCAL_ACTION_HEADERS,
+    body: JSON.stringify({}),
+  });
 
 export const getMemories = (params?: MemoryListParams) =>
   api<MemoryListResponse>(`/api/memories${buildQuery(params as Record<string, unknown>)}`);

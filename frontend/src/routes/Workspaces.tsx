@@ -1,6 +1,13 @@
 import { createResource, createSignal, For, Show, type JSX } from 'solid-js';
-import { Layers } from 'lucide-solid';
-import { getWorkspaces, inspectWorkspace } from '~/api/client';
+import { ExternalLink, Layers, Play, RotateCw, Square } from 'lucide-solid';
+import {
+  getWorkspaces,
+  initializeCurrentWorkspace,
+  inspectWorkspace,
+  launchWorkspaceInstance,
+  restartWorkspaceInstance,
+  stopWorkspaceInstance,
+} from '~/api/client';
 import type { WorkspaceDashboard, WorkspaceEntry, WorkspaceInspectResponse } from '~/api/types';
 import { Page } from '~/components/Page';
 import { Table, type TableColumn } from '~/components/Table';
@@ -28,11 +35,17 @@ function workspacePath(item: WorkspaceEntry): string {
   );
 }
 
+function instanceFor(item: WorkspaceEntry) {
+  return (item as { instance?: WorkspaceEntry['instance'] }).instance;
+}
+
 export default function WorkspacesRoute(): JSX.Element {
   const [data, { refetch }] = createResource<WorkspaceDashboard>(() =>
     cachedFetch('workspaces', getWorkspaces, 30_000),
   );
   const [selected, setSelected] = createSignal<WorkspaceEntry | null>(null);
+  const [busyPath, setBusyPath] = createSignal<string | null>(null);
+  const [actionError, setActionError] = createSignal<string | null>(null);
 
   const summaryStats = (): Stat[] => {
     const v = data() as
@@ -50,9 +63,12 @@ export default function WorkspacesRoute(): JSX.Element {
       list.filter((e) => Boolean((e as { service_state_summary?: string }).service_state_summary)).length;
     const degraded =
       (s?.stale ?? count('stale')) + (s?.missing ?? count('missing')) + (s?.broken ?? count('broken'));
+    const instanceSummary = v?.instance_summary;
+    const running = Number(instanceSummary?.running ?? list.filter((e) => instanceFor(e)?.state === 'running').length);
     return [
       { label: 'Total', value: total },
       { label: 'Healthy', value: ok, tone: ok > 0 ? 'ok' : 'default' },
+      { label: 'Running UI', value: running, tone: running > 0 ? 'ok' : 'default' },
       { label: 'With service', value: withService },
       { label: 'Degraded', value: degraded, tone: degraded > 0 ? 'warn' : 'default' },
     ];
@@ -82,6 +98,72 @@ export default function WorkspacesRoute(): JSX.Element {
   };
 
   const hiddenCount = (): number => allItems().length - items().length;
+
+  const openInstance = (item: WorkspaceEntry): void => {
+    const url = instanceFor(item)?.url;
+    if (typeof url === 'string' && url) {
+      window.location.assign(url);
+    }
+  };
+
+  const launchInstance = async (item: WorkspaceEntry): Promise<void> => {
+    const path = workspacePath(item);
+    setBusyPath(path);
+    setActionError(null);
+    try {
+      const result = await launchWorkspaceInstance(path);
+      await refetch();
+      const url = result.instance?.url;
+      if (typeof url === 'string' && url) window.location.assign(url);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
+  const stopInstance = async (item: WorkspaceEntry): Promise<void> => {
+    const path = workspacePath(item);
+    setBusyPath(path);
+    setActionError(null);
+    try {
+      await stopWorkspaceInstance(path);
+      await refetch();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
+  const restartInstance = async (item: WorkspaceEntry): Promise<void> => {
+    const path = workspacePath(item);
+    setBusyPath(path);
+    setActionError(null);
+    try {
+      const result = await restartWorkspaceInstance(path);
+      await refetch();
+      const url = result.instance?.url;
+      if (typeof url === 'string' && url) window.location.assign(url);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
+  const initializeCurrent = async (): Promise<void> => {
+    setBusyPath('__current__');
+    setActionError(null);
+    try {
+      await initializeCurrentWorkspace();
+      await refetch();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyPath(null);
+    }
+  };
 
   const cols: TableColumn<WorkspaceEntry>[] = [
     {
@@ -151,6 +233,72 @@ export default function WorkspacesRoute(): JSX.Element {
       },
       width: '110px',
     },
+    {
+      key: 'instance',
+      header: 'UI',
+      render: (item) => {
+        const state = String(instanceFor(item)?.state ?? 'stopped');
+        const variant = state === 'running' ? 'ok' : state === 'stale' || state === 'failed' ? 'warn' : 'neutral';
+        return <Chip variant={variant}>{state}</Chip>;
+      },
+      width: '110px',
+    },
+    {
+      key: 'actions',
+      header: '',
+      render: (item) => {
+        const instance = instanceFor(item);
+        const state = String(instance?.state ?? 'stopped');
+        const busy = busyPath() === workspacePath(item);
+        return (
+          <div class="flex items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+            <Show when={state === 'running' && instance?.url}>
+              <button
+                type="button"
+                title="Open"
+                class="rounded-md hairline p-1.5 hover:bg-surface-elevated disabled:opacity-50"
+                disabled={busy}
+                onClick={() => openInstance(item)}
+              >
+                <ExternalLink class="h-3.5 w-3.5" />
+              </button>
+            </Show>
+            <Show when={state !== 'running'}>
+              <button
+                type="button"
+                title="Launch"
+                class="rounded-md hairline p-1.5 hover:bg-surface-elevated disabled:opacity-50"
+                disabled={busy}
+                onClick={() => void launchInstance(item)}
+              >
+                <Play class="h-3.5 w-3.5" />
+              </button>
+            </Show>
+            <Show when={state === 'running' && instance?.owned}>
+              <button
+                type="button"
+                title="Restart"
+                class="rounded-md hairline p-1.5 hover:bg-surface-elevated disabled:opacity-50"
+                disabled={busy}
+                onClick={() => void restartInstance(item)}
+              >
+                <RotateCw class="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                title="Stop"
+                class="rounded-md hairline p-1.5 hover:bg-surface-elevated disabled:opacity-50"
+                disabled={busy}
+                onClick={() => void stopInstance(item)}
+              >
+                <Square class="h-3.5 w-3.5" />
+              </button>
+            </Show>
+          </div>
+        );
+      },
+      width: '104px',
+    },
   ];
 
   return (
@@ -166,6 +314,28 @@ export default function WorkspacesRoute(): JSX.Element {
       </Show>
       <Show when={!data.loading && !data.error}>
         <StatStrip stats={summaryStats()} />
+        <Show when={(data() as WorkspaceDashboard | undefined)?.current_context?.status === 'not_initialized'}>
+          <div class="rounded-md border border-border-subtle bg-surface-elevated px-3 py-2 text-xs text-text-muted">
+            <div class="flex items-center justify-between gap-3">
+              <span>Current directory is not initialized. Known workspaces are still available below.</span>
+              <button
+                type="button"
+                class="rounded-md hairline px-2 py-1 text-text hover:bg-surface"
+                disabled={busyPath() === '__current__'}
+                onClick={() => void initializeCurrent()}
+              >
+                Initialize
+              </button>
+            </div>
+          </div>
+        </Show>
+        <Show when={actionError()}>
+          {(message) => (
+            <div class="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-text">
+              {message()}
+            </div>
+          )}
+        </Show>
         <Show when={hiddenCount() > 0 || showTemp()}>
           <div class="flex items-center justify-between gap-2 px-1 text-[11px] text-text-muted">
             <span>
@@ -257,6 +427,20 @@ function WorkspaceDetail(props: { entry: WorkspaceEntry }): JSX.Element {
           <dd class="text-text">
             {(detail() as { status_kind?: string }).status_kind ?? '—'}
           </dd>
+          <dt class="text-text-subtle">UI</dt>
+          <dd class="text-text">
+            {String(instanceFor(detail())?.state ?? 'stopped')}
+          </dd>
+          <Show when={instanceFor(detail())?.url}>
+            {(url) => (
+              <>
+                <dt class="text-text-subtle">URL</dt>
+                <dd class="break-all font-mono text-[11.5px] text-text">
+                  {url()}
+                </dd>
+              </>
+            )}
+          </Show>
           <dt class="text-text-subtle">First seen</dt>
           <dd class="text-[11.5px] text-text">
             <Show

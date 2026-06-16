@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import time
@@ -8,6 +9,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from opendream import workspace_catalog
 from opendream.storage import MemoryStore
 from opendream.webapp import build_server
 
@@ -71,3 +73,35 @@ class StaticHandlerTests(unittest.TestCase):
         self.assertEqual(resp.status, 200)
         self.assertEqual(resp.headers["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("OpenDream Observe", html)
+
+    def test_workspaces_payload_includes_instance_summary(self) -> None:
+        workspace_catalog.upsert_entry(self.store.workspace, discovered_by="init")
+        with urllib.request.urlopen(f"{self.base_url}/api/workspaces?include_tempdir=1") as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(resp.status, 200)
+        self.assertIn("instance_summary", payload)
+        self.assertIn("current_context", payload)
+        self.assertEqual(payload["current_context"]["status"], "workspace")
+        self.assertIn("instance", payload["entries"][0])
+
+    def test_workspace_launch_requires_local_action_header(self) -> None:
+        request = urllib.request.Request(
+            f"{self.base_url}/api/workspace-instances/launch",
+            data=json.dumps({"workspace": str(self.store.workspace)}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(request)
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_initialize_current_requires_local_action_header(self) -> None:
+        request = urllib.request.Request(
+            f"{self.base_url}/api/workspace-instances/initialize-current",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(request)
+        self.assertEqual(ctx.exception.code, 403)

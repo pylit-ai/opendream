@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.22 - 2026-06-16
+
+- Add `opendream serve` as the simple local web UI entrypoint with automatic
+  current-directory detection and port selection.
+- Add Workspaces UI launch, open, restart, stop, and initialize actions backed
+  by a local derived workspace-instance registry.
+- Preserve explicit `opendream observe serve --workspace ... --port ...`
+  workflows for scripts and fixed-port operation.
+- Document the simplified observe UI path and keep release contracts updated
+  for the new command and runtime module.
+
 ## 0.3.21 - 2026-06-09
 
 - Shorten the README for Hacker News launch traffic while preserving the

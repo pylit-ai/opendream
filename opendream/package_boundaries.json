@@ -51,7 +51,8 @@
       "transcripts",
       "verifier",
       "verification",
-      "workspace_catalog"
+      "workspace_catalog",
+      "workspace_instances"
     ],
     "provider_backends": [
       "automation",

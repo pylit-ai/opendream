@@ -338,19 +338,56 @@ export interface WorkspaceEntry {
   // workspace_catalog.inspect_entry() return shape.
   path?: string;
   label?: string;
+  instance?: WorkspaceInstance;
+  [key: string]: unknown;
+}
+
+export interface WorkspaceInstance {
+  state?: 'stopped' | 'starting' | 'running' | 'stale' | 'failed' | 'unmanaged' | string;
+  workspace_path?: string;
+  host?: string;
+  port?: number;
+  url?: string | null;
+  owned?: boolean;
+  pid?: number;
+  pid_alive?: boolean;
+  listening?: boolean;
   [key: string]: unknown;
 }
 
 export interface WorkspaceDashboard {
   // _workspace_dashboard_payload(); usually contains items + active workspace.
   items?: WorkspaceEntry[];
+  entries?: WorkspaceEntry[];
   active?: WorkspaceEntry | null;
+  current_context?: {
+    status?: string;
+    current_path?: string;
+    workspace_path?: string | null;
+    not_initialized?: boolean;
+    actions?: string[];
+    [key: string]: unknown;
+  } | null;
+  instance_summary?: {
+    running?: number;
+    starting?: number;
+    stale?: number;
+    stopped?: number;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
 export type WorkspaceInspectResponse =
   | { status: 'missing'; workspace: string }
   | { status: 'ok'; entry: WorkspaceEntry };
+
+export interface WorkspaceInstanceActionResponse {
+  status: string;
+  instance?: WorkspaceInstance;
+  workspace_path?: string;
+  [key: string]: unknown;
+}
 
 export interface PageMeta {
   total?: number;

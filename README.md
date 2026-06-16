@@ -79,6 +79,7 @@ uv tool install opendream   # or: pipx install opendream
 opendream init --workspace .
 opendream verify activation-capture --workspace . --targets configured
 opendream status --workspace .
+opendream serve
 opendream deactivate --workspace .
 ```
 
@@ -238,7 +239,8 @@ OpenDream stores canonical state per workspace under `.opendream/`. The multi-wo
 
 ```bash
 opendream workspace list
-opendream observe serve --workspace "$PWD" --port 8000
+opendream serve
+opendream observe serve --workspace "$PWD" --port 8000  # explicit workspace/port fallback
 ```
 
 Semantic-first mode is a configuration posture, not an automatic readiness claim. If the selected semantic path cannot run, OpenDream reports a **degraded** state with a reason and next action; `prepare-context` should still use progressive disclosure and pruning evidence so recalled context stays inspectable.

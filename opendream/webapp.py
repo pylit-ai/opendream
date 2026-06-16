@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from . import auto_reviewer as _auto_reviewer
-from . import workspace_catalog
+from . import workspace_catalog, workspace_instances
 from .dream import dream_worker
 from .integration import emit_event
 from .observability import (
@@ -389,7 +389,30 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
         try:
-            if parsed.path == "/api/annotations":
+            if parsed.path == "/api/workspace-instances/launch":
+                if not self._require_local_action():
+                    return
+                workspace = str(payload.get("workspace") or payload.get("workspace_path") or "")
+                self._write_json(workspace_instances.launch_workspace(workspace))
+                return
+            elif parsed.path == "/api/workspace-instances/stop":
+                if not self._require_local_action():
+                    return
+                workspace = str(payload.get("workspace") or payload.get("workspace_path") or "")
+                self._write_json(workspace_instances.stop_workspace(workspace))
+                return
+            elif parsed.path == "/api/workspace-instances/restart":
+                if not self._require_local_action():
+                    return
+                workspace = str(payload.get("workspace") or payload.get("workspace_path") or "")
+                self._write_json(workspace_instances.restart_workspace(workspace))
+                return
+            elif parsed.path == "/api/workspace-instances/initialize-current":
+                if not self._require_local_action():
+                    return
+                self._write_json(workspace_instances.initialize_workspace(self.store.workspace))
+                return
+            elif parsed.path == "/api/annotations":
                 response = create_annotation(self.store, **payload)
             elif parsed.path == "/api/exports":
                 response = create_export(self.store, **payload)
@@ -737,7 +760,21 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/workspaces":
             include_tempdir = str(query.get("include_tempdir", "")).lower() in ("1", "true", "yes")
-            self._write_json(_workspace_dashboard_payload(include_tempdir=include_tempdir))
+            self._write_json(
+                _workspace_dashboard_payload(
+                    include_tempdir=include_tempdir,
+                    current_path=self.store.workspace,
+                )
+            )
+            _finish()
+            return
+        if parsed.path == "/api/workspace-instances":
+            self._write_json(
+                workspace_instances.dashboard_payload(
+                    workspace_catalog.list_entries(),
+                    current_path=self.store.workspace,
+                )
+            )
             _finish()
             return
         if parsed.path.startswith("/api/workspaces/"):
@@ -1051,6 +1088,18 @@ class ObservabilityHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _require_local_action(self) -> bool:
+        if self.headers.get(workspace_instances.LOCAL_ACTION_HEADER) == workspace_instances.LOCAL_ACTION_VALUE:
+            return True
+        self._write_json(
+            {
+                "error": "missing local action header",
+                "required_header": workspace_instances.LOCAL_ACTION_HEADER,
+            },
+            status=HTTPStatus.FORBIDDEN,
+        )
+        return False
 
     def _write_empty(self, status: HTTPStatus, *, content_type: str | None = None) -> None:
         self.send_response(status)
@@ -1519,7 +1568,11 @@ def _ui_meta_payload() -> dict[str, Any]:
     }
 
 
-def _workspace_dashboard_payload(*, include_tempdir: bool = False) -> dict[str, Any]:
+def _workspace_dashboard_payload(
+    *,
+    include_tempdir: bool = False,
+    current_path: Path | str | None = None,
+) -> dict[str, Any]:
     """Build the read-model payload used by the /workspaces dashboard route.
 
     Uses the machine-local catalog for fast initial render; the dashboard
@@ -1543,6 +1596,8 @@ def _workspace_dashboard_payload(*, include_tempdir: bool = False) -> dict[str, 
                 hidden += 1
                 continue
             entries.append(entry)
+    instance_payload = workspace_instances.dashboard_payload(entries, current_path=current_path)
+    entries = instance_payload["entries"]
     summary = {
         "total": len(entries),
         "ok": sum(1 for e in entries if e.get("status_kind") == "ok"),
@@ -1558,6 +1613,8 @@ def _workspace_dashboard_payload(*, include_tempdir: bool = False) -> dict[str, 
         "summary": summary,
         "entries": entries,
         "roots": workspace_catalog.list_roots(),
+        "instance_summary": instance_payload["instance_summary"],
+        "current_context": instance_payload["current_context"],
     }
 
 

@@ -83,11 +83,17 @@ workspaces are never written to the real `~/.opendream/catalog.json`.
 Nothing starts a server unless you ask. The UI reads **one** workspace’s on-disk memory store (default relative path `.opendream/memory/` under the workspace).
 
 ```bash
+opendream serve
+```
+
+`opendream serve` detects the current workspace when possible, chooses an available localhost port, and opens the Workspaces UI when the current directory is not initialized yet. For explicit scripts or fixed ports, use:
+
+```bash
 opendream observe index --workspace "$PWD"
 opendream observe serve --workspace "$PWD" --port 8000
 ```
 
-Then open `http://127.0.0.1:8000/overview` on the same machine. `observe serve` blocks until Ctrl+C.
+`observe serve` blocks until Ctrl+C.
 The observe server also exposes `GET /api/status` for lightweight workspace progress, `GET /api/health` for startup/readiness/liveness evidence, and `POST /api/health/live-check` for a synthetic end-to-end probe that verifies append plus index refresh without creating durable memory.
 For semantic-first workspaces, `/overview` and `/settings` should expose the same truth as CLI status: readiness, setup-required vs degraded state, state reason, next action, memory-quality warnings, and pruning evidence, with raw JSON still available behind disclosure.
 The same UI also exposes background-runtime controls and digestible summaries of
@@ -283,4 +289,3 @@ By default, durable memory artifacts live under **`.opendream/memory/`** (so a r
 Activation and compressed-status metadata (for the standard `init` / `status` path) persist under **`.opendream/`** at the workspace root — notably `targets.json` and `activation-state.json`. Add `.opendream/` to `.gitignore` if you do not want those files committed.
 
 ---
-
