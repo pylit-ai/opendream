@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.23 - 2026-06-16
+
+- Show the active workspace in the web app top bar instead of the generic
+  `~/workspace` placeholder.
+- Verify `opendream serve` end-to-end from initialized and uninitialized
+  directories.
+- Bump Vite to 8.0.16 and refresh bundled web assets to remove the vulnerable
+  Vite 6 / esbuild 0.25 dependency path flagged by Dependabot.
+
 ## 0.3.22 - 2026-06-16
 
 - Add `opendream serve` as the simple local web UI entrypoint with automatic
