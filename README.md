@@ -22,11 +22,11 @@ Capture what happened, retrieve what matters, and review what changed. OpenDream
 Closed products are starting to dream. OpenDream makes agent memory open, local, portable, and reviewable. "Dreaming" means background memory review and cleanup, not an opaque model behavior.
 
 <p align="center">
-  <img alt="OpenDream product motion showing dreaming turns activity into better memory" src="./docs/assets/demos/product-motion/09-dreaming-social-hook-dark.png" width="880">
+  <img alt="OpenDream video showing dreaming turns activity into better memory" src="./docs/assets/demos/product-motion/09-dreaming-social-hook-dark.png" width="880">
 </p>
 
 <p align="center">
-  <a href="./docs/assets/demos/product-motion/09-dreaming-social-hook-dark.mp4">Watch the product-motion demo</a>
+  <a href="./docs/assets/demos/product-motion/09-dreaming-social-hook-dark.mp4">Play video</a>
 </p>
 
 <picture>
