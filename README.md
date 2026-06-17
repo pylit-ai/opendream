@@ -22,13 +22,11 @@ Capture what happened, retrieve what matters, and review what changed. OpenDream
 Closed products are starting to dream. OpenDream makes agent memory open, local, portable, and reviewable. "Dreaming" means background memory review and cleanup, not an opaque model behavior.
 
 <p align="center">
-  <a href="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.mp4">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/demos/product-motion/02-workspace-memory-loop-dark.png">
-      <source media="(prefers-color-scheme: light)" srcset="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.png">
-      <img alt="OpenDream product motion showing workspace memory improving between sessions" src="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.png" width="880">
-    </picture>
-  </a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/demos/product-motion/02-workspace-memory-loop-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.png">
+    <img alt="OpenDream product motion showing workspace memory improving between sessions" src="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.png" width="880">
+  </picture>
 </p>
 
 <p align="center">
