@@ -22,17 +22,11 @@ Capture what happened, retrieve what matters, and review what changed. OpenDream
 Closed products are starting to dream. OpenDream makes agent memory open, local, portable, and reviewable. "Dreaming" means background memory review and cleanup, not an opaque model behavior.
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/demos/product-motion/02-workspace-memory-loop-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.png">
-    <img alt="OpenDream product motion showing workspace memory improving between sessions" src="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.png" width="880">
-  </picture>
+  <img alt="OpenDream product motion showing dreaming turns activity into better memory" src="./docs/assets/demos/product-motion/09-dreaming-social-hook-dark.png" width="880">
 </p>
 
 <p align="center">
-  <a href="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.mp4">Watch the light product-motion demo</a>
-  ·
-  <a href="./docs/assets/demos/product-motion/02-workspace-memory-loop-dark.mp4">Watch the dark product-motion demo</a>
+  <a href="./docs/assets/demos/product-motion/09-dreaming-social-hook-dark.mp4">Watch the product-motion demo</a>
 </p>
 
 <picture>
@@ -41,7 +35,7 @@ Closed products are starting to dream. OpenDream makes agent memory open, local,
   <img alt="OpenDream UI overview" src="./docs/assets/demos/ui/opendream-ui-overview.gif">
 </picture>
 
-The observability UI shows recent agent activity, selected memories, context-use audit records, review decisions, and workspace health without making you read raw JSON first. Full light and dark demo cuts: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
+The observability UI shows recent agent activity, selected memories, context-use audit records, review decisions, and workspace health without making you read raw JSON first. Full UI demo gallery: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
 
 ### Multiple agents, one workspace memory plane
 
@@ -56,10 +50,7 @@ came before without replacing its built-in memory.
   <img alt="OpenDream session history attributed to Codex, Claude Code, and Cursor" src="./docs/assets/demos/ui/light-shared-memory-sessions.png">
 </picture>
 
-Watch the full session and diff flow:
-[light MP4](./docs/assets/demos/ui/light-sessions-and-diff.mp4),
-[dark MP4](./docs/assets/demos/ui/dark-sessions-and-diff.mp4), or the
-[UI demo gallery](./docs/showcase/ui-demos.md).
+Watch the full session and diff flow in the [UI demo gallery](./docs/showcase/ui-demos.md).
 
 **OpenDream memory in real agent sessions**
 
