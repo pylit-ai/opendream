@@ -22,13 +22,19 @@ Capture what happened, retrieve what matters, and review what changed. OpenDream
 Closed products are starting to dream. OpenDream makes agent memory open, local, portable, and reviewable. "Dreaming" means background memory review and cleanup, not an opaque model behavior.
 
 <p align="center">
-  <video src="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.mp4" poster="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.png" controls muted loop playsinline width="880"></video>
+  <a href="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.mp4">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/demos/product-motion/02-workspace-memory-loop-dark.png">
+      <source media="(prefers-color-scheme: light)" srcset="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.png">
+      <img alt="OpenDream product motion showing workspace memory improving between sessions" src="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.png" width="880">
+    </picture>
+  </a>
 </p>
 
 <p align="center">
-  <a href="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.mp4">Light product-motion demo</a>
+  <a href="./docs/assets/demos/product-motion/02-workspace-memory-loop-light.mp4">Watch the light product-motion demo</a>
   ·
-  <a href="./docs/assets/demos/product-motion/02-workspace-memory-loop-dark.mp4">Dark product-motion demo</a>
+  <a href="./docs/assets/demos/product-motion/02-workspace-memory-loop-dark.mp4">Watch the dark product-motion demo</a>
 </p>
 
 <picture>
