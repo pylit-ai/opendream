@@ -28,6 +28,7 @@
       "adapter_profiles",
       "auto_reviewer",
       "bootstrap",
+      "cache",
       "claim_verification",
       "consolidator",
       "dream",

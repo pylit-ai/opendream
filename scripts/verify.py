@@ -80,6 +80,7 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
         eval_workspace = Path(temp_dir) / "dream-fidelity-eval"
         stages = [
             ("release-hygiene", [str(REPO_ROOT / "scripts" / "check_release_hygiene.sh")]),
+            ("generated-state", [sys.executable, "scripts/check_generated_state.py"]),
             ("package-boundaries", [sys.executable, "scripts/check_package_boundaries.py"]),
             ("release-artifacts", [sys.executable, "scripts/check_release_artifacts.py"]),
             ("vendor-assets", [sys.executable, "scripts/check_vendor_assets.py"]),

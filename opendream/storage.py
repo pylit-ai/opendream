@@ -67,6 +67,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "pending_item_decay_days": 7,
         "weak_memory_quarantine_days": 30,
     },
+    "cache": {
+        "persist_full_observability_index": True,
+        "observability_index_max_bytes": 25 * 1024 * 1024,
+        "observability_compact_index_max_bytes": 5 * 1024 * 1024,
+    },
     "promotion": {"workflow_min_successful_recalls": 2},
     "scheduler": {"min_new_events": 1, "min_interval_seconds": 0},
 }
@@ -251,6 +256,7 @@ class MemoryStore:
         self.index_json_path = self.state_dir / "index.json"
         self.observability_index_path = self.state_dir / "observability_index.json"
         self.observability_compact_index_path = self.state_dir / "observability_compact_index.json"
+        self.cache_config_path = self.state_dir / "cache_config.json"
         self.memory_md_path = self.memory_root / "MEMORY.md"
         self.processed_candidates_path = self.state_dir / "processed_candidates.json"
         self.extraction_state_path = self.state_dir / "processed_events.json"
@@ -419,8 +425,6 @@ class MemoryStore:
             write_json(self.durable_records_path, [])
         if not self.index_json_path.exists():
             write_json(self.index_json_path, {"generated_at": to_iso(utc_now()), "entries": []})
-        if not self.observability_index_path.exists():
-            write_json(self.observability_index_path, {"generated_at": to_iso(utc_now()), "entities": {}})
         if not self.worker_health_path.exists():
             write_json(self.worker_health_path, {})
         if not self.service_manifest_path.exists():
@@ -1330,6 +1334,18 @@ class MemoryStore:
     def save_semantic_config(self, config: dict[str, Any]) -> None:
         self.ensure_layout()
         write_json(self.semantic_config_path, config)
+
+    def load_cache_config(self) -> dict[str, Any]:
+        self.ensure_layout()
+        base = self.config.get("cache", {})
+        payload = read_json(self.cache_config_path, {}) if self.cache_config_path.exists() else {}
+        return _deep_merge(base, payload if isinstance(payload, dict) else {})
+
+    def save_cache_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        self.ensure_layout()
+        merged = _deep_merge(self.load_cache_config(), config)
+        write_json(self.cache_config_path, merged)
+        return merged
 
     # --- Semantic audit ---
 

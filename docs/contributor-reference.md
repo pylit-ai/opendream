@@ -147,8 +147,8 @@ Authoritative when the scripted gate passes; report at `.tmp/verification/verifi
 | `make lint` | Ruff (`scripts/lint.py`) |
 | `make typecheck` | mypy on `opendream` and `scripts` |
 | `make test` | Unit tests |
-| `make verify` | Lint, typecheck, tests, `eval dream-layout` (fresh temp workspace), `scripts/check_adapters.py`, packaging smoke |
-| `make release-check` | Release gate: artifacts, clean venv install, `dream run`, `eval dream-layout`, verification replay |
+| `make verify` | Lint, typecheck, tests, generated-state guard, `eval dream-layout` (fresh temp workspace), `scripts/check_adapters.py`, packaging smoke |
+| `make release-check` | Release gate: generated-state guard, artifacts, clean venv install, `dream run`, `eval dream-layout`, verification replay |
 
 `make release-check` also writes `.tmp/release-check/release_manifest.json` and `release_summary.md`.
 

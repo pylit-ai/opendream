@@ -18,6 +18,7 @@ must stay out of the repository.
 ```bash
 make setup
 make verify
+python scripts/check_generated_state.py
 scripts/check_release_hygiene.sh --strict-local
 python scripts/release_check.py --timeout-seconds 300
 python -m json.tool .tmp/release-check/release_manifest.json >/dev/null

@@ -16,6 +16,7 @@ from unittest.mock import patch
 from opendream import cli
 from opendream.consolidator import consolidate
 from opendream.models import ContextAssembly, MemoryRecord
+from opendream.observability import index_observability
 from opendream.storage import DEFAULT_MEMORY_DIR, LEGACY_MEMORY_DIR, MemoryStore
 from opendream.validation import validate_document
 
@@ -328,6 +329,60 @@ class MemoryCliIntegrationTests(unittest.TestCase):
 
         self.assertEqual(result, {"status": "stopped", "host": "127.0.0.1", "port": 8771})
         self.assertTrue(getattr(server, "closed", False))
+
+    def test_observability_full_index_respects_cache_cap(self) -> None:
+        store = MemoryStore(self.workspace)
+        store.initialize(store_kind="project")
+        store.save_cache_config({"observability_index_max_bytes": 1})
+
+        index = index_observability(store, now=FIXED_NOW)
+
+        self.assertIn("entities", index)
+        self.assertFalse(store.observability_index_path.exists())
+        self.assertTrue(store.observability_compact_index_path.exists())
+
+    def test_cache_lifecycle_cli_configure_verify_and_prune(self) -> None:
+        run_cli("init", "--workspace", str(self.workspace), "--no-activate-configured")
+        info = run_cli("cache", "info", "--workspace", str(self.workspace))
+        self.assertEqual(info["status"], "ok")
+        self.assertEqual(
+            {artifact["key"] for artifact in info["artifacts"]},
+            {"observability_index", "observability_compact_index"},
+        )
+
+        configured = run_cli(
+            "cache",
+            "configure",
+            "--workspace",
+            str(self.workspace),
+            "--persist-full-index",
+            "false",
+            "--max-full-index-bytes",
+            "1",
+        )
+        self.assertFalse(configured["policy"]["persist_full_observability_index"])
+        self.assertEqual(configured["policy"]["observability_index_max_bytes"], 1)
+
+        full_index_path = self.workspace / DEFAULT_MEMORY_DIR / "state" / "observability_index.json"
+        full_index_path.write_text('{"entities": {}}\n', encoding="utf-8")
+        verify = run_cli_raw("cache", "verify", "--workspace", str(self.workspace), check=False)
+        self.assertEqual(verify.returncode, 1)
+        verify_payload = json.loads(verify.stdout)
+        self.assertEqual(verify_payload["status"], "failed")
+        self.assertIn(
+            "full_index_persistence_disabled_but_file_exists",
+            {problem["code"] for problem in verify_payload["problems"]},
+        )
+
+        dry_run = run_cli("cache", "prune", "--workspace", str(self.workspace), "--dry-run", "--full-index")
+        self.assertEqual(dry_run["status"], "previewed")
+        self.assertEqual(len(dry_run["removed"]), 1)
+        self.assertTrue(full_index_path.exists())
+
+        pruned = run_cli("cache", "prune", "--workspace", str(self.workspace), "--yes", "--full-index")
+        self.assertEqual(pruned["status"], "pruned")
+        self.assertEqual(len(pruned["removed"]), 1)
+        self.assertFalse(full_index_path.exists())
 
     def test_emit_event_records_reporting_agent_with_unknown_default(self) -> None:
         run_cli(

@@ -131,7 +131,7 @@ class GraphRouteTests(unittest.TestCase):
 
         self.assertFalse(failures, failures)
         self.assertEqual(len(payloads), 4)
-        self.assertTrue(self.store.observability_index_path.exists())
+        self.assertTrue(self.store.observability_compact_index_path.exists())
 
     def test_api_service_control_enable_and_disable(self) -> None:
         try:

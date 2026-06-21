@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opendream"
-version = "0.3.23"
+version = "0.3.24"
 description = "Local-first memory subsystem for agents in project workspaces"
 readme = "README.md"
 requires-python = ">=3.11"

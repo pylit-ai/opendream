@@ -34,6 +34,7 @@ private state. See the [light and dark demo](showcase/ui-demos.md#multiple-agent
 - **`opendream eval performance`** — **hermetic:** scores against an isolated temp workspace using the same **`--memory-dir`** / **`--compat-mode`** you pass; the JSON **`workspace`** field remains your real path.
 - **`opendream eval dream-layout`** — **state- and layout-sensitive:** uses the store at `--workspace`. **`compatibility_views`** expects the project/user layout (`project.md` / `user.md`); align **`--compat-mode project-user`** (and **`--memory-dir`**) with **`demo`/init** or use a fresh workspace. On **`failed`**, stderr includes **`failing checks:`** and extra guidance for `compatibility_views`; stdout JSON is unchanged.
 - **`opendream eval memory-quality`** — **mutating:** replays a packaged fixture into the **current** store; existing memories (e.g. after **`demo`**) can cause failure. Prefer a **fresh workspace** for a clean CI-style pass/fail.
+- **`opendream cache info --workspace "$WORKSPACE"`** shows generated cache disk usage, byte caps, and Git tracking state. **`opendream cache prune --dry-run --full-index`** previews safe cleanup of the rebuildable full observability index. See [cache-management.md](cache-management.md).
 - **`opendream retrieve`** (and **`prepare-context`**): very short queries may return **`gated: true`** with a **`reason`** (token threshold) instead of ranked hits — intentional noise gate, not a parser error.
 - **Contract:** `opendream contract export --workspace "$WORKSPACE" --format json` — the first argument after **`contract`** must be **`export`**, not the workspace path.
 
@@ -192,5 +193,6 @@ Prefer CLI and hooks over manual edits to paths under **`active_memory_root`**, 
 
 - `<active_memory_root>/state/events/*.jsonl`
 - `<active_memory_root>/state/durable_records.json`, `state/index.json`, and related state
+- `<active_memory_root>/state/observability_index.json` and `state/observability_compact_index.json` unless you are intentionally pruning rebuildable cache files with `opendream cache prune`
 
 Edit **`MEMORY.md`** under that root only when you intentionally curate the human-facing index; the runtime will reconcile with consolidation rules.

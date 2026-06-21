@@ -265,6 +265,7 @@ Use the detailed operator guide for workspace catalog setup, upgrade/backfill fl
 | [docs/showcase/memory-showcase.md](./docs/showcase/memory-showcase.md) | 90-second memory demo |
 | [docs/agent-integrations.md](./docs/agent-integrations.md) | Agent integration guide |
 | [docs/operator-guide.md](./docs/operator-guide.md) | Workspace catalog, runtime commands, observability, generated data, eval notes, and full CLI examples |
+| [docs/cache-management.md](./docs/cache-management.md) | Cache disk usage, generated-state limits, verification, and pruning |
 | [docs/automation/dream-task-playbook.md](./docs/automation/dream-task-playbook.md) | Automation and recurring memory tasks |
 | [docs/architecture/overview.md](./docs/architecture/overview.md) | Architecture overview |
 | [docs/benchmarks/methodology.md](./docs/benchmarks/methodology.md) | Benchmark methodology |

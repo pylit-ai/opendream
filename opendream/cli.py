@@ -37,6 +37,7 @@ from .automation import (
     tick as automation_tick,
 )
 from .bootstrap import bootstrap_index
+from .cache import cache_info, configure_cache, prune_cache, verify_cache
 from .consolidator import consolidate
 from .dream import dream_run, dream_tick, dream_worker, enqueue_dream_job
 from .dream_narrative import synthesize_dream_narrative
@@ -1337,7 +1338,76 @@ def command_index_observability(args: argparse.Namespace) -> dict[str, Any]:
         "generated_at": index["generated_at"],
         "entity_groups": sorted(index["entities"].keys()),
         "index_path": str(store.observability_index_path),
+        "full_index_persisted": store.observability_index_path.exists(),
+        "compact_index_path": str(store.observability_compact_index_path),
     }
+
+
+def _build_cache_store(args: argparse.Namespace) -> MemoryStore:
+    store = build_store(
+        args.workspace,
+        memory_dir=getattr(args, "memory_dir", None),
+        compat_mode=getattr(args, "compat_mode", None),
+    )
+    if not store.is_initialized():
+        store.initialize(store_kind="project", compat_mode=getattr(args, "compat_mode", None))
+    return store
+
+
+def _parse_optional_bool(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("expected one of true,false,yes,no,1,0,on,off")
+
+
+def command_cache_info(args: argparse.Namespace) -> dict[str, Any]:
+    return cache_info(_build_cache_store(args))
+
+
+def command_cache_verify(args: argparse.Namespace) -> dict[str, Any]:
+    return verify_cache(_build_cache_store(args))
+
+
+def command_cache_configure(args: argparse.Namespace) -> dict[str, Any]:
+    return configure_cache(
+        _build_cache_store(args),
+        persist_full_observability_index=args.persist_full_index,
+        observability_index_max_bytes=args.max_full_index_bytes,
+        observability_compact_index_max_bytes=args.max_compact_index_bytes,
+    )
+
+
+def command_cache_prune(args: argparse.Namespace) -> dict[str, Any]:
+    store = _build_cache_store(args)
+    dry_run = bool(args.dry_run)
+    if not dry_run and not args.yes:
+        preview = prune_cache(
+            store,
+            dry_run=True,
+            full_index=args.full_index,
+            compact_index=args.compact_index,
+            all_generated=args.all_generated,
+        )
+        print(
+            "Would remove: "
+            f"{len(preview['removed'])} generated cache artifact(s), "
+            f"{preview['bytes_reclaimable']} byte(s)."
+        )
+        answer = input("Type DELETE to confirm: ").strip()
+        if answer != "DELETE":
+            raise SystemExit("Aborted.")
+    return prune_cache(
+        store,
+        dry_run=dry_run,
+        full_index=args.full_index,
+        compact_index=args.compact_index,
+        all_generated=args.all_generated,
+    )
 
 
 def command_observe_serve(args: argparse.Namespace) -> dict[str, Any]:
@@ -1998,6 +2068,74 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_layout_arguments(doctor_parser)
     doctor_parser.set_defaults(func=command_doctor)
+
+    cache_parser = subparsers.add_parser(
+        "cache",
+        help="Primary: inspect, verify, configure, and prune generated local cache files",
+    )
+    cache_subparsers = cache_parser.add_subparsers(dest="cache_command", required=True)
+
+    cache_info_parser = cache_subparsers.add_parser(
+        "info",
+        help="Show generated cache artifacts, byte sizes, caps, and Git tracking state",
+    )
+    cache_info_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(cache_info_parser)
+    cache_info_parser.set_defaults(func=command_cache_info)
+
+    cache_verify_parser = cache_subparsers.add_parser(
+        "verify",
+        help="Fail if generated cache artifacts exceed caps or are tracked by Git",
+    )
+    cache_verify_parser.add_argument("--workspace", required=True)
+    add_layout_arguments(cache_verify_parser)
+    cache_verify_parser.set_defaults(func=command_cache_verify, result_failure_statuses=("failed",))
+
+    cache_configure_parser = cache_subparsers.add_parser(
+        "configure",
+        help="View or update generated cache persistence and byte caps",
+    )
+    cache_configure_parser.add_argument("--workspace", required=True)
+    cache_configure_parser.add_argument(
+        "--persist-full-index",
+        dest="persist_full_index",
+        type=_parse_optional_bool,
+        metavar="BOOL",
+        help="Persist the full observability index when it is under the byte cap (true/false)",
+    )
+    cache_configure_parser.add_argument(
+        "--max-full-index-bytes",
+        type=int,
+        help="Maximum persisted full observability index size; 0 disables this cap",
+    )
+    cache_configure_parser.add_argument(
+        "--max-compact-index-bytes",
+        type=int,
+        help="Maximum compact observability index size reported by cache verify; 0 disables this cap",
+    )
+    add_layout_arguments(cache_configure_parser)
+    cache_configure_parser.set_defaults(func=command_cache_configure)
+
+    cache_prune_parser = cache_subparsers.add_parser(
+        "prune",
+        help="Delete rebuildable generated cache artifacts; defaults to over-limit full indexes",
+    )
+    cache_prune_parser.add_argument("--workspace", required=True)
+    cache_prune_parser.add_argument("--dry-run", action="store_true", help="Preview without deleting files")
+    cache_prune_parser.add_argument("--yes", action="store_true", help="Delete without interactive confirmation")
+    cache_prune_parser.add_argument("--full-index", action="store_true", help="Select the full observability index")
+    cache_prune_parser.add_argument(
+        "--compact-index",
+        action="store_true",
+        help="Select the compact observability index",
+    )
+    cache_prune_parser.add_argument(
+        "--all-generated",
+        action="store_true",
+        help="Select every rebuildable generated cache artifact",
+    )
+    add_layout_arguments(cache_prune_parser)
+    cache_prune_parser.set_defaults(func=command_cache_prune)
 
     verify_parser = subparsers.add_parser(
         "verify",

@@ -157,7 +157,7 @@ wheels = [
 
 [[package]]
 name = "opendream"
-version = "0.3.21"
+version = "0.3.24"
 source = { editable = "." }
 
 [package.optional-dependencies]

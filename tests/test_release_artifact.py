@@ -25,6 +25,14 @@ assert _RELEASE_CHECK_SPEC is not None and _RELEASE_CHECK_SPEC.loader is not Non
 release_check = importlib.util.module_from_spec(_RELEASE_CHECK_SPEC)
 _RELEASE_CHECK_SPEC.loader.exec_module(release_check)
 
+_GENERATED_STATE_SPEC = importlib.util.spec_from_file_location(
+    "opendream_check_generated_state_script",
+    REPO_ROOT / "scripts" / "check_generated_state.py",
+)
+assert _GENERATED_STATE_SPEC is not None and _GENERATED_STATE_SPEC.loader is not None
+check_generated_state = importlib.util.module_from_spec(_GENERATED_STATE_SPEC)
+_GENERATED_STATE_SPEC.loader.exec_module(check_generated_state)
+
 
 class ReleaseCheckLockTests(unittest.TestCase):
     def test_remove_dead_release_lock_unlinks_dead_pid(self) -> None:
@@ -48,6 +56,33 @@ class ReleaseCheckLockTests(unittest.TestCase):
             self.assertFalse(release_check.remove_dead_release_lock(lock_path))
 
         self.assertTrue(lock_path.exists())
+
+
+class GeneratedStateCheckTests(unittest.TestCase):
+    def test_generated_state_path_detection_blocks_cache_artifacts(self) -> None:
+        blocked = [
+            ".opendream/memory/state/observability_index.json",
+            "memory/state/observability_compact_index.json",
+            ".dream-memory/state/cache_config.json",
+        ]
+        for path in blocked:
+            with self.subTest(path=path):
+                self.assertTrue(check_generated_state.is_generated_state_path(path))
+
+    def test_generated_state_path_detection_allows_public_assets(self) -> None:
+        allowed = [
+            "docs/assets/demos/ui/opendream-ui-overview.gif",
+            "opendream/static/dist/index.html",
+            "opendream/schema/memory-event.schema.json",
+        ]
+        for path in allowed:
+            with self.subTest(path=path):
+                self.assertFalse(check_generated_state.is_generated_state_path(path))
+
+    def test_large_file_allowlist_keeps_release_assets_out_of_cache_guard(self) -> None:
+        self.assertTrue(check_generated_state.is_large_file_allowed("docs/assets/demos/ui/overview.gif"))
+        self.assertTrue(check_generated_state.is_large_file_allowed("opendream/static/dist/index.js"))
+        self.assertFalse(check_generated_state.is_large_file_allowed("reports/local-large.html"))
 
 
 class ReleaseArtifactTests(unittest.TestCase):

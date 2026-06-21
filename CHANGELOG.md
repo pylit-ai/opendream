@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.24 - 2026-06-21
+
+- Add `opendream cache info`, `cache verify`, `cache configure`, and
+  `cache prune` for generated observability cache lifecycle management.
+- Add configurable byte caps for full and compact observability indexes; the
+  compact index remains the fast path while oversized full indexes are not
+  persisted.
+- Add generated-state release checks so `.opendream/` read models, cache
+  indexes, and unexpected large staged files do not ship in public releases.
+- Document cache disk usage, safe pruning, and release verification commands.
+
 ## 0.3.23 - 2026-06-16
 
 - Show the active workspace in the web app top bar instead of the generic

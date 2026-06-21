@@ -1,5 +1,5 @@
 
-.PHONY: help setup sync dev demo test lint typecheck package-boundaries release-artifacts adapters-check verify release-check \
+.PHONY: help setup sync dev demo test lint typecheck package-boundaries generated-state release-artifacts adapters-check verify release-check \
 	bump-patch bump-minor bump-major tag release-patch release-minor release-major clean
 
 VENV ?= .venv
@@ -16,6 +16,7 @@ help:
 	@echo "  make demo             - run demo workspace"
 	@echo "  make test             - unit tests"
 	@echo "  make package-boundaries - package graph and contract boundary check"
+	@echo "  make generated-state - generated cache/state release guard"
 	@echo "  make release-artifacts - stale backup/generated artifact check"
 	@echo "  make verify           - lint, typecheck, tests, eval, adapters, packaging smoke"
 	@echo "  make release-check    - full release gate (local)"
@@ -56,6 +57,9 @@ typecheck:
 
 package-boundaries:
 	@$(PYTHON) scripts/check_package_boundaries.py
+
+generated-state:
+	@$(PYTHON) scripts/check_generated_state.py
 
 release-artifacts:
 	@$(PYTHON) scripts/check_release_artifacts.py

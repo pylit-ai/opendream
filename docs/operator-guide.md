@@ -107,11 +107,15 @@ Watch the UI flow in both themes: [`docs/showcase/ui-demos.md`](./docs/showcase/
 
 Built from the same on-disk artifacts as the runtime (read model is derived; filesystem remains source of truth):
 
-- Index at `.opendream/memory/state/observability_index.json` (under your configured memory root)
+- Indexes at `.opendream/memory/state/observability_compact_index.json` and, when under the configured cap, `.opendream/memory/state/observability_index.json` (under your configured memory root)
 - Read APIs: overview, memories, runs, retrievals, sessions, context, graph, reviews, evals, exports
 - Health APIs: `/api/status`, `/api/health`, and `/api/health/live-check`
 - Audited writes: annotations, review decisions, exports
 - SSE at `/api/stream/status`
+
+Use `opendream cache info --workspace "$PWD"` to inspect generated cache byte
+sizes and `opendream cache prune --dry-run --full-index` before deleting
+rebuildable full-index state. Details: [cache-management.md](cache-management.md).
 - Desktop-first routes: `/overview`, `/memories`, `/dreams`, `/runs`, `/retrievals`, `/sessions`, `/reviews`, `/graph`, `/evals`, `/exports`
 
 `prepare-context` persists context-assembly artifacts so the context viewer can show what the agent actually saw.

@@ -264,6 +264,14 @@ def release_manifest(timeout_seconds: int) -> dict[str, Any]:
         )
         stages.append(
             run_stage(
+                "generated-state",
+                [sys.executable, "scripts/check_generated_state.py"],
+                cwd=REPO_ROOT,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        stages.append(
+            run_stage(
                 "release-artifacts",
                 [sys.executable, "scripts/check_release_artifacts.py"],
                 cwd=REPO_ROOT,

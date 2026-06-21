@@ -23,7 +23,7 @@ from .models import (
 )
 from .semantic_readiness import empty_context_pruning
 from .storage import MemoryStore
-from .util import parse_timestamp, read_json, sha256_path, stable_id, to_iso, utc_now
+from .util import json_dumps, parse_timestamp, read_json, sha256_path, stable_id, to_iso, utc_now
 
 # 446-observability-perf: in-process index cache.
 # Avoids per-request fingerprint computation + disk read for hot endpoints.
@@ -137,9 +137,16 @@ def index_observability(store: MemoryStore, *, now: str | None = None) -> dict[s
         "overview": _build_overview(store, timestamp),
         "entities": _build_entities(store),
     }
-    store.save_observability_index(index)
     compact = _build_compact_index_from_full(index)
     store.save_observability_compact_index(compact)
+    cache_policy = store.load_cache_config()
+    persist_full = bool(cache_policy.get("persist_full_observability_index", True))
+    max_full_bytes = int(cache_policy.get("observability_index_max_bytes", 0) or 0)
+    full_index_bytes = len((json_dumps(index) + "\n").encode("utf-8"))
+    if persist_full and (max_full_bytes <= 0 or full_index_bytes <= max_full_bytes):
+        store.save_observability_index(index)
+    else:
+        store.observability_index_path.unlink(missing_ok=True)
     _cache_put(_store_cache_key(store), index)
     _compact_cache_put(_store_cache_key(store), compact)
     # The fingerprint we just computed is fresh; record it so the next
