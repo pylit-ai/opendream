@@ -83,6 +83,7 @@ def build_report(*, timeout_seconds: int) -> dict[str, Any]:
             ("generated-state", [sys.executable, "scripts/check_generated_state.py"]),
             ("package-boundaries", [sys.executable, "scripts/check_package_boundaries.py"]),
             ("release-artifacts", [sys.executable, "scripts/check_release_artifacts.py"]),
+            ("docs-links", [sys.executable, "scripts/check_docs_links.py"]),
             ("vendor-assets", [sys.executable, "scripts/check_vendor_assets.py"]),
             ("provenance-risk", [sys.executable, "scripts/check_provenance_risk.py"]),
             ("lint", [sys.executable, "scripts/lint.py"]),

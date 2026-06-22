@@ -1,5 +1,5 @@
 
-.PHONY: help setup sync dev demo test lint typecheck package-boundaries generated-state release-artifacts adapters-check verify release-check \
+.PHONY: help setup sync dev demo test lint typecheck package-boundaries generated-state release-artifacts docs-links adapters-check verify release-check \
 	bump-patch bump-minor bump-major tag release-patch release-minor release-major clean
 
 VENV ?= .venv
@@ -18,6 +18,7 @@ help:
 	@echo "  make package-boundaries - package graph and contract boundary check"
 	@echo "  make generated-state - generated cache/state release guard"
 	@echo "  make release-artifacts - stale backup/generated artifact check"
+	@echo "  make docs-links      - verify local Markdown links resolve"
 	@echo "  make verify           - lint, typecheck, tests, eval, adapters, packaging smoke"
 	@echo "  make release-check    - full release gate (local)"
 	@echo "  make version          - print version from pyproject.toml"
@@ -63,6 +64,9 @@ generated-state:
 
 release-artifacts:
 	@$(PYTHON) scripts/check_release_artifacts.py
+
+docs-links:
+	@$(PYTHON) scripts/check_docs_links.py
 
 adapters-check:
 	@$(PYTHON) scripts/check_adapters.py
