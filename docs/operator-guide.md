@@ -31,7 +31,7 @@ for machine output.
 
 The local web UI exposes the same view at `/workspaces`, with per-workspace
 cards that link into the existing detail pages. See
-[ADR-017](./docs/adr/ADR-017-machine-local-workspace-catalog.md) for why the
+[ADR-017](adr/ADR-017-machine-local-workspace-catalog.md) for why the
 catalog is derived rather than canonical.
 
 ### Upgrading an existing workspace
@@ -100,7 +100,7 @@ The same UI also exposes background-runtime controls and digestible summaries of
 the current memory surface plus the latest runtime mutation effects, so you can
 see what OpenDream is changing without dropping straight into raw JSON.
 
-Watch the UI flow in both themes: [`docs/showcase/ui-demos.md`](./docs/showcase/ui-demos.md).
+Watch the UI flow in both themes: [`docs/showcase/ui-demos.md`](showcase/ui-demos.md).
 
 <details>
 <summary><strong>What the observability app exposes</strong></summary>
@@ -133,7 +133,7 @@ Use OpenDream as an **activation-first runtime**:
 - Run **`status`** for the single high-signal answer covering activation, drift, queue state, and runtime health.
 - Run **`activate --repair`** when `status` or `doctor` reports drift.
 - Run **`deactivate`** if you want to remove OpenDream-managed repo-local surfaces while keeping your repo config intact.
-- Use **`automation register|run|tick|status|review`** when you want managed recurring projections such as feature queues or bug radar without mutating durable memory. For a **reproducible multi-layer pattern** (capture → automation radar → optional semantic refresh), see [`docs/automation/dream-task-playbook.md`](./docs/automation/dream-task-playbook.md), the worked example at [`docs/automation/examples/feature-mining.md`](./docs/automation/examples/feature-mining.md), and the **ordered CLI sequences** (`init` through `tick`, hybrid `dream run` smoke, Layer C / delegated ingest) in [`docs/automation/complete-operator-workflow.md`](./docs/automation/complete-operator-workflow.md).
+- Use **`automation register|run|tick|status|review`** when you want managed recurring projections such as feature queues or bug radar without mutating durable memory. For a **reproducible multi-layer pattern** (capture -> automation radar -> optional semantic refresh), see [`docs/automation/dream-task-playbook.md`](automation/dream-task-playbook.md), the worked example at [`docs/automation/examples/feature-mining.md`](automation/examples/feature-mining.md), and the **ordered CLI sequences** (`init` through `tick`, hybrid `dream run` smoke, Layer C / delegated ingest) in [`docs/automation/complete-operator-workflow.md`](automation/complete-operator-workflow.md).
 - Use **`doctor --surface agents`**, **`service ...`**, **`dream ...`**, **`maintain`**, and **`prepare-context`** as advanced or explicit operator paths.
 
 <details>
@@ -241,13 +241,13 @@ opendream semantic ingest --workspace "$PWD" --scan-inbox
 OpenDream always supports deterministic local execution. Provider and
 agent-runtime paths are optional integrations; OpenDream does not call external
 model providers unless you explicitly configure one. The detailed strategy
-matrix lives in [`docs/agent-integrations.md`](./docs/agent-integrations.md).
+matrix lives in [`docs/agent-integrations.md`](agent-integrations.md).
 
 Run `opendream semantic setup --workspace . --apply` to detect, apply, scaffold, and validate the recommended path for your environment. If you need a manual nudge later, use `opendream dream worker --workspace . --once --mode auto`.
 
 Semantic-first is a configuration posture, not an automatic readiness claim. If semantic posture is selected but the recommended path has not been applied yet, OpenDream should report **setup required**. If a previously applied path stops being runnable, it should report **degraded** semantic-first, explain why, keep deterministic capture explicit, and recommend one concrete next action instead of implying that `mode=semantic` is already ready.
 
-**Feature / bug / fix radar** uses **`opendream automation`** (projection jobs), not `dream run`. Full walkthrough, file layouts, and how this differs from transcript dreaming: [`docs/automation/semantic-mode-and-feature-radar-setup.md`](./docs/automation/semantic-mode-and-feature-radar-setup.md).
+**Feature / bug / fix radar** uses **`opendream automation`** (projection jobs), not `dream run`. Full walkthrough, file layouts, and how this differs from transcript dreaming: [`docs/automation/semantic-mode-and-feature-radar-setup.md`](automation/semantic-mode-and-feature-radar-setup.md).
 
 **Note:** The repo is stdlib-only; hybrid/semantic mode runs the full **pipeline and audits** with **in-process heuristic** synthesis/verification today. Provider registry + API keys gate **availability** and health checks; outbound LLM calls are not implemented in this package yet (see guide).
 

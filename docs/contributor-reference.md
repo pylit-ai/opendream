@@ -67,11 +67,11 @@ make release-check
 
 Automations are **projection jobs**: they read **durable** memories, write **typed records** under `<memory-root>/automation/`, and can appear in `prepare-context` under **Active Automation Projections** — they do **not** replace canonical durable memory.
 
-**Playbook:** To wire skills, cron, and staleness the same way across projects (feature mining, bug radar, research deltas), follow [`docs/automation/dream-task-playbook.md`](./docs/automation/dream-task-playbook.md). Commit job specs under `docs/automation/job-specs/` or your own path and register from there.
+**Playbook:** To wire skills, cron, and staleness the same way across projects (feature mining, bug radar, research deltas), follow [`docs/automation/dream-task-playbook.md`](automation/dream-task-playbook.md). Commit job specs under `docs/automation/job-specs/` or your own path and register from there.
 
 **1. Prerequisite:** initialized store plus durable memories (same as the smoke test: `init`, ingest events, `maintain`).
 
-**2. Job spec:** JSON validated against [`opendream/schema/automation-job.schema.json`](./opendream/schema/automation-job.schema.json). You may omit `version`, `enabled`, and timestamps; `automation register` normalizes defaults (`version`: 1, `enabled`: true, `created_at` / `updated_at`).
+**2. Job spec:** JSON validated against [`opendream/schema/automation-job.schema.json`](../opendream/schema/automation-job.schema.json). You may omit `version`, `enabled`, and timestamps; `automation register` normalizes defaults (`version`: 1, `enabled`: true, `created_at` / `updated_at`).
 
 Example file `automation-release-watch.json` (adjust selectors to match your corpus):
 
@@ -119,7 +119,7 @@ opendream prepare-context --workspace "$PWD" --query "your task"
 | `automation/records/<record_type>/<job_id>.json` | Projection records |
 | `automation/audit/` | Run reports and diffs |
 
-**5. Tests in repo:** `tests.test_memory_cli.MemoryCliIntegrationTests.test_automation_register_run_status_and_context` and `test_automation_staleness_and_top_level_tick`. Consumer repos should run the same smoke path locally; extend CI with project-owned schema checks if the canonical backlog lives in git (see **Verification** in [`docs/automation/dream-task-playbook.md`](./docs/automation/dream-task-playbook.md)).
+**5. Tests in repo:** `tests.test_memory_cli.MemoryCliIntegrationTests.test_automation_register_run_status_and_context` and `test_automation_staleness_and_top_level_tick`. Consumer repos should run the same smoke path locally; extend CI with project-owned schema checks if the canonical backlog lives in git (see **Verification** in [`docs/automation/dream-task-playbook.md`](automation/dream-task-playbook.md)).
 
 </details>
 
@@ -133,7 +133,7 @@ opendream prepare-context --workspace "$PWD" --query "your task"
 | `opendream/schema/` | Machine-readable runtime contracts |
 | `docs/` | Architecture, governance, and user-facing guides |
 
-Optional, **non-normative** framework examples may live under `.meta/spec-adapters/` (see [`AGENTS.md`](./AGENTS.md)). They are not part of the packaged API; `scripts/check_adapters.py` keeps example paths and documented CLI strings consistent.
+Optional, **non-normative** framework examples may live under `.meta/spec-adapters/` (see [`AGENTS.md`](../AGENTS.md)). They are not part of the packaged API; `scripts/check_adapters.py` keeps example paths and documented CLI strings consistent.
 
 </details>
 
@@ -157,7 +157,7 @@ Authoritative when the scripted gate passes; report at `.tmp/verification/verifi
 <details>
 <summary><strong>Releasing (maintainers)</strong></summary>
 
-Publishing follows the **tag push** pattern: [`.github/workflows/publish-pypi.yml`](./.github/workflows/publish-pypi.yml) runs `uv build` + `uv publish` with **PyPI Trusted Publishing (OIDC)**.
+Publishing follows the **tag push** pattern: [`.github/workflows/publish-pypi.yml`](../.github/workflows/publish-pypi.yml) runs `uv build` + `uv publish` with **PyPI Trusted Publishing (OIDC)**.
 
 **GitHub vs PyPI binding**
 
