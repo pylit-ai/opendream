@@ -44,6 +44,9 @@
       "name": "eval"
     },
     {
+      "name": "export"
+    },
+    {
       "name": "extract"
     },
     {
@@ -151,7 +154,8 @@
   },
   "output_version_map": {
     "cli_json": "2",
-    "contract_export": "2"
+    "contract_export": "3",
+    "promotion_candidate_export": "1"
   },
   "schema_inventory": [
     {
@@ -231,6 +235,9 @@
     },
     {
       "name": "memory-topic.schema.json"
+    },
+    {
+      "name": "promotion-candidate-export.schema.json"
     },
     {
       "name": "provider-entry.schema.json"

@@ -25,7 +25,7 @@ def normalize_reporting_agent(reporting_agent: dict[str, Any] | None = None) -> 
         agent["agent_label"] = agent_label
     elif agent_id:
         agent["agent_label"] = agent_id
-    for key in ("runtime", "adapter_id", "model_id", "model_version"):
+    for key in ("runtime", "adapter_id", "model_id", "model_version", "genome_hash"):
         value = str(reporting_agent.get(key) or "").strip()
         if value:
             agent[key] = value

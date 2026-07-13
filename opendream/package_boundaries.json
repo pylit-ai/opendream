@@ -29,6 +29,7 @@
       "auto_reviewer",
       "bootstrap",
       "cache",
+      "candidate_export",
       "claim_verification",
       "consolidator",
       "dream",

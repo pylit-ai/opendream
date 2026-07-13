@@ -179,6 +179,32 @@ opendream contract export --workspace "$WORKSPACE" --format json
 
 The payload validates against `opendream/schema/contract-export.schema.json`. **`cli_output_version`** is the same integer as command JSON (e.g. `status`) and matches the numeric meaning of **`output_version_map.cli_json`**. When the **export document** shape changes, bump **`output_version_map.contract_export`** and update consumers and golden fixtures together.
 
+### Promotion-candidate export
+
+Downstream governance tools can consume extracted candidates through a stable,
+versioned JSON surface without reading OpenDream's store internals:
+
+```bash
+opendream export candidates --workspace "$WORKSPACE" --format json
+```
+
+The payload validates against
+`opendream/schema/promotion-candidate-export.schema.json`. It includes candidate
+summaries and bodies, processing state, review decisions, consolidation and
+supersession operations, and attributable source-event references. Raw source
+event content is not exported; each evidence span carries a `content_sha256`
+digest instead. Consumers must read
+`output_version_map.promotion_candidate_export` from `contract export` and
+refuse unsupported versions.
+
+### Agent Genome attribution
+
+Event, retrieval, prepared-context, and context-use audit commands accept an
+optional `--agent-genome-hash`. Managed callers can instead set
+`OPENDREAM_AGENT_GENOME_HASH` (or `AGENT_GENOME_HASH`). OpenDream stores the
+opaque value as `reporting_agent.genome_hash`; it does not interpret the hash
+or make outcome claims from it.
+
 ## Direct-provider vs delegated execution
 
 - **Direct-provider**: Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, then run `opendream semantic setup --workspace . --prefer direct-provider --apply`

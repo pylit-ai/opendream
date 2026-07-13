@@ -709,10 +709,21 @@ class MemoryStore:
         append_jsonl(path, rows)
         return path
 
+    def load_candidates(self) -> list[dict[str, Any]]:
+        if not self.is_initialized():
+            return []
+        candidates: list[dict[str, Any]] = []
+        for path in sorted(self.candidates_dir.glob("*.jsonl")):
+            candidates.extend(self._load_jsonl(path))
+        return candidates
+
+    def load_processed_candidate_ids(self) -> set[str]:
+        return set(read_json(self.processed_candidates_path, []))
+
     def load_pending_candidates(self) -> list[dict[str, Any]]:
         if not self.is_initialized():
             return []
-        processed = set(read_json(self.processed_candidates_path, []))
+        processed = self.load_processed_candidate_ids()
         candidates: list[dict[str, Any]] = []
         for path in sorted(self.candidates_dir.glob("*.jsonl")):
             for item in self._load_jsonl(path):
@@ -721,9 +732,17 @@ class MemoryStore:
         return candidates
 
     def mark_candidates_processed(self, candidate_ids: Iterable[str]) -> None:
-        processed = set(read_json(self.processed_candidates_path, []))
+        processed = self.load_processed_candidate_ids()
         processed.update(candidate_ids)
         write_json(self.processed_candidates_path, sorted(processed))
+
+    def load_consolidation_operations(self) -> list[dict[str, Any]]:
+        if not self.is_initialized():
+            return []
+        operations: list[dict[str, Any]] = []
+        for path in sorted(self.audit_consolidation_dir.glob("*.jsonl")):
+            operations.extend(self._load_jsonl(path))
+        return operations
 
     def load_processed_event_ids(self) -> set[str]:
         return set(read_json(self.extraction_state_path, []))

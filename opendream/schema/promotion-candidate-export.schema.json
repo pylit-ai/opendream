@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "promotion-candidate-export.schema.json",
+  "title": "PromotionCandidateExport",
+  "type": "object",
+  "required": [
+    "candidate_export_version",
+    "opendream_version",
+    "generated_at",
+    "workspace",
+    "candidates"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "candidate_export_version": { "type": "string" },
+    "opendream_version": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "workspace": { "type": "string" },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "candidate_id",
+          "derived_from_event_ids",
+          "type",
+          "scope",
+          "title",
+          "summary",
+          "body",
+          "confidence",
+          "salience",
+          "status",
+          "created_at",
+          "origin_mode",
+          "processing_state",
+          "evidence_spans",
+          "missing_source_event_ids",
+          "review_decisions",
+          "consolidation_operations"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "derived_from_event_ids": { "type": "array", "items": { "type": "string" } },
+          "type": { "type": "string" },
+          "scope": { "type": "string" },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "body": { "type": "string" },
+          "confidence": { "type": "number" },
+          "salience": { "type": "number" },
+          "status": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "origin_mode": { "type": "string" },
+          "retrieval_boost": { "type": "number" },
+          "memory_refs": { "type": "array", "items": { "type": "string" } },
+          "conflicts_with": { "type": "array", "items": { "type": "string" } },
+          "workflow_steps": { "type": "array", "items": { "type": "string" } },
+          "claim_class": { "type": "string" },
+          "processing_state": { "type": "string", "enum": ["pending", "processed"] },
+          "evidence_spans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "event_id",
+                "session_id",
+                "turn_id",
+                "timestamp",
+                "kind",
+                "scope",
+                "source",
+                "reporting_agent",
+                "content_sha256"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "event_id": { "type": "string" },
+                "session_id": { "type": "string" },
+                "turn_id": { "type": "string" },
+                "timestamp": { "type": "string", "format": "date-time" },
+                "kind": { "type": "string" },
+                "scope": { "type": "string" },
+                "source": { "type": "object" },
+                "reporting_agent": { "type": "object" },
+                "content_sha256": { "type": "string" }
+              }
+            }
+          },
+          "missing_source_event_ids": { "type": "array", "items": { "type": "string" } },
+          "review_decisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "queue_item_type",
+                "queue_item_id",
+                "action",
+                "rationale",
+                "actor",
+                "created_at"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": { "type": "string" },
+                "queue_item_type": { "type": "string" },
+                "queue_item_id": { "type": "string" },
+                "action": { "type": "string" },
+                "rationale": { "type": "string" },
+                "actor": { "type": "string" },
+                "created_at": { "type": "string", "format": "date-time" }
+              }
+            }
+          },
+          "consolidation_operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "op_id",
+                "run_id",
+                "op",
+                "target_id",
+                "reason",
+                "source_event_ids",
+                "timestamp"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "op_id": { "type": "string" },
+                "run_id": { "type": "string" },
+                "op": { "type": "string" },
+                "target_id": { "type": "string" },
+                "reason": { "type": "string" },
+                "source_event_ids": { "type": "array", "items": { "type": "string" } },
+                "timestamp": { "type": "string", "format": "date-time" },
+                "payload": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -67,7 +67,11 @@
         "runtime": { "type": "string" },
         "adapter_id": { "type": "string" },
         "model_id": { "type": "string" },
-        "model_version": { "type": "string" }
+        "model_version": { "type": "string" },
+        "genome_hash": {
+          "type": "string",
+          "description": "Opaque Agent Genome configuration hash supplied by the caller."
+        }
       },
       "additionalProperties": false
     },

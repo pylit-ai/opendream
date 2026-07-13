@@ -820,6 +820,7 @@ def _infer_agent_from_environment() -> dict[str, Any]:
         "adapter_id": _env_first("OPENDREAM_AGENT_ADAPTER_ID"),
         "model_id": _env_first("OPENDREAM_AGENT_MODEL_ID"),
         "model_version": _env_first("OPENDREAM_AGENT_MODEL_VERSION"),
+        "genome_hash": _env_first("OPENDREAM_AGENT_GENOME_HASH", "AGENT_GENOME_HASH"),
     }
     if explicit["agent_id"] or explicit["agent_label"] or explicit["runtime"]:
         return {key: value for key, value in explicit.items() if value}
@@ -841,6 +842,7 @@ def _resolve_reporting_agent(
             "agent_adapter_id": "",
             "agent_model_id": "",
             "agent_model_version": "",
+            "agent_genome_hash": "",
         }
         mapping = {
             "agent_id": "agent_id",
@@ -849,6 +851,7 @@ def _resolve_reporting_agent(
             "adapter_id": "agent_adapter_id",
             "model_id": "agent_model_id",
             "model_version": "agent_model_version",
+            "genome_hash": "agent_genome_hash",
         }
         for target_key, arg_key in mapping.items():
             value = str(getattr(args, arg_key, "") or "").strip()
@@ -914,6 +917,18 @@ def command_contract_export(args: argparse.Namespace) -> dict[str, Any]:
     workspace = Path(args.workspace)
     payload = build_contract_export(workspace)
     validate_document("contract-export.schema.json", payload)
+    return payload
+
+
+def command_export_candidates(args: argparse.Namespace) -> dict[str, Any]:
+    from .candidate_export import build_candidate_export
+    from .validation import validate_document
+
+    store = build_store(args.workspace, memory_dir=args.memory_dir, compat_mode=args.compat_mode)
+    if not store.is_initialized():
+        raise ValueError("candidate export requires an initialized OpenDream workspace")
+    payload = build_candidate_export(store, now=args.now)
+    validate_document("promotion-candidate-export.schema.json", payload)
     return payload
 
 
@@ -2244,6 +2259,7 @@ def build_parser() -> argparse.ArgumentParser:
     emit_parser.add_argument("--agent-adapter-id")
     emit_parser.add_argument("--agent-model-id")
     emit_parser.add_argument("--agent-model-version")
+    emit_parser.add_argument("--agent-genome-hash")
     emit_parser.add_argument("--route", choices=["project", "global"], default="project")
     emit_parser.add_argument("--global-workspace")
     add_layout_arguments(emit_parser)
@@ -2328,6 +2344,7 @@ def build_parser() -> argparse.ArgumentParser:
     retrieve_parser.add_argument("--agent-adapter-id")
     retrieve_parser.add_argument("--agent-model-id")
     retrieve_parser.add_argument("--agent-model-version")
+    retrieve_parser.add_argument("--agent-genome-hash")
     retrieve_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     add_layout_arguments(retrieve_parser)
     retrieve_parser.set_defaults(func=command_retrieve)
@@ -2342,6 +2359,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_context_parser.add_argument("--agent-adapter-id")
     prepare_context_parser.add_argument("--agent-model-id")
     prepare_context_parser.add_argument("--agent-model-version")
+    prepare_context_parser.add_argument("--agent-genome-hash")
     prepare_context_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic runs")
     prepare_context_parser.add_argument(
         "--activate-session",
@@ -2379,6 +2397,7 @@ def build_parser() -> argparse.ArgumentParser:
     record_context_use_parser.add_argument("--agent-adapter-id")
     record_context_use_parser.add_argument("--agent-model-id")
     record_context_use_parser.add_argument("--agent-model-version")
+    record_context_use_parser.add_argument("--agent-genome-hash")
     add_layout_arguments(record_context_use_parser)
     record_context_use_parser.set_defaults(func=command_record_context_use)
 
@@ -2420,6 +2439,21 @@ def build_parser() -> argparse.ArgumentParser:
     contract_export_parser.add_argument("--workspace", required=True)
     contract_export_parser.add_argument("--format", choices=["json"], default="json")
     contract_export_parser.set_defaults(func=command_contract_export)
+
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Export stable downstream integration records",
+    )
+    export_subparsers = export_parser.add_subparsers(dest="export_command", required=True)
+    export_candidates_parser = export_subparsers.add_parser(
+        "candidates",
+        help="Export attributable promotion candidates without raw source content",
+    )
+    export_candidates_parser.add_argument("--workspace", required=True)
+    export_candidates_parser.add_argument("--now", help="Fixed ISO timestamp for deterministic exports")
+    export_candidates_parser.add_argument("--format", choices=["json"], default="json")
+    add_layout_arguments(export_candidates_parser)
+    export_candidates_parser.set_defaults(func=command_export_candidates)
 
     automation_parser = subparsers.add_parser(
         "automation",

@@ -54,6 +54,7 @@ The agent-ready platform work extends the architecture with:
 
 - **Path-scoped guidance** — subtree `AGENTS.md` files plus root routing (`opendream/`, `.meta/spec-adapters/`, `tests/`).
 - **Contract export** — `opendream contract export` emits schema-validated JSON (`opendream/schema/contract-export.schema.json`) describing CLI commands, schema inventory, and version maps.
+- **Promotion-candidate export** — `opendream export candidates` emits schema-validated, versioned candidate, review, consolidation, and hashed evidence metadata for downstream governance tools without exposing raw event content.
 - **Distribution & engines (planned)** — thin vendor packages and an automation engine registry per ADR-003 and ADR-004.
 - **Guidance drift & isolated execution (planned)** — proposal-only drift loop (ADR-006) and worktree-isolated code mutation (ADR-005).
 

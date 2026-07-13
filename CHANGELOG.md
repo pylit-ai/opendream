@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.25 - 2026-07-12
+
+- Add `opendream export candidates`, a versioned downstream contract for
+  promotion candidates, review decisions, consolidation history, and
+  attributable evidence references without raw source-event content.
+- Preserve optional Agent Genome configuration hashes on event, retrieval,
+  prepared-context, and context-use attribution records.
+- Advertise the promotion-candidate export version through the existing
+  machine-readable contract export and document fail-closed consumer version
+  checks.
+
 ## 0.3.24 - 2026-06-21
 
 - Add `opendream cache info`, `cache verify`, `cache configure`, and
