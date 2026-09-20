@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import jev_rerank
 from .memory_types import canonical_memory_type, is_workflow_memory_type
 from .models import normalize_reporting_agent
 from .relation_graph import build_relation_explanations, relation_aware_score_adjustment
@@ -248,6 +249,8 @@ def retrieve(
     query_source: str | None = None,
     caller_detail: str | None = None,
     reporting_agent: dict[str, Any] | None = None,
+    jev_rerank_enabled: bool = False,
+    jev_allow_memory_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     timestamp = now or to_iso(utc_now())
     normalized_agent = normalize_reporting_agent(reporting_agent)
@@ -488,6 +491,36 @@ def retrieve(
     scored.sort(key=lambda item: (-item[0], item[1]["status"] != "active", item[1]["title"]))
     lexical_only_scored.sort(key=lambda item: (-item[0], item[1]["title"]))
     selected = scored[:limit]
+    # Optional provider ranking permutes only approved slots in the baseline shortlist.
+    # Eligibility, conflicts, local scoring and unapproved records remain authoritative.
+    if jev_rerank_enabled:
+        baseline_ids = [record["memory_id"] for _, record, _ in selected]
+        blocked_sources = {
+            event["event_id"] for event in store.load_events()
+            if event.get("sensitivity", "normal") != "normal"
+        }
+        slots = [
+            index for index, (_, record, explanation) in enumerate(selected[:jev_rerank.MAX_CANDIDATES])
+            if record["memory_id"] in jev_allow_memory_ids
+            and record["status"] == "active"
+            and record.get("sensitivity", "normal") == "normal"
+            and not (set(record.get("source_event_ids", [])) & blocked_sources)
+            and explanation["conflict"]["state"] == "none"
+            and float(record["confidence"]) >= LOW_CONFIDENCE_THRESHOLD
+        ]
+        candidates = [selected[index] for index in slots]
+        order, reason, diagnostics = jev_rerank.rerank(query, [record for _, record, _ in candidates])
+        if order is not None:
+            selected = list(selected)
+            for slot, candidate_index in zip(slots, order, strict=True):
+                selected[slot] = candidates[candidate_index]
+        rerank["jev"] = {
+            "version": 1, "applied": order is not None, "reason": reason,
+            "baseline_memory_ids": baseline_ids,
+            "candidate_memory_ids": [record["memory_id"] for _, record, _ in candidates],
+            "model": jev_rerank.MODEL,
+            **diagnostics,
+        }
 
     run_id = stable_id("retrieve", timestamp, query, limit, use_embeddings)
 

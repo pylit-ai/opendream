@@ -39,6 +39,7 @@
       "extractor",
       "harness_optimizer",
       "integration",
+      "jev_rerank",
       "memory_quality",
       "observability",
       "planner",

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Optional retrieval rerank.jev metadata version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "applied", "reason", "baseline_memory_ids", "candidate_memory_ids", "model"],
+  "properties": {
+    "attempted_requests": {"type": "integer", "minimum": 0, "maximum": 1},
+    "returned_model": {"type": ["string", "null"]},
+    "elapsed_ms": {"type": "number", "minimum": 0},
+    "usage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["input_tokens", "output_tokens"],
+      "properties": {
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0}
+      }
+    },
+    "version": {"const": 1},
+    "applied": {"type": "boolean"},
+    "reason": {"enum": ["applied", "insufficient_candidates", "missing_credentials", "low_confidence", "provider_failure"]},
+    "baseline_memory_ids": {"type": "array", "items": {"type": "string"}},
+    "candidate_memory_ids": {"type": "array", "maxItems": 8, "items": {"type": "string"}},
+    "model": {"const": "jev-1.13.0"}
+  }
+}

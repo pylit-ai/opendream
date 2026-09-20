@@ -651,6 +651,8 @@ def command_retrieve(args: argparse.Namespace) -> dict[str, Any]:
         include_contested=args.include_contested,
         query_source="cli",
         caller_detail=((getattr(args, "caller_detail", "") or "").strip() or None),
+        jev_rerank_enabled=getattr(args, "jev_rerank", False),
+        jev_allow_memory_ids=frozenset(getattr(args, "jev_allow_memory", []) or []),
         reporting_agent=_resolve_reporting_agent(args),
     )
     response["workspace"] = str(store.workspace)
@@ -2333,6 +2335,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     retrieve_parser.add_argument("--limit", type=int, default=5)
     retrieve_parser.add_argument("--include-contested", action="store_true")
+    retrieve_parser.add_argument(
+        "--jev-rerank", action="store_true",
+        help="Opt in to one paid Jev request sharing the query and approved memory titles/summaries.",
+    )
+    retrieve_parser.add_argument(
+        "--jev-allow-memory", action="append", default=[], metavar="MEMORY_ID",
+        help="Explicitly approve title/summary egress for this memory ID (repeat for each approved memory).",
+    )
     retrieve_parser.add_argument(
         "--caller-detail",
         metavar="TEXT",

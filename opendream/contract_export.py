@@ -27,7 +27,7 @@ def top_level_command_names() -> tuple[str, ...]:
     return ()
 
 
-CONTRACT_EXPORT_DOCUMENT_VERSION = "3"
+CONTRACT_EXPORT_DOCUMENT_VERSION = "4"
 CONTRACT_SCHEMA_FILE = "contract-export.schema.json"
 
 
@@ -39,6 +39,7 @@ def build_contract_export(_workspace: Path) -> dict[str, Any]:
         "cli_json": str(CLI_JSON_VERSION),
         "contract_export": CONTRACT_EXPORT_DOCUMENT_VERSION,
         "promotion_candidate_export": "1",
+        "jev_rerank": "1",
     }
     minimal_event: dict[str, Any] = {
         "kind": "task_outcome",
