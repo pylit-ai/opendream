@@ -5,6 +5,7 @@
   "additionalProperties": false,
   "required": ["version", "applied", "reason", "baseline_memory_ids", "candidate_memory_ids", "model"],
   "properties": {
+    "failure_stage": {"enum": ["transport_or_json", "usage", "model", "candidate_ids", "answer_type", "score", "confidence", "probability_keys", "probability_values", "probability_sum", "score_expectation", "rubric"]},
     "attempted_requests": {"type": "integer", "minimum": 0, "maximum": 1},
     "returned_model": {"type": ["string", "null"]},
     "elapsed_ms": {"type": "number", "minimum": 0},

@@ -45,6 +45,11 @@ Opted-in results and retrieval audits add `rerank.jev` version 1, documented by
 contains `applied`, a fixed reason code, pinned model, baseline memory IDs and
 approved candidate IDs, attempted request count, elapsed milliseconds, returned
 model and validated provider token usage when available (never an invented cost).
+Rejected responses also include a fixed `failure_stage` code identifying the
+transport/JSON or schema validation stage. No rejected values, exception text or
+response content is added to this diagnostic. Probability-sum and score-expectation
+checks remain separate, each using the existing 0.001 tolerance; no wider rounding
+allowance has been established from the provider contract.
 Existing explanation scores still describe the local
 baseline; Jev changes ordering only. The baseline can always be inspected there
 or reproduced by omitting the flags. No content or provider exception is added

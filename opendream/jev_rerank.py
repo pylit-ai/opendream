@@ -77,12 +77,14 @@ def rerank(
             "criteria": RUBRIC,
         } for alias in aliases},
     }
+    stage = "transport_or_json"
     try:
         diagnostics["attempted_requests"] = 1
         response = _request(payload, key)
         returned_model = response.get("model")
         if isinstance(returned_model, str) and len(returned_model) <= 100:
             diagnostics["returned_model"] = returned_model
+        stage = "usage"
         usage = response.get("usage")
         if not isinstance(usage, dict) or not all(
             type(usage.get(field)) is int and usage[field] >= 0
@@ -90,24 +92,36 @@ def rerank(
         ):
             raise ValueError("invalid usage")
         diagnostics["usage"] = {field: usage[field] for field in ("input_tokens", "output_tokens")}
+        stage = "model"
         if response.get("model") != MODEL:
             raise ValueError("unexpected model")
+        stage = "candidate_ids"
         answers = response["answers"]
         if not isinstance(answers, dict) or set(answers) != set(aliases):
             raise ValueError("unexpected candidate IDs")
         scores = []
         for alias in aliases:
+            stage = "answer_type"
             answer = answers[alias]
             if not isinstance(answer, dict) or answer.get("type") != "score":
                 raise ValueError("unexpected answer type")
+            stage = "score"
             score = _number(answer["score"], 2.0)
+            stage = "confidence"
             confidence = _number(answer["confidence"])
+            stage = "probability_keys"
             probabilities = answer["probabilities"]
             if not isinstance(probabilities, dict) or set(probabilities) != {"0", "1", "2"}:
                 raise ValueError("unexpected distribution")
+            stage = "probability_values"
             values = [_number(probabilities[str(index)]) for index in range(3)]
-            if abs(sum(values) - 1) > 0.001 or abs(score - sum(i * p for i, p in enumerate(values))) > 0.001:
+            stage = "probability_sum"
+            if abs(sum(values) - 1) > 0.001:
                 raise ValueError("inconsistent distribution")
+            stage = "score_expectation"
+            if abs(score - sum(i * p for i, p in enumerate(values))) > 0.001:
+                raise ValueError("inconsistent distribution")
+            stage = "rubric"
             if answer["legend"] != {str(index): level for index, level in enumerate(RUBRIC)}:
                 raise ValueError("unexpected rubric")
             if confidence < 0.5:
@@ -116,4 +130,5 @@ def rerank(
         return finish(sorted(range(len(scores)), key=lambda index: -scores[index]), "applied")
     except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError, RecursionError):
         # Do not log provider exceptions: they may contain sensitive request content.
+        diagnostics["failure_stage"] = stage
         return finish(None, "provider_failure")

@@ -208,6 +208,34 @@ class JevConsumerTests(unittest.TestCase):
 
     @patch.dict("os.environ", {"TYPESAFE_API_KEY": "synthetic-key"})
     @patch("opendream.jev_rerank._request")
+    def test_rounding_and_rejection_diagnostics_are_specific_and_content_free(self, request) -> None:
+        payload = response()
+        payload["answers"]["candidate_1"].update(
+            score=1.98, probabilities={"0": 0, "1": 0.02, "2": 0.98}, confidence=0.97,
+        )
+        request.return_value = payload
+        accepted = self.opted()
+        self.assertEqual(accepted["selected_memory_ids"], ["b", "a"])
+        self.assertNotIn("failure_stage", accepted["rerank"]["jev"])
+        for stage, updates in [
+            ("score_expectation", {"score": 1.97}),
+            ("probability_sum", {"probabilities": {"0": 0, "1": 0.02, "2": 0.97}}),
+            ("rubric", {"legend": {"0": "private rejected text"}}),
+            ("score", {"score": "private rejected text"}),
+        ]:
+            with self.subTest(stage=stage):
+                malformed = copy.deepcopy(payload)
+                malformed["answers"]["candidate_1"].update(updates)
+                request.return_value = malformed
+                result = self.opted()
+                metadata = result["rerank"]["jev"]
+                self.assertEqual(metadata["failure_stage"], stage)
+                self.assertEqual(result["selected_memory_ids"], ["a", "b"])
+                self.assertNotIn("private rejected text", json.dumps(metadata))
+                validate_document("jev-rerank.schema.json", metadata)
+
+    @patch.dict("os.environ", {"TYPESAFE_API_KEY": "synthetic-key"})
+    @patch("opendream.jev_rerank._request")
     def test_conflicted_and_sensitive_records_never_leave_host(self, request) -> None:
         self.records[0]["conflicts_with"] = ["b"]
         write_json(self.store.durable_records_path, self.records)
