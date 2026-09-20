@@ -53,3 +53,10 @@ to logs, and no monetary or performance benefit is asserted.
 Verification uses synthetic responses and temporary memory stores. Live provider
 compatibility, quality, latency and cost have not been measured. Keep any later
 evaluation data private and use a separately authorized budget.
+
+The CLI availability regression test covers default behavior with and without a
+key, opt-in without a key, valid provider responses, authentication failures (401),
+rate limiting (429), connection errors, timeouts and malformed response bodies.
+It invokes the normal CLI entrypoint and substitutes only the HTTPS connection,
+so no provider calls or private memory transfers are needed. Failure cases assert
+the baseline selection, explanations and harm signals stay intact, with no retry.

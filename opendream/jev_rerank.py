@@ -35,7 +35,7 @@ def _request(payload: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def _number(value: Any, maximum: float = 1.0) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= maximum:
+    if type(value) not in (int, float) or not 0 <= value <= maximum or not math.isfinite(value):
         raise ValueError("invalid number")
     return float(value)
 
@@ -114,6 +114,6 @@ def rerank(
                 return finish(None, "low_confidence")
             scores.append(score)
         return finish(sorted(range(len(scores)), key=lambda index: -scores[index]), "applied")
-    except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError):
+    except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError, RecursionError):
         # Do not log provider exceptions: they may contain sensitive request content.
         return finish(None, "provider_failure")

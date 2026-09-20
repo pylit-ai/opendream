@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import copy
+import io
+import json
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from opendream.cli import build_parser
+from opendream.cli import build_parser, main
 from opendream.jev_rerank import MODEL, RUBRIC, _request, rerank
 from opendream.storage import MemoryStore
 from opendream.util import write_json
@@ -48,6 +51,66 @@ class JevConsumerTests(unittest.TestCase):
 
     def opted(self) -> dict:
         return self.run_retrieve("--jev-rerank", "--jev-allow-memory", "a", "--jev-allow-memory", "b")
+
+    def run_main(self, *, opted: bool) -> dict:
+        argv = ["opendream", "retrieve", "--workspace", str(self.store.workspace),
+                "--query", "package dependency installation", "--now", NOW, "--limit", "2"]
+        if opted:
+            argv += ["--jev-rerank", "--jev-allow-memory", "a", "--jev-allow-memory", "b"]
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch("sys.argv", argv), redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main()
+        self.assertEqual(exit_code, 0, stderr.getvalue())
+        self.assertEqual(stderr.getvalue(), "")
+        return json.loads(stdout.getvalue())
+
+    def test_real_cli_availability_matrix_preserves_baseline(self) -> None:
+        huge_score = response()
+        huge_score["answers"]["candidate_0"]["score"] = 10 ** 400
+        cases = [
+            ("default_with_key", False, "synthetic-key", 200, response(), None, 0, None),
+            ("default_without_key", False, "", 200, response(), None, 0, None),
+            ("opt_in_no_key", True, "", 200, response(), None, 0, "missing_credentials"),
+            ("available", True, "synthetic-key", 200, response(), None, 1, "applied"),
+            ("auth_401", True, "synthetic-key", 401, {}, None, 1, "provider_failure"),
+            ("rate_429", True, "synthetic-key", 429, {}, None, 1, "provider_failure"),
+            ("network", True, "synthetic-key", 200, {}, OSError("offline"), 1, "provider_failure"),
+            ("timeout", True, "synthetic-key", 200, {}, TimeoutError("timed out"), 1, "provider_failure"),
+            ("malformed_json", True, "synthetic-key", 200, b"not JSON", None, 1, "provider_failure"),
+            ("non_object", True, "synthetic-key", 200, [], None, 1, "provider_failure"),
+            ("invalid_encoding", True, "synthetic-key", 200, b"\xff", None, 1, "provider_failure"),
+            ("deep_json", True, "synthetic-key", 200, b"[" * 2000 + b"]" * 2000,
+             None, 1, "provider_failure"),
+            ("huge_score", True, "synthetic-key", 200, huge_score, None, 1, "provider_failure"),
+        ]
+        with patch.dict("os.environ", {"TYPESAFE_API_KEY": ""}):
+            baseline = self.run_main(opted=False)
+        for name, opted, key, status, body, error, attempts, reason in cases:
+            with self.subTest(case=name), patch.dict("os.environ", {"TYPESAFE_API_KEY": key}), \
+                    patch("opendream.jev_rerank.http.client.HTTPSConnection") as connection:
+                client = connection.return_value
+                client.getresponse.side_effect = error
+                client.getresponse.return_value.status = status
+                client.getresponse.return_value.read.return_value = (
+                    body if isinstance(body, bytes) else json.dumps(body).encode()
+                )
+                result = self.run_main(opted=opted)
+                if reason == "applied":
+                    self.assertEqual(result["selected_memory_ids"], ["b", "a"])
+                else:
+                    for field in ("selected_memory_ids", "why", "explanations", "excluded", "memory_hurt"):
+                        self.assertEqual(result[field], baseline[field])
+                self.assertEqual(connection.call_count, attempts)
+                self.assertEqual(client.request.call_count, attempts)
+                self.assertEqual(client.close.call_count, attempts)
+                if opted:
+                    metadata = result["rerank"]["jev"]
+                    self.assertEqual(metadata["reason"], reason)
+                    self.assertEqual(metadata["attempted_requests"], attempts)
+                    self.assertEqual(metadata["baseline_memory_ids"], baseline["selected_memory_ids"])
+                    validate_document("jev-rerank.schema.json", metadata)
+                else:
+                    self.assertNotIn("jev", result["rerank"])
 
     @patch.dict("os.environ", {"TYPESAFE_API_KEY": "synthetic-key"})
     @patch("opendream.jev_rerank._request")
